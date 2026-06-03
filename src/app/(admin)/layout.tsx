@@ -1,6 +1,5 @@
 import { requireAdmin } from "@/lib/auth";
 import { AppShell } from "@/components/layout/app-shell";
-import { ADMIN_NAV } from "@/components/layout/nav";
 
 export default async function AdminLayout({
   children,
@@ -11,7 +10,6 @@ export default async function AdminLayout({
 
   return (
     <AppShell
-      nav={ADMIN_NAV}
       roleLabel="Admin"
       context="Bbettr Agency · Administrator"
       user={{

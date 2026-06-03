@@ -1,7 +1,6 @@
 import { requireClient } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
-import { CLIENT_NAV } from "@/components/layout/nav";
 
 export default async function ClientLayout({
   children,
@@ -19,7 +18,6 @@ export default async function ClientLayout({
 
   return (
     <AppShell
-      nav={CLIENT_NAV}
       roleLabel="Client"
       context={client?.name ?? "Your account"}
       user={{

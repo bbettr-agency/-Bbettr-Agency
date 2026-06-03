@@ -8,10 +8,9 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import type { NavItem } from "@/components/layout/nav";
+import { CLIENT_NAV, ADMIN_NAV, type NavItem } from "@/components/layout/nav";
 
 interface AppShellProps {
-  nav: NavItem[];
   user: { name: string; email: string; avatarUrl?: string | null };
   /** Label shown under the user (e.g. tenant name or "Administrator"). */
   context: string;
@@ -20,7 +19,6 @@ interface AppShellProps {
 }
 
 export function AppShell({
-  nav,
   user,
   context,
   roleLabel,
@@ -28,6 +26,11 @@ export function AppShell({
 }: AppShellProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Select the navigation inside the client bundle. The nav items contain
+  // Lucide icon components (functions), which cannot be serialized across the
+  // server→client boundary — so they must NOT be passed in as a prop.
+  const nav: NavItem[] = roleLabel === "Admin" ? ADMIN_NAV : CLIENT_NAV;
 
   const isActive = (href: string) =>
     href === pathname ||
