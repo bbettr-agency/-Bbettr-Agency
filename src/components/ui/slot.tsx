@@ -7,7 +7,9 @@ import * as React from "react";
  */
 export const Slot = React.forwardRef<HTMLElement, { children?: React.ReactNode } & Record<string, unknown>>(
   ({ children, ...props }, ref) => {
-    if (!React.isValidElement(children)) return null;
+    // Fall back to rendering children directly rather than disappearing if a
+    // single valid element wasn't provided — silent null-returns hide bugs.
+    if (!React.isValidElement(children)) return <>{children}</>;
 
     const child = children as React.ReactElement<Record<string, unknown>>;
     const childProps = child.props;

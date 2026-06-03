@@ -49,20 +49,29 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const Comp = asChild ? Slot : "button";
+    const classes = cn(
+      "inline-flex items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all duration-150",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+      "disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
+      variantStyles[variant],
+      sizeStyles[size],
+      className
+    );
+
+    // When rendering `asChild` (e.g. a Link), Slot must receive exactly ONE
+    // valid React element. Injecting the loading spinner here would make
+    // `children` an array, so the spinner is button-only. Likewise `disabled`
+    // is not a valid prop on an anchor, so we only pass it to a real <button>.
+    if (asChild) {
+      return (
+        <Comp ref={ref} className={classes} {...props}>
+          {children}
+        </Comp>
+      );
+    }
+
     return (
-      <Comp
-        ref={ref}
-        className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all duration-150",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-          "disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
-          variantStyles[variant],
-          sizeStyles[size],
-          className
-        )}
-        disabled={disabled || loading}
-        {...props}
-      >
+      <Comp ref={ref} className={classes} disabled={disabled || loading} {...props}>
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {children}
       </Comp>

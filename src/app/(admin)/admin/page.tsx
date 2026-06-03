@@ -39,7 +39,7 @@ export default async function AdminOverviewPage() {
         actions={
           <Button asChild>
             <Link href="/admin/clients/new">
-              <Plus className="h-4 w-4" /> New client
+              <Plus className="h-4 w-4" /> Create Client
             </Link>
           </Button>
         }
@@ -100,7 +100,7 @@ export default async function AdminOverviewPage() {
                 action={
                   <Button asChild>
                     <Link href="/admin/clients/new">
-                      <Plus className="h-4 w-4" /> New client
+                      <Plus className="h-4 w-4" /> Create Client
                     </Link>
                   </Button>
                 }
