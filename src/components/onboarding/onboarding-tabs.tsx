@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { OnboardingStatusBadge } from "@/components/ui/status-badge";
 import { OnboardingForm } from "@/components/onboarding/onboarding-form";
 import { getService } from "@/lib/services";
+import type { OnboardingState } from "@/app/(client)/dashboard/onboarding/actions";
 import type {
   ServiceType,
   OnboardingStatus,
@@ -23,8 +25,23 @@ export function OnboardingTabs({
   services,
   submissions,
 }: OnboardingTabsProps) {
+  const router = useRouter();
   const [active, setActive] = useState<ServiceType>(services[0]?.service);
   if (!active) return null;
+
+  // After a successful submission: jump to the next incomplete service, or
+  // return to the dashboard once everything is done. router.refresh() re-reads
+  // the server data so the status badges and progress update with no manual
+  // reload.
+  function handleSubmitted(result: OnboardingState) {
+    if (result.nextService && result.nextService !== active) {
+      setActive(result.nextService);
+      router.refresh();
+    } else {
+      router.push("/dashboard");
+      router.refresh();
+    }
+  }
 
   const def = getService(active);
   const submission = submissions.find((s) => s.service === active);
@@ -97,6 +114,7 @@ export function OnboardingTabs({
             service={def}
             initialData={(submission?.data as Record<string, unknown>) ?? {}}
             readOnly={status === "approved"}
+            onSubmitted={handleSubmitted}
           />
         </CardContent>
       </Card>

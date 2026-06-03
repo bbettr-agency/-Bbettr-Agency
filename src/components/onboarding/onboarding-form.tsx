@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, FieldHelp } from "@/components/ui/input";
 import { FileDropzone } from "@/components/shared/file-dropzone";
-import { saveOnboarding } from "@/app/(client)/dashboard/onboarding/actions";
+import { saveOnboarding, type OnboardingState } from "@/app/(client)/dashboard/onboarding/actions";
 import type { ServiceDefinition, OnboardingField } from "@/lib/services";
 import type { FileRecord } from "@/lib/database.types";
 
@@ -17,6 +17,8 @@ interface OnboardingFormProps {
   service: ServiceDefinition;
   initialData: FormValues;
   readOnly?: boolean;
+  /** Called after a successful final submission (not draft saves). */
+  onSubmitted?: (result: OnboardingState) => void;
 }
 
 export function OnboardingForm({
@@ -24,6 +26,7 @@ export function OnboardingForm({
   service,
   initialData,
   readOnly = false,
+  onSubmitted,
 }: OnboardingFormProps) {
   const [values, setValues] = useState<FormValues>(initialData ?? {});
   const [pending, startTransition] = useTransition();
@@ -36,11 +39,25 @@ export function OnboardingForm({
     setFeedback(null);
     startTransition(async () => {
       const res = await saveOnboarding(service.id, values, finalise);
-      if (res.error) setFeedback(res.error);
-      else
+      if (res.error) {
+        setFeedback(res.error);
+        return;
+      }
+      if (finalise) {
         setFeedback(
-          finalise ? "Onboarding submitted — thank you!" : "Draft saved."
+          res.allComplete
+            ? "All onboarding complete — taking you to your dashboard…"
+            : "Onboarding submitted — moving you to the next service…"
         );
+        // Brief pause so the confirmation is visible, then hand off to the
+        // parent to advance to the next service or the dashboard.
+        if (onSubmitted) {
+          const result = res;
+          setTimeout(() => onSubmitted(result), 900);
+        }
+      } else {
+        setFeedback("Draft saved.");
+      }
     });
   }
 
