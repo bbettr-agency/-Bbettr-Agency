@@ -135,6 +135,28 @@ Admins land on `/admin`, clients on `/dashboard` — routing is role-aware.
 
 ---
 
+## 🔒 Required security settings before go-live
+
+> **⚠️ CRITICAL — disable public sign-up.** New `auth.users` get a `profiles` row
+> via the `handle_new_user` trigger, which reads `role` and `client_id` from the
+> user's sign-up metadata. This is safe because the **only** code path that sets
+> that metadata is the admin "Create client" server action (gated by
+> `requireAdmin()`). **But if public sign-up is left enabled, anyone could
+> register themselves and request `role: admin`.**
+>
+> In the Supabase dashboard:
+> 1. **Authentication → Providers → Email** → turn **OFF** "Allow new users to sign up"
+>    (i.e. disable public sign-ups). All client logins are created by admins from
+>    inside the portal.
+> 2. **Authentication → Providers → Email** → keep "Confirm email" on (the admin
+>    create-client flow already sets `email_confirm: true`).
+> 3. Keep RLS enabled on every table (the migrations do this — never disable it).
+>
+> The app cannot enforce this setting from code; it is a Supabase project
+> configuration and **must be verified manually before launch.**
+
+---
+
 ## 📦 Scripts
 
 | Script | Description |

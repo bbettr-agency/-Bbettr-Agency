@@ -9,6 +9,7 @@ import {
   File as FileIcon,
   Download,
   Trash2,
+  AlertCircle,
 } from "lucide-react";
 import { cn, formatBytes } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -41,24 +42,60 @@ export function FileManager({
 }: FileManagerProps) {
   const [files, setFiles] = useState<FileRecord[]>(initialFiles);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function open(file: FileRecord) {
-    const url = await getSignedUrl(file.path);
-    window.open(url, "_blank");
+    try {
+      const url = await getSignedUrl(file.path);
+      window.open(url, "_blank");
+    } catch (e) {
+      setError(
+        `Could not open "${file.name}": ${
+          e instanceof Error ? e.message : "unknown error"
+        }`
+      );
+    }
   }
 
   async function remove(file: FileRecord) {
     if (!confirm(`Delete "${file.name}"? This cannot be undone.`)) return;
     setBusyId(file.id);
+    setError(null);
     const supabase = createClient();
-    await supabase.storage.from(STORAGE_BUCKET).remove([file.path]);
-    await supabase.from("files").delete().eq("id", file.id);
-    setFiles((f) => f.filter((x) => x.id !== file.id));
-    setBusyId(null);
+    try {
+      // Remove the stored object first. A "not found" here is non-fatal —
+      // we still want to clear the (possibly orphaned) database row.
+      await supabase.storage.from(STORAGE_BUCKET).remove([file.path]);
+
+      // The database row is the source of truth: only drop it from the UI
+      // if this delete actually succeeds.
+      const { error: dbError } = await supabase
+        .from("files")
+        .delete()
+        .eq("id", file.id);
+      if (dbError) throw new Error(dbError.message);
+
+      setFiles((f) => f.filter((x) => x.id !== file.id));
+    } catch (e) {
+      setError(
+        `Could not delete "${file.name}": ${
+          e instanceof Error ? e.message : "unknown error"
+        }. The file was left in place.`
+      );
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {!readOnly && (
         <FileDropzone
           clientId={clientId}

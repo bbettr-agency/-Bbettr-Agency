@@ -92,6 +92,7 @@ export function OnboardingTabs({
           ) : null}
 
           <OnboardingForm
+            key={active}
             clientId={clientId}
             service={def}
             initialData={(submission?.data as Record<string, unknown>) ?? {}}

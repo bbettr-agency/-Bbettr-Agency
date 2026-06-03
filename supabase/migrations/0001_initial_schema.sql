@@ -203,6 +203,13 @@ create trigger trg_reports_updated    before update on reports
 -- ============================================================================
 -- New auth user -> profile bootstrap.
 -- Reads role/client_id from the invite metadata set by the admin flow.
+--
+-- ⚠️ SECURITY: this trusts `role` from raw_user_meta_data. That is only safe
+-- because the sole code path that sets it is the admin "Create client" server
+-- action (gated by requireAdmin + the service-role key). PUBLIC SIGN-UP MUST BE
+-- DISABLED in Supabase (Authentication → Providers → Email → disallow new
+-- sign-ups); otherwise a user could self-register as an admin. See README
+-- "Required security settings before go-live".
 -- ============================================================================
 create or replace function public.handle_new_user()
 returns trigger
