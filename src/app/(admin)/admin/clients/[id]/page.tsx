@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
 import { ClientDetail } from "@/components/admin/client-detail";
+import { DangerZone } from "@/components/admin/danger-zone";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -67,6 +68,8 @@ export default async function ClientDetailPage({
         files={files}
         onboarding={onboarding}
       />
+
+      <DangerZone clientId={client.id} clientName={client.name} />
     </div>
   );
 }

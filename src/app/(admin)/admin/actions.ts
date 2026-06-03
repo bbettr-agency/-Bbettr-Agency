@@ -242,3 +242,92 @@ export async function addStageAction(formData: FormData): Promise<ActionResult> 
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
 }
+
+const STORAGE_BUCKET = "client-files";
+
+/**
+ * Permanently delete a client (tenant) and EVERYTHING associated with it.
+ *
+ * The database does most of the work via ON DELETE CASCADE from clients(id):
+ * deleting the client row removes client_services, onboarding_submissions,
+ * project_stages, updates, reports and files rows automatically.
+ *
+ * Two things are NOT covered by the cascade and are handled explicitly here:
+ *   1. Supabase Storage objects under client-files/<clientId>/.
+ *   2. The client's auth login(s) — profiles.client_id is ON DELETE SET NULL,
+ *      so we delete the auth users, which cascades their profile rows away.
+ *
+ * Requires admin. `confirmationName` must match the client's name exactly
+ * (defence-in-depth on top of the UI's type-to-confirm).
+ */
+export async function deleteClientAction(
+  clientId: string,
+  confirmationName: string
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return {
+      error:
+        "Server is missing its service-role key, so the client could not be deleted.",
+    };
+  }
+
+  // 1. Verify the client exists and the typed name matches exactly.
+  const { data: client } = await admin
+    .from("clients")
+    .select("id, name")
+    .eq("id", clientId)
+    .single();
+  if (!client) return { error: "Client not found." };
+  if (confirmationName.trim() !== client.name) {
+    return { error: "The name you typed does not match this client." };
+  }
+
+  // 2. Gather everything that won't be removed by the DB cascade — BEFORE we
+  //    delete the client row (afterwards files rows are gone and profiles are
+  //    unlinked, so they'd be unfindable).
+  const [{ data: fileRows }, { data: profileRows }, { data: storageList }] =
+    await Promise.all([
+      admin.from("files").select("path").eq("client_id", clientId),
+      admin.from("profiles").select("id").eq("client_id", clientId),
+      admin.storage.from(STORAGE_BUCKET).list(clientId, { limit: 1000 }),
+    ]);
+
+  // 3. Remove storage objects (from the files table + a folder listing as a
+  //    safety net), de-duplicated.
+  const paths = new Set<string>();
+  (fileRows ?? []).forEach((f) => f.path && paths.add(f.path));
+  (storageList ?? []).forEach((o) => paths.add(`${clientId}/${o.name}`));
+  if (paths.size > 0) {
+    await admin.storage.from(STORAGE_BUCKET).remove(Array.from(paths));
+  }
+
+  // 4. Delete the client's auth logins (cascades their profile rows).
+  for (const p of profileRows ?? []) {
+    try {
+      await admin.auth.admin.deleteUser(p.id);
+    } catch {
+      // Continue — a missing/already-deleted auth user must not block cleanup.
+    }
+  }
+
+  // 5. Delete the client row — cascades all remaining tenant child tables.
+  const { error: deleteError } = await admin
+    .from("clients")
+    .delete()
+    .eq("id", clientId);
+  if (deleteError) return { error: deleteError.message };
+
+  // 6. Refresh every admin surface so counts/lists update immediately.
+  revalidatePath("/admin");
+  revalidatePath("/admin/clients");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/updates");
+  revalidatePath("/admin/files");
+
+  return { ok: true };
+}

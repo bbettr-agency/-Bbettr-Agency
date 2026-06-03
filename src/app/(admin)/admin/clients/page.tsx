@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { format } from "date-fns";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users, CheckCircle2 } from "lucide-react";
 import { getAllClients } from "@/lib/admin-queries";
 import { getService } from "@/lib/services";
 import { computeProgress } from "@/lib/queries";
@@ -16,11 +16,25 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 
 export const metadata: Metadata = { title: "Clients" };
 
-export default async function ClientsPage() {
-  const clients = await getAllClients();
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ deleted?: string }>;
+}) {
+  const [{ deleted }, clients] = await Promise.all([
+    searchParams,
+    getAllClients(),
+  ]);
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {deleted && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Client successfully deleted.
+        </div>
+      )}
+
       <PageHeader
         title="Clients"
         description={`${clients.length} client${clients.length === 1 ? "" : "s"} in your portfolio.`}
