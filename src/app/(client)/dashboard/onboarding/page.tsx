@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, CheckCircle2 } from "lucide-react";
 import { requireClient } from "@/lib/auth";
-import { getClientServices, getOnboarding } from "@/lib/queries";
+import {
+  getClientServices,
+  getOnboarding,
+  isOnboardingComplete,
+} from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
+import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { OnboardingTabs } from "@/components/onboarding/onboarding-tabs";
 
@@ -15,12 +20,33 @@ export default async function OnboardingPage() {
     getOnboarding(profile.client_id),
   ]);
 
+  const complete = isOnboardingComplete(services);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Onboarding"
         description="Tell us what we need to get your services up and running. Only the services you purchased appear here."
       />
+
+      {complete && (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardContent className="flex items-start gap-3 p-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
+              <CheckCircle2 className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-ink-900">
+                Onboarding Complete
+              </p>
+              <p className="text-sm text-ink-500">
+                Our team is now preparing your project. You can still review your
+                answers below.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {services.length > 0 ? (
         <OnboardingTabs

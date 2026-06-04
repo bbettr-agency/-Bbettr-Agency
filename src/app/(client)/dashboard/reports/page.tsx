@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SeenMarker } from "@/components/shared/seen-marker";
 import { BarChart3 } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import { getReports } from "@/lib/queries";
@@ -31,6 +32,7 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <SeenMarker section="reports" />
       <PageHeader
         title="Monthly Reports"
         description="Transparent, detailed performance reporting — every month."

@@ -1,0 +1,39 @@
+# V2 Roadmap
+
+Captured at the end of the V1 launch session. Nothing here is a launch blocker;
+ordered by impact.
+
+## High impact
+1. **Supabase Realtime** — live cross-tab updates so an already-open admin or
+   client tab refreshes without navigation. Closes the one gap revalidation
+   can't cover (admin posts update → client's open tab updates instantly).
+2. **Email notifications** — new report, new update, "assets needed" nudge,
+   client invite email with credentials. (Supabase Auth emails + a transactional
+   provider, e.g. Resend.)
+3. **Error monitoring + CI** — Sentry for runtime errors; a GitHub Action running
+   `typecheck` + `build` on every push/PR.
+
+## Medium impact
+4. **Pagination + SQL-side aggregation** — admin client list currently joins in
+   JS; global reports/files/updates and client reports/files are unbounded.
+   Move to SQL views / `.range()` pagination before ~100 clients or thousands of
+   rows.
+5. **Auto-computed report metrics** — derive `cost_per_lead` from
+   `ad_spend / leads_generated` server-side; store inputs only.
+6. **Onboarding draft auto-save** — persist on change so a refresh never loses
+   typed answers.
+
+## Larger / later
+7. **Analytics integrations** — GA4 / Google Ads / Meta pulling metrics into
+   reports automatically.
+8. **Team seats & granular roles** — multiple agency users, scoped permissions.
+9. **Audit log** — who changed what, when (esp. deletions and status changes).
+10. **White-label theming per client.**
+11. **Generated Supabase types** — replace the hand-maintained
+    `src/lib/database.types.ts` with `supabase gen types typescript` to prevent
+    drift.
+
+## Notes / tech debt
+- Stage automation matches stage names exactly; consider a stable `key` column
+  if stages become customizable.
+- Client file uploads are browser-side, so admin counts refresh on next load.

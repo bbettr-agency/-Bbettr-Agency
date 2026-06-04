@@ -1,9 +1,56 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Client,
   ClientService,
   ProjectStage,
 } from "@/lib/database.types";
+
+export interface PortalAccess {
+  email: string | null;
+  hasLogin: boolean;
+  lastSignInAt: string | null;
+  createdAt: string | null;
+}
+
+/**
+ * Portal access + login activity for a client. Reads the client's auth login
+ * via the service-role admin API (last_sign_in_at / created_at are not stored
+ * in `profiles`). Admin-only; call from admin pages.
+ */
+export async function getPortalAccess(clientId: string): Promise<PortalAccess> {
+  const supabase = await createClient();
+  const [{ data: client }, { data: profiles }] = await Promise.all([
+    supabase.from("clients").select("contact_email").eq("id", clientId).single(),
+    supabase.from("profiles").select("id, email").eq("client_id", clientId).limit(1),
+  ]);
+
+  const profile = profiles?.[0];
+  let hasLogin = false;
+  let lastSignInAt: string | null = null;
+  let createdAt: string | null = null;
+
+  if (profile) {
+    try {
+      const admin = createAdminClient();
+      const { data } = await admin.auth.admin.getUserById(profile.id);
+      if (data.user) {
+        hasLogin = true;
+        lastSignInAt = data.user.last_sign_in_at ?? null;
+        createdAt = data.user.created_at ?? null;
+      }
+    } catch {
+      // Service role unavailable — fall back to "no login info".
+    }
+  }
+
+  return {
+    email: client?.contact_email ?? profile?.email ?? null,
+    hasLogin,
+    lastSignInAt,
+    createdAt,
+  };
+}
 
 /** Aggregated shape used by the admin client list. */
 export interface ClientSummary extends Client {

@@ -3,18 +3,27 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X, LogOut, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { CLIENT_NAV, ADMIN_NAV, type NavItem } from "@/components/layout/nav";
 
+/**
+ * Per-nav-item sidebar indicators, keyed by href:
+ *   "dot"   — blue unread/notification dot
+ *   "check" — green completion check
+ * Computed server-side and passed in as plain data (never icon functions).
+ */
+export type NavBadges = Record<string, "dot" | "check" | undefined>;
+
 interface AppShellProps {
   user: { name: string; email: string; avatarUrl?: string | null };
   /** Label shown under the user (e.g. tenant name or "Administrator"). */
   context: string;
   roleLabel: "Client" | "Admin";
+  badges?: NavBadges;
   children: React.ReactNode;
 }
 
@@ -22,6 +31,7 @@ export function AppShell({
   user,
   context,
   roleLabel,
+  badges,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -46,6 +56,7 @@ export function AppShell({
           context={context}
           roleLabel={roleLabel}
           isActive={isActive}
+          badges={badges}
         />
       </aside>
 
@@ -82,6 +93,7 @@ export function AppShell({
               context={context}
               roleLabel={roleLabel}
               isActive={isActive}
+              badges={badges}
               onNavigate={() => setMobileOpen(false)}
             />
           </aside>
@@ -104,6 +116,7 @@ function SidebarInner({
   context,
   roleLabel,
   isActive,
+  badges,
   onNavigate,
 }: {
   nav: NavItem[];
@@ -111,6 +124,7 @@ function SidebarInner({
   context: string;
   roleLabel: "Client" | "Admin";
   isActive: (href: string) => boolean;
+  badges?: NavBadges;
   onNavigate?: () => void;
 }) {
   return (
@@ -122,6 +136,7 @@ function SidebarInner({
       <nav className="flex-1 space-y-1 px-3 py-4">
         {nav.map((item) => {
           const active = isActive(item.href);
+          const badge = badges?.[item.href];
           return (
             <Link
               key={item.href}
@@ -140,7 +155,21 @@ function SidebarInner({
                   active ? "text-brand-600" : "text-ink-400 group-hover:text-ink-600"
                 )}
               />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {badge === "dot" && (
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
+                  aria-label="New activity"
+                />
+              )}
+              {badge === "check" && (
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                  aria-label="Complete"
+                >
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                </span>
+              )}
             </Link>
           );
         })}

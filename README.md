@@ -81,6 +81,14 @@ A consistent, premium design system spans the whole app:
 
 ---
 
+## 📚 Documentation
+
+Full project docs live under [`docs/`](./docs/) — start with
+[`docs/SESSION_HANDOVER.md`](./docs/SESSION_HANDOVER.md) for current status and
+next steps. Also: [setup](./docs/SETUP.md), [deployment](./docs/DEPLOYMENT.md),
+[database](./docs/DATABASE.md), [testing](./docs/TESTING_CHECKLIST.md),
+[roadmap](./docs/ROADMAP.md).
+
 ## 🚀 Getting started
 
 ### 1. Install

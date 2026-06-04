@@ -12,11 +12,15 @@ import {
   getFiles,
   getOnboarding,
 } from "@/lib/queries";
+import { getPortalAccess } from "@/lib/admin-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
 import { ClientDetail } from "@/components/admin/client-detail";
 import { DangerZone } from "@/components/admin/danger-zone";
+
+const PORTAL_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://portal.bbettragency.com";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -31,7 +35,7 @@ export default async function ClientDetailPage({
   const client = await getClient(id);
   if (!client) notFound();
 
-  const [services, stages, updates, reports, files, onboarding] =
+  const [services, stages, updates, reports, files, onboarding, portalAccess] =
     await Promise.all([
       getClientServices(id),
       getProjectStages(id),
@@ -39,6 +43,7 @@ export default async function ClientDetailPage({
       getReports(id),
       getFiles(id),
       getOnboarding(id),
+      getPortalAccess(id),
     ]);
 
   return (
@@ -67,6 +72,8 @@ export default async function ClientDetailPage({
         reports={reports}
         files={files}
         onboarding={onboarding}
+        portalUrl={PORTAL_URL}
+        portalAccess={portalAccess}
       />
 
       <DangerZone clientId={client.id} clientName={client.name} />

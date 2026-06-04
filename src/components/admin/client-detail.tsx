@@ -11,12 +11,16 @@ import {
 import { getService } from "@/lib/services";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { StageManager } from "@/components/admin/stage-manager";
+import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
+import { computeReadiness } from "@/lib/readiness";
 import { UpdateComposer } from "@/components/admin/update-composer";
 import { ReportComposer } from "@/components/admin/report-composer";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
 import { ReportCard } from "@/components/reports/report-card";
 import { FileManager } from "@/components/files/file-manager";
+import { PortalAccessCard } from "@/components/admin/portal-access-card";
 import { ClipboardList } from "lucide-react";
+import type { PortalAccess } from "@/lib/admin-queries";
 import type {
   Client,
   ClientService,
@@ -35,6 +39,8 @@ interface ClientDetailProps {
   reports: Report[];
   files: FileRecord[];
   onboarding: OnboardingSubmission[];
+  portalUrl: string;
+  portalAccess: PortalAccess;
 }
 
 export function ClientDetail({
@@ -45,7 +51,16 @@ export function ClientDetail({
   reports,
   files,
   onboarding,
+  portalUrl,
+  portalAccess,
 }: ClientDetailProps) {
+  const readiness = computeReadiness(
+    services.map((s) => s.service),
+    onboarding
+  );
+  const assetsReceived =
+    stages.find((s) => s.name === "Assets Received")?.status === "completed";
+
   const tabs = [
     { id: "overview", label: "Overview" },
     { id: "onboarding", label: "Onboarding", count: onboarding.length },
@@ -60,6 +75,7 @@ export function ClientDetail({
       {(active) => (
         <>
           {active === "overview" && (
+            <div className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
               <Card className="lg:col-span-2">
                 <CardHeader>
@@ -73,17 +89,21 @@ export function ClientDetail({
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>Status & Services</CardTitle>
+                  <CardTitle>Account & Services</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
                     <p className="mb-1.5 text-xs font-medium text-ink-400">
-                      Project status
+                      Account Status
                     </p>
                     <ClientStatusControl
                       clientId={client.id}
                       status={client.status}
                     />
+                    <p className="mt-1.5 text-xs text-ink-400">
+                      Internal lifecycle label — the project&apos;s real progress
+                      is the roadmap below in the Progress tab.
+                    </p>
                   </div>
                   <div>
                     <p className="mb-1.5 text-xs font-medium text-ink-400">
@@ -106,6 +126,12 @@ export function ClientDetail({
                   </div>
                 </CardContent>
               </Card>
+            </div>
+              <PortalAccessCard
+                clientId={client.id}
+                portalUrl={portalUrl}
+                access={portalAccess}
+              />
             </div>
           )}
 
@@ -134,14 +160,21 @@ export function ClientDetail({
           )}
 
           {active === "progress" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Project Roadmap</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <StageManager clientId={client.id} stages={stages} />
-              </CardContent>
-            </Card>
+            <div className="space-y-6">
+              <AssetsReceivedControl
+                clientId={client.id}
+                readiness={readiness}
+                assetsReceived={assetsReceived}
+              />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Project Roadmap</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <StageManager clientId={client.id} stages={stages} />
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {active === "updates" && (

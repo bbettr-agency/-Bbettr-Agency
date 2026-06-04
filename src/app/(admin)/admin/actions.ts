@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { revalidateClient } from "@/lib/revalidate";
+import { getEmailService, type EmailKind } from "@/lib/email";
 import type {
   ClientStatus,
   ServiceType,
@@ -123,19 +125,111 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
   return { ok: true, clientId: client.id };
 }
 
+/**
+ * Send a portal email to a client (welcome / resend credentials / password
+ * reset). Routed through the swappable email service (Supabase in V1).
+ */
+export async function sendPortalEmailAction(
+  clientId: string,
+  kind: EmailKind
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { data: client } = await supabase
+    .from("clients")
+    .select("contact_email")
+    .eq("id", clientId)
+    .single();
+
+  const email = client?.contact_email;
+  if (!email) return { error: "This client has no email address on file." };
+
+  const result = await getEmailService().send(kind, email);
+  if (!result.ok) {
+    return { error: result.error ?? "Could not send the email. Please try again." };
+  }
+  return { ok: true };
+}
+
 export async function updateClientStatusAction(
   clientId: string,
   status: ClientStatus
 ): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
+
+  // Soft guard: an account can't be "Completed" until the project has launched.
+  // Prevents showing "Completed" while the roadmap is still in progress.
+  if (status === "completed") {
+    const { data: launch } = await supabase
+      .from("project_stages")
+      .select("status")
+      .eq("client_id", clientId)
+      .eq("name", "Launch")
+      .maybeSingle();
+    if (!launch || launch.status !== "completed") {
+      return {
+        error:
+          "You can't set Account Status to Completed until the Launch stage is complete.",
+      };
+    }
+  }
+
   const { error } = await supabase
     .from("clients")
     .update({ status })
     .eq("id", clientId);
   if (error) return { error: error.message };
-  revalidatePath(`/admin/clients/${clientId}`);
-  revalidatePath("/admin/clients");
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+/**
+ * Admin-approves a client's assets: completes the "Assets Received" stage,
+ * starts "In Development", ensures the client is in active delivery, and
+ * (optionally) posts a client update. The admin remains the decision-maker —
+ * this is a deliberate approval, not automatic.
+ */
+export async function markAssetsReceivedAction(
+  clientId: string,
+  postUpdate: boolean
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const { error: completeError } = await supabase
+    .from("project_stages")
+    .update({ status: "completed" })
+    .eq("client_id", clientId)
+    .eq("name", "Assets Received");
+  if (completeError) return { error: completeError.message };
+
+  // Start "In Development" if it hasn't begun yet.
+  await supabase
+    .from("project_stages")
+    .update({ status: "in_progress" })
+    .eq("client_id", clientId)
+    .eq("name", "In Development")
+    .eq("status", "pending");
+
+  // Ensure the client is in active delivery (no-op if already further along).
+  await supabase
+    .from("clients")
+    .update({ status: "in_progress" })
+    .eq("id", clientId)
+    .eq("status", "onboarding");
+
+  if (postUpdate) {
+    await supabase.from("updates").insert({
+      client_id: clientId,
+      title: "Assets Received — Development Started",
+      body: "We've received everything we need and your project has moved into development. We'll keep you posted as we make progress.",
+      author_id: profile.id,
+      author_name: profile.full_name ?? "Bbettr Agency",
+    });
+  }
+
+  revalidateClient(clientId);
   return { ok: true };
 }
 
@@ -155,8 +249,7 @@ export async function postUpdateAction(formData: FormData): Promise<ActionResult
     author_name: profile.full_name ?? "Bbettr Agency",
   });
   if (error) return { error: error.message };
-  revalidatePath(`/admin/clients/${clientId}`);
-  revalidatePath("/admin/updates");
+  revalidateClient(clientId);
   return { ok: true };
 }
 
@@ -196,8 +289,7 @@ export async function upsertReportAction(formData: FormData): Promise<ActionResu
     { onConflict: "client_id,reporting_month" }
   );
   if (error) return { error: error.message };
-  revalidatePath(`/admin/clients/${clientId}`);
-  revalidatePath("/admin/reports");
+  revalidateClient(clientId);
   return { ok: true };
 }
 
@@ -213,7 +305,7 @@ export async function setStageStatusAction(
     .update({ status })
     .eq("id", stageId);
   if (error) return { error: error.message };
-  revalidatePath(`/admin/clients/${clientId}`);
+  revalidateClient(clientId);
   return { ok: true };
 }
 
@@ -239,7 +331,7 @@ export async function addStageAction(formData: FormData): Promise<ActionResult> 
     status: "pending",
   });
   if (error) return { error: error.message };
-  revalidatePath(`/admin/clients/${clientId}`);
+  revalidateClient(clientId);
   return { ok: true };
 }
 

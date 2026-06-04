@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SeenMarker } from "@/components/shared/seen-marker";
 import { Route, CheckCircle2, Clock, Circle } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import { getProjectStages, computeProgress } from "@/lib/queries";
@@ -23,6 +24,7 @@ export default async function ProjectPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <SeenMarker section="project" />
       <PageHeader
         title="Project Progress"
         description="Track exactly where your project stands at every stage."

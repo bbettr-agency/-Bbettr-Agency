@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SeenMarker } from "@/components/shared/seen-marker";
 import { Megaphone } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import { getUpdates } from "@/lib/queries";
@@ -14,6 +15,7 @@ export default async function UpdatesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <SeenMarker section="updates" />
       <PageHeader
         title="Updates"
         description="A live feed of everything happening on your projects."

@@ -8,29 +8,46 @@ import {
   getClientServices,
   getProjectStages,
   getUpdates,
+  getOnboarding,
   computeProgress,
+  currentPhase,
+  isOnboardingComplete,
 } from "@/lib/queries";
+import { computeReadiness } from "@/lib/readiness";
 import { getService } from "@/lib/services";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ClientStatusBadge } from "@/components/ui/status-badge";
 import { ProgressTracker, ProgressBar } from "@/components/ui/progress-tracker";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ReadinessChecklist } from "@/components/shared/readiness-checklist";
+import { PackageCheck, CheckCircle2 } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const profile = await requireClient();
-  const [client, services, stages, updates] = await Promise.all([
+  const [client, services, stages, updates, onboarding] = await Promise.all([
     getClient(profile.client_id),
     getClientServices(profile.client_id),
     getProjectStages(profile.client_id),
     getUpdates(profile.client_id, 3),
+    getOnboarding(profile.client_id),
   ]);
 
   const progress = computeProgress(stages);
-  const firstName = (profile.full_name ?? "there").split(" ").slice(-1)[0];
+  const phase = currentPhase(stages);
+  const onboardingComplete = isOnboardingComplete(services);
+
+  // Asset readiness: show the client what we still need, until an admin has
+  // confirmed the "Assets Received" stage.
+  const readiness = computeReadiness(
+    services.map((s) => s.service),
+    onboarding
+  );
+  const assetsReceived =
+    stages.find((s) => s.name === "Assets Received")?.status === "completed";
+  const showChecklist = readiness.hasItems && !assetsReceived;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -77,10 +94,13 @@ export default async function DashboardPage() {
 
             <div className="shrink-0 rounded-2xl bg-white/10 p-5 backdrop-blur-sm">
               <p className="text-xs font-medium uppercase tracking-wide text-white/60">
-                Status
+                Current phase
               </p>
               <div className="mt-2">
-                {client && <ClientStatusBadge status={client.status} />}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold text-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-300" />
+                  {phase ? phase.label : "Getting started"}
+                </span>
               </div>
               <div className="mt-4 w-48">
                 <div className="mb-1.5 flex items-center justify-between text-xs">
@@ -93,6 +113,38 @@ export default async function DashboardPage() {
           </div>
         </div>
       </Card>
+
+      {/* Asset readiness checklist — what we still need from the client */}
+      {showChecklist && (
+        <Card className={readiness.allReady ? "border-emerald-200" : "border-brand-200"}>
+          <CardHeader className="flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <PackageCheck className="h-4.5 w-4.5 text-brand-500" />
+              <CardTitle>
+                {readiness.allReady ? "Everything received" : "What we still need from you"}
+              </CardTitle>
+            </div>
+            <Badge tone={readiness.allReady ? "success" : "warning"} dot>
+              {readiness.totalDone}/{readiness.totalItems} received
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {readiness.allReady ? (
+              <p className="flex items-center gap-2 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                Thank you — we have everything we need and your team is reviewing
+                it now.
+              </p>
+            ) : (
+              <p className="text-sm text-ink-500">
+                Please provide the items marked <strong>Pending</strong> so we
+                can begin. You can add them from your onboarding forms and files.
+              </p>
+            )}
+            <ReadinessChecklist readiness={readiness} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Progress tracker */}
@@ -160,8 +212,24 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Service onboarding nudges */}
-      {services.some((s) => s.onboarding_status !== "approved") && (
+      {/* Onboarding nudge (incomplete) → completion message (complete) */}
+      {onboardingComplete ? (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardContent className="flex items-start gap-3 p-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
+              <CheckCircle2 className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-ink-900">
+                Onboarding Complete
+              </p>
+              <p className="text-sm text-ink-500">
+                Our team is now preparing your project.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
         <Card className="border-brand-200 bg-brand-50/40">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">

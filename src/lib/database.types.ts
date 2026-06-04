@@ -264,6 +264,28 @@ export interface Database {
           }
         ];
       };
+      client_section_views: {
+        Row: {
+          client_id: string;
+          section: string;
+          last_viewed_at: string;
+        };
+        Insert: {
+          client_id: string;
+          section: string;
+          last_viewed_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_section_views"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "client_section_views_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
