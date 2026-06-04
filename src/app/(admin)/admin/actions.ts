@@ -139,6 +139,18 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
 }
 
 /**
+ * Translate raw email-provider errors into clear admin-facing guidance.
+ * Supabase's shared email sender has a very low hourly cap.
+ */
+function friendlyEmailError(raw?: string): string {
+  const msg = (raw ?? "").toLowerCase();
+  if (msg.includes("rate limit") || msg.includes("rate_limit") || msg.includes("429")) {
+    return "Supabase email limit reached. Configure SMTP or Resend for production. In the meantime, use “Copy login instructions” to share access manually.";
+  }
+  return raw ?? "Could not send the email. Please try again.";
+}
+
+/**
  * Send a portal email to a client (welcome / resend credentials / password
  * reset). Routed through the swappable email service (Supabase in V1).
  */
@@ -159,7 +171,7 @@ export async function sendPortalEmailAction(
 
   const result = await getEmailService().send(kind, email);
   if (!result.ok) {
-    return { error: result.error ?? "Could not send the email. Please try again." };
+    return { error: friendlyEmailError(result.error) };
   }
   return { ok: true };
 }

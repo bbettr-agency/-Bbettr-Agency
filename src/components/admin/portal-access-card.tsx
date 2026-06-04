@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
+  ClipboardList,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,22 @@ export function PortalAccessCard({
     `Portal: ${portalUrl}`,
     `Email: ${access.email ?? "—"}`,
     ...(tempPassword ? [`Temporary password: ${tempPassword}`] : []),
+  ].join("\n");
+
+  // Manual fallback to share when email delivery is unavailable (e.g. Supabase
+  // rate limit). Includes step-by-step login instructions.
+  const loginInstructions = [
+    `Your Bbettr Agency portal access`,
+    ``,
+    `Portal: ${portalUrl}`,
+    `Email: ${access.email ?? "—"}`,
+    `Temporary password: ${
+      tempPassword ?? "(ask your account manager to generate one)"
+    }`,
+    ``,
+    `1. Open the portal link above.`,
+    `2. Sign in with your email and the temporary password.`,
+    `3. Change your password after your first login.`,
   ].join("\n");
 
   function sendEmail(kind: EmailKind, label: string) {
@@ -211,6 +228,18 @@ export function PortalAccessCard({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => copy("instructions", loginInstructions)}
+          >
+            {copied === "instructions" ? (
+              <Check className="h-4 w-4 text-emerald-500" />
+            ) : (
+              <ClipboardList className="h-4 w-4" />
+            )}
+            Copy login instructions
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             loading={busy === "reset"}
             disabled={pending}
             onClick={resetPassword}
@@ -242,6 +271,11 @@ export function PortalAccessCard({
           <li>
             <strong className="text-ink-500">Copy credentials</strong> — copies
             the portal URL, email{tempPassword ? " and temporary password" : ""}.
+          </li>
+          <li>
+            <strong className="text-ink-500">Copy login instructions</strong> —
+            copies a ready-to-send message with the link, email, password &amp;
+            steps (use this if email sending is unavailable).
           </li>
           <li>
             <strong className="text-ink-500">Reset password</strong> — generates
