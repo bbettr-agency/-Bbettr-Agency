@@ -7,18 +7,35 @@ const APP_URL =
 /**
  * V1 email provider built on Supabase Auth's built-in emails.
  *
- * All three kinds currently send Supabase's secure "set / reset your password"
- * link (which works for both brand-new and existing logins). The distinct kinds
- * are preserved so a future Resend provider can send branded, purpose-specific
- * emails (welcome vs. reminder vs. reset) without changing callers.
+ * - welcome / resend_credentials → a passwordless **magic-link access email**
+ *   (`signInWithOtp`): "click to access your Bbettr Agency portal". This is a
+ *   genuine welcome/invite, distinct from a password reset.
+ * - password_reset → Supabase's **"reset your password"** email.
+ *
+ * Note: Supabase cannot email a plaintext password (only the admin-generated
+ * temporary password — see resetTempPasswordAction — can be shared, and it's
+ * never sent by email). V2 can swap this for branded Resend emails by
+ * implementing PortalEmailService elsewhere; callers don't change.
  */
 export const supabaseEmailService: PortalEmailService = {
-  async send(_kind: EmailKind, email: string): Promise<EmailResult> {
+  async send(kind: EmailKind, email: string): Promise<EmailResult> {
     const supabase = await createClient();
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${APP_URL}/reset-password`,
+
+    if (kind === "password_reset") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${APP_URL}/reset-password`,
+      });
+      return error ? { ok: false, error: error.message } : { ok: true };
+    }
+
+    // welcome | resend_credentials → passwordless access (magic link)
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: `${APP_URL}/dashboard`,
+      },
     });
-    if (error) return { ok: false, error: error.message };
-    return { ok: true };
+    return error ? { ok: false, error: error.message } : { ok: true };
   },
 };

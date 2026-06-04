@@ -16,7 +16,20 @@ export interface ActionResult {
   ok?: boolean;
   error?: string;
   clientId?: string;
+  /** A freshly generated temporary password, returned once for the admin to copy. */
+  password?: string;
 }
+
+/** Generate a strong, human-shareable temporary password (no ambiguous chars). */
+function generateTempPassword(length = 14): string {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#$%";
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+  return out;
+}
+
 
 const DEFAULT_STAGES = [
   "Contract Signed",
@@ -149,6 +162,45 @@ export async function sendPortalEmailAction(
     return { error: result.error ?? "Could not send the email. Please try again." };
   }
   return { ok: true };
+}
+
+/**
+ * Reset a client's portal password to a freshly generated temporary one and
+ * return it ONCE so the admin can copy & share it securely. The plaintext is
+ * never stored (Supabase keeps only the hash) — this is the only way the admin
+ * can obtain a shareable password, since a self-serve reset email is chosen by
+ * the client and can't be surfaced here.
+ */
+export async function resetTempPasswordAction(
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return {
+      error:
+        "Server is missing its service-role key, so the password could not be reset.",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("client_id", clientId)
+    .limit(1);
+
+  const userId = profiles?.[0]?.id;
+  if (!userId) return { error: "This client has no portal login yet." };
+
+  const password = generateTempPassword();
+  const { error } = await admin.auth.admin.updateUserById(userId, { password });
+  if (error) return { error: error.message };
+
+  return { ok: true, password };
 }
 
 export async function updateClientStatusAction(

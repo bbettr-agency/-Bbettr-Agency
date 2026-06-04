@@ -13,11 +13,15 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  Eye,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { sendPortalEmailAction } from "@/app/(admin)/admin/actions";
+import {
+  sendPortalEmailAction,
+  resetTempPasswordAction,
+} from "@/app/(admin)/admin/actions";
 import type { PortalAccess } from "@/lib/admin-queries";
 import type { EmailKind } from "@/lib/email";
 
@@ -32,7 +36,8 @@ export function PortalAccessCard({
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [sentKind, setSentKind] = useState<EmailKind | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(
     null
   );
@@ -44,12 +49,20 @@ export function PortalAccessCard({
     });
   }
 
+  // Credentials include the temporary password only when one has been generated
+  // this session (it is never stored, so it isn't available on a fresh load).
+  const credentials = [
+    `Portal: ${portalUrl}`,
+    `Email: ${access.email ?? "—"}`,
+    ...(tempPassword ? [`Temporary password: ${tempPassword}`] : []),
+  ].join("\n");
+
   function sendEmail(kind: EmailKind, label: string) {
     setFeedback(null);
-    setSentKind(kind);
+    setBusy(kind);
     startTransition(async () => {
       const res = await sendPortalEmailAction(clientId, kind);
-      setSentKind(null);
+      setBusy(null);
       setFeedback(
         res.error
           ? { ok: false, msg: res.error }
@@ -58,7 +71,23 @@ export function PortalAccessCard({
     });
   }
 
-  const credentials = `Portal: ${portalUrl}\nEmail: ${access.email ?? "—"}`;
+  function resetPassword() {
+    setFeedback(null);
+    setBusy("reset");
+    startTransition(async () => {
+      const res = await resetTempPasswordAction(clientId);
+      setBusy(null);
+      if (res.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      setTempPassword(res.password ?? null);
+      setFeedback({
+        ok: true,
+        msg: "New temporary password generated — copy it now (shown once).",
+      });
+    });
+  }
 
   return (
     <Card>
@@ -101,6 +130,43 @@ export function PortalAccessCard({
             onCopy={() => access.email && copy("email", access.email)}
           />
         </div>
+
+        {/* Temporary password — shown once, after a reset */}
+        {tempPassword ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <div className="flex items-center gap-1.5 text-amber-700">
+              <Eye className="h-3.5 w-3.5" />
+              <span className="text-xs font-semibold">
+                Temporary password (shown once)
+              </span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <code className="flex-1 rounded-lg bg-white px-2.5 py-1.5 font-mono text-sm text-ink-900 ring-1 ring-inset ring-amber-200">
+                {tempPassword}
+              </code>
+              <button
+                onClick={() => copy("pw", tempPassword)}
+                className="rounded-lg p-1.5 text-amber-600 hover:bg-amber-100"
+                aria-label="Copy password"
+              >
+                {copied === "pw" ? (
+                  <Check className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-amber-700">
+              Share securely. Ask the client to change it after their first login.
+            </p>
+          </div>
+        ) : (
+          <p className="flex items-start gap-1.5 rounded-xl bg-ink-50 p-3 text-xs text-ink-500">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Passwords are never stored. Use <strong>Reset Password</strong> to
+            generate a new temporary password you can copy and share.
+          </p>
+        )}
 
         {/* Login activity */}
         <div className="grid grid-cols-2 gap-3">
@@ -145,7 +211,16 @@ export function PortalAccessCard({
           <Button
             variant="outline"
             size="sm"
-            loading={pending && sentKind === "welcome"}
+            loading={busy === "reset"}
+            disabled={pending}
+            onClick={resetPassword}
+          >
+            <KeyRound className="h-4 w-4" /> Reset password
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            loading={busy === "welcome"}
             disabled={pending || !access.email}
             onClick={() => sendEmail("welcome", "Welcome email")}
           >
@@ -154,22 +229,33 @@ export function PortalAccessCard({
           <Button
             variant="outline"
             size="sm"
-            loading={pending && sentKind === "resend_credentials"}
+            loading={busy === "resend_credentials"}
             disabled={pending || !access.email}
-            onClick={() => sendEmail("resend_credentials", "Credentials")}
+            onClick={() => sendEmail("resend_credentials", "Access email")}
           >
             <RotateCcw className="h-4 w-4" /> Resend credentials
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            loading={pending && sentKind === "password_reset"}
-            disabled={pending || !access.email}
-            onClick={() => sendEmail("password_reset", "Password reset")}
-          >
-            <KeyRound className="h-4 w-4" /> Reset password
-          </Button>
         </div>
+
+        {/* Helper text — what each action does */}
+        <ul className="space-y-1 text-xs text-ink-400">
+          <li>
+            <strong className="text-ink-500">Copy credentials</strong> — copies
+            the portal URL, email{tempPassword ? " and temporary password" : ""}.
+          </li>
+          <li>
+            <strong className="text-ink-500">Reset password</strong> — generates
+            a new temporary password to copy &amp; share (does not email it).
+          </li>
+          <li>
+            <strong className="text-ink-500">Send welcome email</strong> — emails
+            the client a secure link to access their portal.
+          </li>
+          <li>
+            <strong className="text-ink-500">Resend credentials</strong> —
+            re-sends that access link.
+          </li>
+        </ul>
 
         {feedback && (
           <p
