@@ -9,10 +9,12 @@ import {
   getProjectStages,
   getUpdates,
   getOnboarding,
+  getOpenActionItems,
   computeProgress,
   currentPhase,
   isOnboardingComplete,
 } from "@/lib/queries";
+import { ActionRequiredBanner } from "@/components/client/action-required-banner";
 import { computeReadiness } from "@/lib/readiness";
 import { getService } from "@/lib/services";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,13 +29,15 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const profile = await requireClient();
-  const [client, services, stages, updates, onboarding] = await Promise.all([
-    getClient(profile.client_id),
-    getClientServices(profile.client_id),
-    getProjectStages(profile.client_id),
-    getUpdates(profile.client_id, 3),
-    getOnboarding(profile.client_id),
-  ]);
+  const [client, services, stages, updates, onboarding, actionItems] =
+    await Promise.all([
+      getClient(profile.client_id),
+      getClientServices(profile.client_id),
+      getProjectStages(profile.client_id),
+      getUpdates(profile.client_id, 3),
+      getOnboarding(profile.client_id),
+      getOpenActionItems(profile.client_id),
+    ]);
 
   const progress = computeProgress(stages);
   const phase = currentPhase(stages);
@@ -51,6 +55,9 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Action required — highest priority, top of the dashboard */}
+      <ActionRequiredBanner items={actionItems} />
+
       {/* Welcome hero */}
       <Card className="relative overflow-hidden border-0 bg-ink-900 text-white shadow-card-hover">
         <div

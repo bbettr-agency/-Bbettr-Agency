@@ -87,6 +87,19 @@ export async function getClientNotifications(
   };
 }
 
+/** Open (unresolved) action-required items for a client, newest first. */
+export async function getOpenActionItems(clientId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("notifications")
+    .select("id, title, body, link, created_at")
+    .eq("client_id", clientId)
+    .eq("action_required", true)
+    .is("resolved_at", null)
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
 export async function getClient(clientId: string) {
   const supabase = await createClient();
   const { data } = await supabase

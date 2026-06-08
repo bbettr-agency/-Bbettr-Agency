@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
+import { notify } from "@/lib/notifications";
+import { format } from "date-fns";
 import type {
   ClientStatus,
   ServiceType,
@@ -293,6 +295,15 @@ export async function markAssetsReceivedAction(
     });
   }
 
+  await notify({
+    clientId,
+    type: "stage_advanced",
+    title: "Your project has moved into Development",
+    body: "We've received everything we need and your project is now in development. We'll keep you posted as we make progress.",
+    link: "/dashboard/project",
+    email: { ctaLabel: "View project progress" },
+  });
+
   revalidateClient(clientId);
   return { ok: true };
 }
@@ -313,6 +324,15 @@ export async function postUpdateAction(formData: FormData): Promise<ActionResult
     author_name: profile.full_name ?? "Bbettr Agency",
   });
   if (error) return { error: error.message };
+
+  await notify({
+    clientId,
+    type: "update_posted",
+    title: `New update: ${title}`,
+    body,
+    link: "/dashboard/updates",
+  });
+
   revalidateClient(clientId);
   return { ok: true };
 }
@@ -335,6 +355,16 @@ export async function upsertReportAction(formData: FormData): Promise<ActionResu
   };
 
   const supabase = await createClient();
+
+  // Detect whether this is a brand-new report so we only email on publish,
+  // not on every edit.
+  const { data: existing } = await supabase
+    .from("reports")
+    .select("id")
+    .eq("client_id", clientId)
+    .eq("reporting_month", month)
+    .maybeSingle();
+
   const { error } = await supabase.from("reports").upsert(
     {
       client_id: clientId,
@@ -353,6 +383,19 @@ export async function upsertReportAction(formData: FormData): Promise<ActionResu
     { onConflict: "client_id,reporting_month" }
   );
   if (error) return { error: error.message };
+
+  if (!existing) {
+    const monthLabel = format(new Date(`${month}T00:00:00`), "MMMM yyyy");
+    await notify({
+      clientId,
+      type: "report_published",
+      title: `Your ${monthLabel} report is ready`,
+      body: `Your performance report for ${monthLabel} has been published. Open your portal to see your results.`,
+      link: "/dashboard/reports",
+      email: { ctaLabel: "View your report" },
+    });
+  }
+
   revalidateClient(clientId);
   return { ok: true };
 }
@@ -364,11 +407,32 @@ export async function setStageStatusAction(
 ): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
+
+  // Read the prior state + name so we only notify on meaningful forward
+  // movement (a stage starting or completing), not on every cycle.
+  const { data: before } = await supabase
+    .from("project_stages")
+    .select("name, status")
+    .eq("id", stageId)
+    .single();
+
   const { error } = await supabase
     .from("project_stages")
     .update({ status })
     .eq("id", stageId);
   if (error) return { error: error.message };
+
+  if (before && before.status !== status && status === "in_progress") {
+    await notify({
+      clientId,
+      type: "stage_advanced",
+      title: `Your project has moved to: ${before.name}`,
+      body: `Your project has progressed to the "${before.name}" stage. Open your portal to see the latest.`,
+      link: "/dashboard/project",
+      email: { ctaLabel: "View project progress" },
+    });
+  }
+
   revalidateClient(clientId);
   return { ok: true };
 }
@@ -485,5 +549,84 @@ export async function deleteClientAction(
   revalidatePath("/admin/updates");
   revalidatePath("/admin/files");
 
+  return { ok: true };
+}
+
+/** Action-required categories the admin can request from a client. */
+export type ActionCategory =
+  | "file_approval"
+  | "feedback"
+  | "information"
+  | "blocking";
+
+const ACTION_LABELS: Record<ActionCategory, string> = {
+  file_approval: "Approval needed",
+  feedback: "Feedback requested",
+  information: "Information needed",
+  blocking: "Blocking your project",
+};
+
+/**
+ * Ask the client to take an action (file approval / feedback / info / blocking
+ * task). Creates an action_required notification + email and surfaces it
+ * prominently on the client dashboard.
+ */
+export async function requestClientActionAction(
+  formData: FormData
+): Promise<ActionResult> {
+  await requireAdmin();
+  const clientId = String(formData.get("client_id") ?? "");
+  const category = String(formData.get("category") ?? "") as ActionCategory;
+  const title = String(formData.get("title") ?? "").trim();
+  const details = String(formData.get("details") ?? "").trim();
+  if (!clientId || !title || !ACTION_LABELS[category]) {
+    return { error: "A category and title are required." };
+  }
+
+  await notify({
+    clientId,
+    type: "action_required",
+    title: `${ACTION_LABELS[category]}: ${title}`,
+    body: details || title,
+    link: "/dashboard",
+    actionRequired: true,
+    email: { ctaLabel: "Take action in your portal" },
+  });
+
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+/** Send the client a reminder that we're still waiting on assets/access. */
+export async function sendAssetsReminderAction(
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  await notify({
+    clientId,
+    type: "assets_needed",
+    title: "A quick reminder — we still need a few things from you",
+    body: "To start your project we still need some assets or access from you. Your portal shows exactly what's outstanding.",
+    link: "/dashboard",
+    actionRequired: true,
+    email: { ctaLabel: "See what's needed" },
+  });
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+/** Mark an action-required notification as resolved (admin, once handled). */
+export async function resolveNotificationAction(
+  notificationId: string,
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("notifications")
+    .update({ resolved_at: new Date().toISOString() })
+    .eq("id", notificationId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
   return { ok: true };
 }

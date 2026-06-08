@@ -2,12 +2,20 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, PackageCheck, AlertTriangle } from "lucide-react";
+import {
+  CheckCircle2,
+  PackageCheck,
+  AlertTriangle,
+  Bell,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ReadinessChecklist } from "@/components/shared/readiness-checklist";
-import { markAssetsReceivedAction } from "@/app/(admin)/admin/actions";
+import {
+  markAssetsReceivedAction,
+  sendAssetsReminderAction,
+} from "@/app/(admin)/admin/actions";
 import type { Readiness } from "@/lib/readiness";
 
 export function AssetsReceivedControl({
@@ -24,6 +32,7 @@ export function AssetsReceivedControl({
   const [pending, startTransition] = useTransition();
   const [postUpdate, setPostUpdate] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reminderSent, setReminderSent] = useState(false);
 
   function approve() {
     setError(null);
@@ -31,6 +40,16 @@ export function AssetsReceivedControl({
       const res = await markAssetsReceivedAction(clientId, postUpdate);
       if (res.error) setError(res.error);
       else router.refresh();
+    });
+  }
+
+  function sendReminder() {
+    setError(null);
+    setReminderSent(false);
+    startTransition(async () => {
+      const res = await sendAssetsReminderAction(clientId);
+      if (res.error) setError(res.error);
+      else setReminderSent(true);
     });
   }
 
@@ -105,9 +124,19 @@ export function AssetsReceivedControl({
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <Button onClick={approve} loading={pending}>
-          <PackageCheck className="h-4 w-4" /> Mark Assets Received
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={approve} loading={pending}>
+            <PackageCheck className="h-4 w-4" /> Mark Assets Received
+          </Button>
+          <Button variant="outline" onClick={sendReminder} disabled={pending}>
+            <Bell className="h-4 w-4" /> Send reminder
+          </Button>
+          {reminderSent && (
+            <span className="flex items-center gap-1.5 text-sm text-emerald-600">
+              <CheckCircle2 className="h-4 w-4" /> Reminder emailed
+            </span>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

@@ -31,6 +31,13 @@ export type FileCategory =
   | "document"
   | "report";
 
+export type NotificationType =
+  | "report_published"
+  | "update_posted"
+  | "stage_advanced"
+  | "assets_needed"
+  | "action_required";
+
 export interface Database {
   public: {
     Tables: {
@@ -286,6 +293,40 @@ export interface Database {
           }
         ];
       };
+      notifications: {
+        Row: {
+          id: string;
+          client_id: string;
+          type: NotificationType;
+          title: string;
+          body: string | null;
+          link: string | null;
+          action_required: boolean;
+          resolved_at: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          client_id: string;
+          type: NotificationType;
+          title: string;
+          body?: string | null;
+          link?: string | null;
+          action_required?: boolean;
+          resolved_at?: string | null;
+          read_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "notifications_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -311,3 +352,4 @@ export type ProjectStage = Database["public"]["Tables"]["project_stages"]["Row"]
 export type Update = Database["public"]["Tables"]["updates"]["Row"];
 export type Report = Database["public"]["Tables"]["reports"]["Row"];
 export type FileRecord = Database["public"]["Tables"]["files"]["Row"];
+export type Notification = Database["public"]["Tables"]["notifications"]["Row"];

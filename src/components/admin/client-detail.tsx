@@ -12,6 +12,7 @@ import { getService } from "@/lib/services";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { StageManager } from "@/components/admin/stage-manager";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
+import { RequestActionComposer } from "@/components/admin/request-action-composer";
 import { computeReadiness } from "@/lib/readiness";
 import { UpdateComposer } from "@/components/admin/update-composer";
 import { ReportComposer } from "@/components/admin/report-composer";
@@ -179,14 +180,21 @@ export function ClientDetail({
 
           {active === "updates" && (
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card className="h-fit">
-                <CardHeader>
-                  <CardTitle>Post an update</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <UpdateComposer clientId={client.id} />
-                </CardContent>
-              </Card>
+              <div className="space-y-6">
+                <Card className="h-fit">
+                  <CardHeader>
+                    <CardTitle>Post an update</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <UpdateComposer clientId={client.id} />
+                  </CardContent>
+                </Card>
+                <Card className="h-fit border-amber-200">
+                  <CardContent className="p-6">
+                    <RequestActionComposer clientId={client.id} />
+                  </CardContent>
+                </Card>
+              </div>
               <div>
                 {updates.length > 0 ? (
                   <UpdatesTimeline updates={updates} />
