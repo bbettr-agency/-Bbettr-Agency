@@ -10,6 +10,7 @@ import {
   Settings,
   Handshake,
   Receipt,
+  Headset,
 } from "lucide-react";
 
 export interface NavItem {
@@ -32,6 +33,7 @@ export const CLIENT_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
   { label: "Clients", href: "/admin/clients", icon: Users },
+  { label: "Reps", href: "/admin/reps", icon: Headset },
   { label: "Invoice Requests", href: "/admin/invoices", icon: Receipt },
   { label: "Reports", href: "/admin/reports", icon: BarChart3 },
   { label: "Updates", href: "/admin/updates", icon: Megaphone },

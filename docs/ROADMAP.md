@@ -17,10 +17,12 @@ ordered by impact.
 
 ## In progress
 - **Sales Rep Portal (Phase 1 — shipped):** `rep` role, rep dashboard, log-deal
-  form, invoice-request approval queue for admins, commissions (record-only).
+  form, invoice-request approval queue for admins, commissions (record-only),
+  **Admin → Reps management** (create rep + login, activate/deactivate, reset
+  password, send welcome/reset email, per-rep deals & commission totals).
 - **Sales Rep Portal (Phase 2 — next):** QuickBooks Online integration — admin
   OAuth connect, find-or-create customer, create invoice on approval (ZAR,
-  once-off first). Provision-rep admin UI. Recurring/monthly invoices later.
+  once-off first). Recurring/monthly invoices later.
 
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or

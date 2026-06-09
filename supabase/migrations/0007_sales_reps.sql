@@ -33,6 +33,7 @@ $$;
 create table reps (
   id              uuid primary key references profiles(id) on delete cascade,
   display_name    text,
+  phone           text,
   commission_rate numeric(5,2) not null default 0,
   active          boolean not null default true,
   created_at      timestamptz not null default now()

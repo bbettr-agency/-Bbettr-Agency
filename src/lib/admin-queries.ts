@@ -171,3 +171,98 @@ export async function getInvoiceRequests() {
     .order("created_at", { ascending: false });
   return data ?? [];
 }
+
+export interface RepSummary {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  commissionRate: number;
+  active: boolean;
+  dealsCount: number;
+  pendingRequests: number;
+  approvedRequests: number;
+  commissionTotal: number;
+}
+
+/** All reps with aggregated deal/commission stats, for the admin Reps list. */
+export async function getAllReps(): Promise<RepSummary[]> {
+  const supabase = await createClient();
+  const [{ data: reps }, { data: profiles }, { data: deals }, { data: requests }, { data: commissions }] =
+    await Promise.all([
+      supabase.from("reps").select("*").order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id, full_name, email").eq("role", "rep"),
+      supabase.from("deals").select("rep_id"),
+      supabase.from("invoice_requests").select("rep_id, status"),
+      supabase.from("commissions").select("rep_id, amount"),
+    ]);
+
+  return (reps ?? []).map((r) => {
+    const profile = (profiles ?? []).find((p) => p.id === r.id);
+    const repRequests = (requests ?? []).filter((x) => x.rep_id === r.id);
+    return {
+      id: r.id,
+      name: profile?.full_name || r.display_name || "Rep",
+      email: profile?.email ?? null,
+      phone: r.phone,
+      commissionRate: Number(r.commission_rate),
+      active: r.active,
+      dealsCount: (deals ?? []).filter((d) => d.rep_id === r.id).length,
+      pendingRequests: repRequests.filter((x) => x.status === "pending").length,
+      approvedRequests: repRequests.filter(
+        (x) => x.status === "approved" || x.status === "invoiced"
+      ).length,
+      commissionTotal: (commissions ?? [])
+        .filter((c) => c.rep_id === r.id)
+        .reduce((s, c) => s + Number(c.amount || 0), 0),
+    };
+  });
+}
+
+export interface RepDetail extends RepSummary {
+  lastSignInAt: string | null;
+  createdAt: string | null;
+  deals: import("@/lib/database.types").Deal[];
+}
+
+/** Full rep detail for the admin rep page (profile, login activity, deals). */
+export async function getRepDetail(repId: string): Promise<RepDetail | null> {
+  const supabase = await createClient();
+  const [{ data: rep }, { data: profile }, { data: deals }, { data: requests }, { data: commissions }] =
+    await Promise.all([
+      supabase.from("reps").select("*").eq("id", repId).maybeSingle(),
+      supabase.from("profiles").select("full_name, email").eq("id", repId).maybeSingle(),
+      supabase.from("deals").select("*").eq("rep_id", repId).order("created_at", { ascending: false }),
+      supabase.from("invoice_requests").select("status").eq("rep_id", repId),
+      supabase.from("commissions").select("amount").eq("rep_id", repId),
+    ]);
+  if (!rep) return null;
+
+  let lastSignInAt: string | null = null;
+  let createdAt: string | null = null;
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin.auth.admin.getUserById(repId);
+    lastSignInAt = data.user?.last_sign_in_at ?? null;
+    createdAt = data.user?.created_at ?? null;
+  } catch {
+    /* service role unavailable */
+  }
+
+  const reqs = requests ?? [];
+  return {
+    id: rep.id,
+    name: profile?.full_name || rep.display_name || "Rep",
+    email: profile?.email ?? null,
+    phone: rep.phone,
+    commissionRate: Number(rep.commission_rate),
+    active: rep.active,
+    dealsCount: (deals ?? []).length,
+    pendingRequests: reqs.filter((x) => x.status === "pending").length,
+    approvedRequests: reqs.filter((x) => x.status === "approved" || x.status === "invoiced").length,
+    commissionTotal: (commissions ?? []).reduce((s, c) => s + Number(c.amount || 0), 0),
+    lastSignInAt,
+    createdAt,
+    deals: deals ?? [],
+  };
+}

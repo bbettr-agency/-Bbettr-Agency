@@ -362,6 +362,7 @@ export interface Database {
         Row: {
           id: string;
           display_name: string | null;
+          phone: string | null;
           commission_rate: number;
           active: boolean;
           created_at: string;
@@ -369,6 +370,7 @@ export interface Database {
         Insert: {
           id: string;
           display_name?: string | null;
+          phone?: string | null;
           commission_rate?: number;
           active?: boolean;
         };
