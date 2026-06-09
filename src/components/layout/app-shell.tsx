@@ -24,6 +24,8 @@ interface AppShellProps {
   context: string;
   roleLabel: "Client" | "Admin";
   badges?: NavBadges;
+  /** Optional top-bar content (e.g. the client notification bell). */
+  headerSlot?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -32,6 +34,7 @@ export function AppShell({
   context,
   roleLabel,
   badges,
+  headerSlot,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -63,13 +66,16 @@ export function AppShell({
       {/* Mobile top bar */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-ink-100 bg-white/80 px-4 backdrop-blur-lg lg:hidden">
         <Logo />
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="rounded-lg p-2 text-ink-600 hover:bg-ink-100"
-          aria-label="Open menu"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {headerSlot}
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="rounded-lg p-2 text-ink-600 hover:bg-ink-100"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
       </header>
 
       {/* Mobile drawer */}
@@ -102,6 +108,12 @@ export function AppShell({
 
       {/* Main content */}
       <main className="lg:pl-64">
+        {/* Desktop top bar (holds the notification bell, etc.) */}
+        {headerSlot && (
+          <header className="sticky top-0 z-20 hidden h-16 items-center justify-end border-b border-ink-100 bg-white/80 px-10 backdrop-blur-lg lg:flex">
+            {headerSlot}
+          </header>
+        )}
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
           {children}
         </div>

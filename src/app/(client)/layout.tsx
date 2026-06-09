@@ -3,12 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import {
   isOnboardingComplete,
   getClientNotifications,
+  getClientNotificationFeed,
   NOTIFY_SECTIONS,
   SECTION_HREF,
 } from "@/lib/queries";
 import { AppShell, type NavBadges } from "@/components/layout/app-shell";
 import { getPortalSettings } from "@/lib/settings";
 import { MaintenanceScreen } from "@/components/client/maintenance-screen";
+import { NotificationBell } from "@/components/client/notification-bell";
 
 export default async function ClientLayout({
   children,
@@ -28,7 +30,7 @@ export default async function ClientLayout({
 
   const supabase = await createClient();
 
-  const [{ data: client }, { data: services }, notifications] =
+  const [{ data: client }, { data: services }, notifications, feed] =
     await Promise.all([
       supabase
         .from("clients")
@@ -40,6 +42,7 @@ export default async function ClientLayout({
         .select("onboarding_status")
         .eq("client_id", profile.client_id),
       getClientNotifications(profile.client_id, profile.id),
+      getClientNotificationFeed(profile.client_id),
     ]);
 
   // Sidebar indicators: a blue dot for sections with unseen activity, and a
@@ -57,6 +60,12 @@ export default async function ClientLayout({
       roleLabel="Client"
       context={client?.name ?? "Your account"}
       badges={badges}
+      headerSlot={
+        <NotificationBell
+          notifications={feed.items}
+          unreadCount={feed.unreadCount}
+        />
+      }
       user={{
         name: profile.full_name ?? "Client",
         email: profile.email ?? "",

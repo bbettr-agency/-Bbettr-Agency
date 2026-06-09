@@ -1,10 +1,54 @@
 import { createClient } from "@/lib/supabase/server";
+import type { NotificationType } from "@/lib/database.types";
 
 /**
  * Tenant-scoped data access helpers. RLS guarantees a client can only ever
  * read its own rows, but we still filter by client_id explicitly for clarity
  * and so admins can reuse these helpers for a specific tenant.
  */
+
+export interface NotificationFeedItem {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  link: string | null;
+  action_required: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationFeed {
+  items: NotificationFeedItem[];
+  unreadCount: number;
+}
+
+/**
+ * Notification center feed for a client: the latest notifications plus the
+ * total unread count. Read-only, under the client's own RLS.
+ */
+export async function getClientNotificationFeed(
+  clientId: string,
+  limit = 15
+): Promise<NotificationFeed> {
+  const supabase = await createClient();
+
+  const [{ data: items }, { count }] = await Promise.all([
+    supabase
+      .from("notifications")
+      .select("id, type, title, body, link, action_required, read_at, created_at")
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", clientId)
+      .is("read_at", null),
+  ]);
+
+  return { items: items ?? [], unreadCount: count ?? 0 };
+}
 
 /** Portal sections that carry notification dots, mapped to their nav href. */
 export const NOTIFY_SECTIONS = ["project", "updates", "reports", "files"] as const;

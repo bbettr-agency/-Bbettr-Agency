@@ -10,6 +10,10 @@ ordered by impact.
 - **Client Portal Maintenance Mode** — admin toggle (Admin → Settings) backed by
   the `portal_settings` table (migration 0006); clients see a branded
   maintenance screen, admin access unaffected.
+- **Client Notification Center** — bell icon in the client header with unread
+  count, dropdown feed (type icons, time-ago, unread highlight, action-required
+  pinned), per-item mark-as-read on click + "Mark all as read". Reuses the
+  existing `notifications` table / `read_at` (no migration). Client-only.
 
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or

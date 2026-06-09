@@ -42,3 +42,29 @@ export async function resolveActionItemAction(notificationId: string) {
     .eq("client_id", profile.client_id);
   revalidatePath("/dashboard");
 }
+
+/** Mark a single notification as read (client's own, via RLS). */
+export async function markNotificationReadAction(notificationId: string) {
+  const profile = await requireClient();
+  const supabase = await createClient();
+  await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", notificationId)
+    .eq("client_id", profile.client_id)
+    .is("read_at", null);
+  // Refresh the layout so the bell's unread count updates.
+  revalidatePath("/dashboard", "layout");
+}
+
+/** Mark all of the client's unread notifications as read. */
+export async function markAllNotificationsReadAction() {
+  const profile = await requireClient();
+  const supabase = await createClient();
+  await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("client_id", profile.client_id)
+    .is("read_at", null);
+  revalidatePath("/dashboard", "layout");
+}
