@@ -22,6 +22,12 @@ export interface ActionResult {
   password?: string;
 }
 
+/**
+ * Name clients see on updates/communications. Always the company, never the
+ * individual admin (the internal admin account keeps its real name).
+ */
+const CLIENT_FACING_AUTHOR = "Bbettr Team";
+
 /** Generate a strong, human-shareable temporary password (no ambiguous chars). */
 function generateTempPassword(length = 14): string {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#$%";
@@ -291,7 +297,8 @@ export async function markAssetsReceivedAction(
       title: "Assets Received — Development Started",
       body: "We've received everything we need and your project has moved into development. We'll keep you posted as we make progress.",
       author_id: profile.id,
-      author_name: profile.full_name ?? "Bbettr Agency",
+      // Client-facing attribution shows the company, not the individual admin.
+      author_name: CLIENT_FACING_AUTHOR,
     });
   }
 
@@ -321,7 +328,7 @@ export async function postUpdateAction(formData: FormData): Promise<ActionResult
     title,
     body,
     author_id: profile.id,
-    author_name: profile.full_name ?? "Bbettr Agency",
+    author_name: CLIENT_FACING_AUTHOR,
   });
   if (error) return { error: error.message };
 
