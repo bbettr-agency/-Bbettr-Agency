@@ -53,6 +53,11 @@ export default async function DashboardPage() {
     stages.find((s) => s.name === "Assets Received")?.status === "completed";
   const showChecklist = readiness.hasItems && !assetsReceived;
 
+  // Once the project has launched, drop the "Onboarding Complete" card — the
+  // roadmap / current-phase card tells the story from then on.
+  const launchComplete =
+    stages.find((s) => s.name === "Launch")?.status === "completed";
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Action required — highest priority, top of the dashboard */}
@@ -219,24 +224,8 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Onboarding nudge (incomplete) → completion message (complete) */}
-      {onboardingComplete ? (
-        <Card className="border-emerald-200 bg-emerald-50/40">
-          <CardContent className="flex items-start gap-3 p-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
-              <CheckCircle2 className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-ink-900">
-                Onboarding Complete
-              </p>
-              <p className="text-sm text-ink-500">
-                Our team is now preparing your project.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
+      {/* Onboarding nudge (incomplete) → completion message (complete, pre-launch) */}
+      {!onboardingComplete ? (
         <Card className="border-brand-200 bg-brand-50/40">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
@@ -259,7 +248,23 @@ export default async function DashboardPage() {
             </Button>
           </CardContent>
         </Card>
-      )}
+      ) : !launchComplete ? (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardContent className="flex items-start gap-3 p-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
+              <CheckCircle2 className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-ink-900">
+                Onboarding Complete
+              </p>
+              <p className="text-sm text-ink-500">
+                Our team is now preparing your project.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }
