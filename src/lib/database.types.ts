@@ -6,7 +6,22 @@
  * hand-maintain them here so the app is fully typed without a live connection.
  */
 
-export type UserRole = "admin" | "client";
+export type UserRole = "admin" | "client" | "rep";
+
+export type BillingType = "once_off" | "monthly";
+export type DealStatus =
+  | "new"
+  | "invoice_requested"
+  | "invoiced"
+  | "won"
+  | "lost";
+export type InvoiceRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "invoiced"
+  | "failed";
+export type CommissionStatus = "pending" | "paid";
 
 export type ClientStatus =
   | "lead"
@@ -343,6 +358,113 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["portal_settings"]["Row"]>;
         Relationships: [];
       };
+      reps: {
+        Row: {
+          id: string;
+          display_name: string | null;
+          commission_rate: number;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          display_name?: string | null;
+          commission_rate?: number;
+          active?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["reps"]["Row"]>;
+        Relationships: [];
+      };
+      deals: {
+        Row: {
+          id: string;
+          rep_id: string;
+          business_name: string;
+          contact_name: string | null;
+          email: string | null;
+          phone: string | null;
+          package: string | null;
+          price: number | null;
+          billing_type: BillingType;
+          notes: string | null;
+          status: DealStatus;
+          client_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          rep_id: string;
+          business_name: string;
+          contact_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          package?: string | null;
+          price?: number | null;
+          billing_type?: BillingType;
+          notes?: string | null;
+          status?: DealStatus;
+          client_id?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["deals"]["Row"]>;
+        Relationships: [];
+      };
+      invoice_requests: {
+        Row: {
+          id: string;
+          deal_id: string;
+          rep_id: string;
+          amount: number;
+          billing_type: BillingType;
+          status: InvoiceRequestStatus;
+          quickbooks_invoice_id: string | null;
+          quickbooks_customer_id: string | null;
+          approved_by: string | null;
+          error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          deal_id: string;
+          rep_id: string;
+          amount: number;
+          billing_type: BillingType;
+          status?: InvoiceRequestStatus;
+          quickbooks_invoice_id?: string | null;
+          quickbooks_customer_id?: string | null;
+          approved_by?: string | null;
+          error?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["invoice_requests"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "invoice_requests_deal_id_fkey";
+            columns: ["deal_id"];
+            isOneToOne: false;
+            referencedRelation: "deals";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      commissions: {
+        Row: {
+          id: string;
+          rep_id: string;
+          deal_id: string;
+          amount: number;
+          rate: number;
+          status: CommissionStatus;
+          created_at: string;
+        };
+        Insert: {
+          rep_id: string;
+          deal_id: string;
+          amount: number;
+          rate?: number;
+          status?: CommissionStatus;
+        };
+        Update: Partial<Database["public"]["Tables"]["commissions"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -370,3 +492,7 @@ export type Report = Database["public"]["Tables"]["reports"]["Row"];
 export type FileRecord = Database["public"]["Tables"]["files"]["Row"];
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"];
 export type PortalSettings = Database["public"]["Tables"]["portal_settings"]["Row"];
+export type Rep = Database["public"]["Tables"]["reps"]["Row"];
+export type Deal = Database["public"]["Tables"]["deals"]["Row"];
+export type InvoiceRequest = Database["public"]["Tables"]["invoice_requests"]["Row"];
+export type Commission = Database["public"]["Tables"]["commissions"]["Row"];

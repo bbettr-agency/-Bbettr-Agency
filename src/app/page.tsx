@@ -10,5 +10,6 @@ export default async function RootPage() {
 
   if (!profile) redirect("/login");
   if (profile.role === "admin") redirect("/admin");
+  if (profile.role === "rep") redirect("/rep");
   redirect("/dashboard");
 }

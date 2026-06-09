@@ -4,7 +4,16 @@
 `0001_initial_schema` · `0002_rls_policies` · `0003_storage` ·
 `0004_notifications` (section-view dots) · `0005_client_notifications`
 (notifications event log) · `0006_portal_settings` (global settings /
-maintenance mode).
+maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
+commissions).
+
+### Sales Rep Portal (`0007`)
+Adds the `rep` role and four tables: `reps` (commission_rate), `deals`,
+`invoice_requests`, `commissions`. RLS: reps see/create only their **own** deals
+and invoice requests (`rep_id = auth.uid()`); only admins change invoice-request
+status or manage commissions; reps have **no** access to client/admin tables.
+Flow: rep logs a deal → invoice_request (`pending`) → admin approves → commission
+recorded (record-only). QuickBooks invoicing is a separate, later phase.
 
 ## Schema (core tables)
 Core schema in `supabase/migrations/0001_initial_schema.sql`.

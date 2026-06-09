@@ -159,3 +159,15 @@ export async function getAllFilesGlobal() {
     .order("created_at", { ascending: false });
   return data ?? [];
 }
+
+/** All invoice requests (newest first) with their deal details, for the admin queue. */
+export async function getInvoiceRequests() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("invoice_requests")
+    .select(
+      "id, amount, billing_type, status, created_at, deal_id, rep_id, deals(business_name, contact_name, email, package)"
+    )
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}

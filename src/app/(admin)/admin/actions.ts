@@ -637,3 +637,66 @@ export async function resolveNotificationAction(
   revalidateClient(clientId);
   return { ok: true };
 }
+
+/**
+ * Approve an invoice request (admin). V1: marks the request approved and records
+ * the rep's commission (record-only). In the QuickBooks phase this is where the
+ * QBO invoice gets created and the status becomes "invoiced".
+ */
+export async function approveInvoiceRequestAction(
+  requestId: string
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: req } = await supabase
+    .from("invoice_requests")
+    .select("id, deal_id, rep_id, amount, status")
+    .eq("id", requestId)
+    .single();
+  if (!req) return { error: "Invoice request not found." };
+  if (req.status !== "pending") {
+    return { error: "This request has already been actioned." };
+  }
+
+  const { error } = await supabase
+    .from("invoice_requests")
+    .update({ status: "approved", approved_by: profile.id })
+    .eq("id", requestId);
+  if (error) return { error: error.message };
+
+  // Record-only commission (payout handled later). Rate from the rep's profile.
+  const { data: rep } = await supabase
+    .from("reps")
+    .select("commission_rate")
+    .eq("id", req.rep_id)
+    .maybeSingle();
+  const rate = Number(rep?.commission_rate ?? 0);
+  await supabase.from("commissions").insert({
+    rep_id: req.rep_id,
+    deal_id: req.deal_id,
+    amount: Number(req.amount) * (rate / 100),
+    rate,
+    status: "pending",
+  });
+
+  revalidatePath("/admin/invoices");
+  revalidatePath("/rep");
+  return { ok: true };
+}
+
+/** Reject an invoice request (admin). */
+export async function rejectInvoiceRequestAction(
+  requestId: string
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("invoice_requests")
+    .update({ status: "rejected", approved_by: profile.id })
+    .eq("id", requestId);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/invoices");
+  revalidatePath("/rep");
+  return { ok: true };
+}

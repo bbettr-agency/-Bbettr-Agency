@@ -3,7 +3,45 @@ import type {
   ClientStatus,
   OnboardingStatus,
   StageStatus,
+  DealStatus,
+  InvoiceRequestStatus,
 } from "@/lib/database.types";
+
+const dealStatusMap: Record<
+  DealStatus,
+  { label: string; tone: "brand" | "neutral" | "success" | "warning" | "info" }
+> = {
+  new: { label: "New", tone: "neutral" },
+  invoice_requested: { label: "Invoice Requested", tone: "warning" },
+  invoiced: { label: "Invoiced", tone: "info" },
+  won: { label: "Won", tone: "success" },
+  lost: { label: "Lost", tone: "neutral" },
+};
+
+export function DealStatusBadge({ status }: { status: DealStatus }) {
+  const cfg = dealStatusMap[status];
+  return <Badge tone={cfg.tone} dot>{cfg.label}</Badge>;
+}
+
+const invoiceRequestStatusMap: Record<
+  InvoiceRequestStatus,
+  { label: string; tone: "neutral" | "warning" | "success" | "danger" | "info" }
+> = {
+  pending: { label: "Pending", tone: "warning" },
+  approved: { label: "Approved", tone: "success" },
+  rejected: { label: "Rejected", tone: "danger" },
+  invoiced: { label: "Invoiced", tone: "info" },
+  failed: { label: "Failed", tone: "danger" },
+};
+
+export function InvoiceRequestStatusBadge({
+  status,
+}: {
+  status: InvoiceRequestStatus;
+}) {
+  const cfg = invoiceRequestStatusMap[status];
+  return <Badge tone={cfg.tone}>{cfg.label}</Badge>;
+}
 
 const clientStatusMap: Record<
   ClientStatus,

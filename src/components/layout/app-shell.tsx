@@ -8,7 +8,12 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { CLIENT_NAV, ADMIN_NAV, type NavItem } from "@/components/layout/nav";
+import {
+  CLIENT_NAV,
+  ADMIN_NAV,
+  REP_NAV,
+  type NavItem,
+} from "@/components/layout/nav";
 
 /**
  * Per-nav-item sidebar indicators, keyed by href:
@@ -22,7 +27,7 @@ interface AppShellProps {
   user: { name: string; email: string; avatarUrl?: string | null };
   /** Label shown under the user (e.g. tenant name or "Administrator"). */
   context: string;
-  roleLabel: "Client" | "Admin";
+  roleLabel: "Client" | "Admin" | "Rep";
   badges?: NavBadges;
   /** Optional top-bar content (e.g. the client notification bell). */
   headerSlot?: React.ReactNode;
@@ -43,7 +48,8 @@ export function AppShell({
   // Select the navigation inside the client bundle. The nav items contain
   // Lucide icon components (functions), which cannot be serialized across the
   // server→client boundary — so they must NOT be passed in as a prop.
-  const nav: NavItem[] = roleLabel === "Admin" ? ADMIN_NAV : CLIENT_NAV;
+  const nav: NavItem[] =
+    roleLabel === "Admin" ? ADMIN_NAV : roleLabel === "Rep" ? REP_NAV : CLIENT_NAV;
 
   const isActive = (href: string) =>
     href === pathname ||
@@ -134,7 +140,7 @@ function SidebarInner({
   nav: NavItem[];
   user: AppShellProps["user"];
   context: string;
-  roleLabel: "Client" | "Admin";
+  roleLabel: "Client" | "Admin" | "Rep";
   isActive: (href: string) => boolean;
   badges?: NavBadges;
   onNavigate?: () => void;

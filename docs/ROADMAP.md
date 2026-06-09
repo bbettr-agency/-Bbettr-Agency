@@ -15,6 +15,13 @@ ordered by impact.
   pinned), per-item mark-as-read on click + "Mark all as read". Reuses the
   existing `notifications` table / `read_at` (no migration). Client-only.
 
+## In progress
+- **Sales Rep Portal (Phase 1 — shipped):** `rep` role, rep dashboard, log-deal
+  form, invoice-request approval queue for admins, commissions (record-only).
+- **Sales Rep Portal (Phase 2 — next):** QuickBooks Online integration — admin
+  OAuth connect, find-or-create customer, create invoice on approval (ZAR,
+  once-off first). Provision-rep admin UI. Recurring/monthly invoices later.
+
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or
    client tab refreshes without navigation. Closes the one gap revalidation

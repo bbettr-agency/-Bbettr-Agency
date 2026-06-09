@@ -38,6 +38,7 @@ export async function signIn(
       .eq("id", user.id)
       .single();
     if (profile?.role === "admin") destination = "/admin";
+    else if (profile?.role === "rep") destination = "/rep";
   }
 
   redirect(destination);
