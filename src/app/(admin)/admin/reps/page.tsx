@@ -51,10 +51,11 @@ export default async function RepsPage() {
             <THead>
               <TR className="hover:bg-transparent">
                 <TH>Rep</TH>
-                <TH>Commission</TH>
+                <TH>Commission %</TH>
                 <TH>Status</TH>
                 <TH>Deals</TH>
                 <TH>Pending</TH>
+                <TH>Sales Value</TH>
                 <TH>Commission Total</TH>
               </TR>
             </THead>
@@ -83,6 +84,7 @@ export default async function RepsPage() {
                   </TD>
                   <TD>{r.dealsCount}</TD>
                   <TD>{r.pendingRequests}</TD>
+                  <TD>{formatCurrency(r.salesValue)}</TD>
                   <TD>{formatCurrency(r.commissionTotal)}</TD>
                 </TR>
               ))}

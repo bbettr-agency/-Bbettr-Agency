@@ -182,6 +182,7 @@ export interface RepSummary {
   dealsCount: number;
   pendingRequests: number;
   approvedRequests: number;
+  salesValue: number;
   commissionTotal: number;
 }
 
@@ -192,7 +193,7 @@ export async function getAllReps(): Promise<RepSummary[]> {
     await Promise.all([
       supabase.from("reps").select("*").order("created_at", { ascending: false }),
       supabase.from("profiles").select("id, full_name, email").eq("role", "rep"),
-      supabase.from("deals").select("rep_id"),
+      supabase.from("deals").select("rep_id, price"),
       supabase.from("invoice_requests").select("rep_id, status"),
       supabase.from("commissions").select("rep_id, amount"),
     ]);
@@ -200,6 +201,7 @@ export async function getAllReps(): Promise<RepSummary[]> {
   return (reps ?? []).map((r) => {
     const profile = (profiles ?? []).find((p) => p.id === r.id);
     const repRequests = (requests ?? []).filter((x) => x.rep_id === r.id);
+    const repDeals = (deals ?? []).filter((d) => d.rep_id === r.id);
     return {
       id: r.id,
       name: profile?.full_name || r.display_name || "Rep",
@@ -207,11 +209,12 @@ export async function getAllReps(): Promise<RepSummary[]> {
       phone: r.phone,
       commissionRate: Number(r.commission_rate),
       active: r.active,
-      dealsCount: (deals ?? []).filter((d) => d.rep_id === r.id).length,
+      dealsCount: repDeals.length,
       pendingRequests: repRequests.filter((x) => x.status === "pending").length,
       approvedRequests: repRequests.filter(
         (x) => x.status === "approved" || x.status === "invoiced"
       ).length,
+      salesValue: repDeals.reduce((s, d) => s + Number(d.price || 0), 0),
       commissionTotal: (commissions ?? [])
         .filter((c) => c.rep_id === r.id)
         .reduce((s, c) => s + Number(c.amount || 0), 0),
@@ -260,6 +263,7 @@ export async function getRepDetail(repId: string): Promise<RepDetail | null> {
     dealsCount: (deals ?? []).length,
     pendingRequests: reqs.filter((x) => x.status === "pending").length,
     approvedRequests: reqs.filter((x) => x.status === "approved" || x.status === "invoiced").length,
+    salesValue: (deals ?? []).reduce((s, d) => s + Number(d.price || 0), 0),
     commissionTotal: (commissions ?? []).reduce((s, c) => s + Number(c.amount || 0), 0),
     lastSignInAt,
     createdAt,

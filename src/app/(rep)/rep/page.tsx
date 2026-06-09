@@ -1,19 +1,26 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { format } from "date-fns";
-import { Handshake, Wallet, Clock, Plus, CheckCircle2 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import {
+  Handshake,
+  Wallet,
+  Clock,
+  Plus,
+  CheckCircle2,
+  XCircle,
+  FileCheck2,
+  Receipt,
+  type LucideIcon,
+} from "lucide-react";
 import { requireRep } from "@/lib/auth";
-import { getRepDeals, getRepStats } from "@/lib/rep-queries";
+import { getRepDashboard, type ActivityItem } from "@/lib/rep-queries";
 import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { DealStatusBadge } from "@/components/ui/status-badge";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 
-export const metadata: Metadata = { title: "My Deals" };
+export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function RepDashboardPage({
   searchParams,
@@ -21,10 +28,9 @@ export default async function RepDashboardPage({
   searchParams: Promise<{ created?: string }>;
 }) {
   const profile = await requireRep();
-  const [{ created }, deals, stats] = await Promise.all([
+  const [{ created }, data] = await Promise.all([
     searchParams,
-    getRepDeals(profile.id),
-    getRepStats(profile.id),
+    getRepDashboard(profile.id),
   ]);
 
   return (
@@ -38,7 +44,7 @@ export default async function RepDashboardPage({
 
       <PageHeader
         title={`Welcome${profile.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}`}
-        description="Close a deal and we'll handle the invoicing."
+        description="Your sales overview."
         actions={
           <Button asChild>
             <Link href="/rep/deals/new">
@@ -48,74 +54,109 @@ export default async function RepDashboardPage({
         }
       />
 
+      {/* Top stat cards */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Total Deals" value={stats.totalDeals} icon={Handshake} />
+        <StatCard label="Total Deals" value={data.totalDeals} icon={Handshake} />
         <StatCard
-          label="Pipeline Value"
-          value={formatCurrency(stats.pipelineValue)}
+          label="Commission Earned"
+          value={formatCurrency(data.commissionEarned)}
           icon={Wallet}
         />
         <StatCard
           label="Awaiting Approval"
-          value={stats.awaitingApproval}
+          value={data.awaitingApproval}
           icon={Clock}
         />
       </div>
 
-      {deals.length === 0 ? (
-        <EmptyState
-          icon={Handshake}
-          title="No deals yet"
-          description="Closed a client on a call? Log the deal and we'll generate the invoice."
-          action={
-            <Button asChild>
-              <Link href="/rep/deals/new">
-                <Plus className="h-4 w-4" /> New Deal
-              </Link>
-            </Button>
-          }
-        />
-      ) : (
-        <Card className="overflow-hidden">
-          <Table>
-            <THead>
-              <TR className="hover:bg-transparent">
-                <TH>Business</TH>
-                <TH>Package</TH>
-                <TH>Price</TH>
-                <TH>Billing</TH>
-                <TH>Status</TH>
-                <TH>Created</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {deals.map((d) => (
-                <TR key={d.id}>
-                  <TD>
-                    <p className="font-semibold text-ink-900">
-                      {d.business_name}
-                    </p>
-                    <p className="text-xs text-ink-400">
-                      {d.contact_name ?? d.email ?? "—"}
-                    </p>
-                  </TD>
-                  <TD>{d.package ?? "—"}</TD>
-                  <TD>{formatCurrency(d.price)}</TD>
-                  <TD className="capitalize">
-                    {d.billing_type === "once_off" ? "Once-off" : "Monthly"}
-                  </TD>
-                  <TD>
-                    <DealStatusBadge status={d.status} />
-                  </TD>
-                  <TD className="whitespace-nowrap text-xs text-ink-500">
-                    {format(new Date(d.created_at), "d MMM yyyy")}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* This Month */}
+        <Card>
+          <CardHeader>
+            <CardTitle>This Month</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <Tile label="Deals Closed" value={data.month.dealsClosed} />
+            <Tile label="Sales Value" value={formatCurrency(data.month.salesValue)} />
+            <Tile label="Commission Earned" value={formatCurrency(data.month.commission)} />
+            <Tile label="Pending Approval" value={data.month.pending} />
+          </CardContent>
         </Card>
-      )}
+
+        {/* Lifetime */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Lifetime Stats</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <Tile label="Total Deals" value={data.lifetime.totalDeals} />
+            <Tile label="Total Sales Value" value={formatCurrency(data.lifetime.totalSalesValue)} />
+            <Tile
+              label="Total Commission Earned"
+              value={formatCurrency(data.lifetime.totalCommission)}
+              wide
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Activity */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.activity.length === 0 ? (
+            <p className="py-6 text-center text-sm text-ink-400">
+              No activity yet. Log your first deal to get started.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {data.activity.map((item) => {
+                const { icon: Icon, tone } = ACTIVITY_STYLE[item.kind];
+                return (
+                  <li key={item.id} className="flex items-center gap-3">
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1 text-sm text-ink-700">{item.label}</span>
+                    <span className="text-xs text-ink-400">
+                      {formatDistanceToNow(new Date(item.at), { addSuffix: true })}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+const ACTIVITY_STYLE: Record<
+  ActivityItem["kind"],
+  { icon: LucideIcon; tone: string }
+> = {
+  submitted: { icon: FileCheck2, tone: "bg-brand-50 text-brand-500" },
+  approved: { icon: CheckCircle2, tone: "bg-emerald-50 text-emerald-600" },
+  rejected: { icon: XCircle, tone: "bg-red-50 text-red-500" },
+  commission: { icon: Receipt, tone: "bg-amber-50 text-amber-600" },
+};
+
+function Tile({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value: string | number;
+  wide?: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border border-ink-100 p-3 ${wide ? "col-span-2" : ""}`}>
+      <p className="text-xs font-medium text-ink-400">{label}</p>
+      <p className="mt-1 text-lg font-bold text-ink-900">{value}</p>
     </div>
   );
 }

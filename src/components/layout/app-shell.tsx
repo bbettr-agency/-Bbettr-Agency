@@ -53,7 +53,10 @@ export function AppShell({
 
   const isActive = (href: string) =>
     href === pathname ||
-    (href !== "/dashboard" && href !== "/admin" && pathname.startsWith(href));
+    (href !== "/dashboard" &&
+      href !== "/admin" &&
+      href !== "/rep" &&
+      pathname.startsWith(href));
 
   return (
     <div className="min-h-screen bg-ink-50">

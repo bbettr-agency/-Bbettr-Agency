@@ -11,6 +11,7 @@ import {
   Handshake,
   Receipt,
   Headset,
+  Wallet,
 } from "lucide-react";
 
 export interface NavItem {
@@ -43,6 +44,8 @@ export const ADMIN_NAV: NavItem[] = [
 
 /** Sales-rep navigation. */
 export const REP_NAV: NavItem[] = [
-  { label: "My Deals", href: "/rep", icon: Handshake },
+  { label: "Dashboard", href: "/rep", icon: LayoutDashboard },
+  { label: "My Deals", href: "/rep/deals", icon: Handshake },
   { label: "New Deal", href: "/rep/deals/new", icon: ClipboardList },
+  { label: "My Earnings", href: "/rep/earnings", icon: Wallet },
 ];
