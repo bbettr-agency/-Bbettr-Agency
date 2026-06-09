@@ -5,7 +5,14 @@
 `0004_notifications` (section-view dots) · `0005_client_notifications`
 (notifications event log) · `0006_portal_settings` (global settings /
 maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
-commissions).
+commissions) · `0008_internal_notifications` (admin/rep in-app notifications).
+
+### Internal notifications (`0008`)
+`internal_notifications` is addressed by `recipient_id` (a profiles/auth user),
+**separate** from the tenant-addressed client `notifications` table. Recipients
+read/mark-read their own; rows are written server-side via the service role
+(`notifyInternal` / `notifyAdmins`). Powers the admin & rep header bell. No email
+(in-app only).
 
 ### Sales Rep Portal (`0007`)
 Adds the `rep` role and four tables: `reps` (commission_rate), `deals`,

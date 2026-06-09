@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireRep } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { notifyAdmins } from "@/lib/internal-notifications";
 import type { BillingType } from "@/lib/database.types";
 
 export interface DealActionResult {
@@ -68,6 +69,16 @@ export async function createDealAction(
       status: "pending",
     });
   if (requestError) return { error: requestError.message };
+
+  // Notify admins that a new deal / invoice request needs review.
+  await notifyAdmins({
+    type: "deal_submitted",
+    title: `New deal submitted — ${businessName}`,
+    body: `${profile.full_name ?? "A rep"} submitted a deal${
+      price ? ` worth R${price.toLocaleString("en-ZA")}` : ""
+    }.`,
+    link: "/admin/invoices",
+  });
 
   revalidatePath("/rep");
   revalidatePath("/admin/invoices");

@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmailService, type EmailKind } from "@/lib/email";
+import { notifyAdmins } from "@/lib/internal-notifications";
 
 export interface RepActionResult {
   ok?: boolean;
@@ -87,6 +88,12 @@ export async function createRepAction(
     };
   }
 
+  await notifyAdmins({
+    type: "rep_created",
+    title: `New rep added — ${fullName}`,
+    link: `/admin/reps/${created.user.id}`,
+  });
+
   revalidatePath("/admin/reps");
   return { ok: true, repId: created.user.id, password: generated ? password : undefined };
 }
@@ -103,6 +110,20 @@ export async function setRepActiveAction(
     .update({ active })
     .eq("id", repId);
   if (error) return { error: error.message };
+
+  if (!active) {
+    const { data: rep } = await supabase
+      .from("reps")
+      .select("display_name")
+      .eq("id", repId)
+      .maybeSingle();
+    await notifyAdmins({
+      type: "rep_deactivated",
+      title: `Rep deactivated — ${rep?.display_name ?? "rep"}`,
+      link: `/admin/reps/${repId}`,
+    });
+  }
+
   revalidatePath("/admin/reps");
   revalidatePath(`/admin/reps/${repId}`);
   return { ok: true };

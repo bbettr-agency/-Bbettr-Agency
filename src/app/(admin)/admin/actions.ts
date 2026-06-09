@@ -7,6 +7,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
 import { notify } from "@/lib/notifications";
+import { notifyInternal } from "@/lib/internal-notifications";
+import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
   ClientStatus,
@@ -672,12 +674,28 @@ export async function approveInvoiceRequestAction(
     .eq("id", req.rep_id)
     .maybeSingle();
   const rate = Number(rep?.commission_rate ?? 0);
+  const commissionAmount = Number(req.amount) * (rate / 100);
   await supabase.from("commissions").insert({
     rep_id: req.rep_id,
     deal_id: req.deal_id,
-    amount: Number(req.amount) * (rate / 100),
+    amount: commissionAmount,
     rate,
     status: "pending",
+  });
+
+  // Notify the rep: invoice approved + commission recorded.
+  await notifyInternal({
+    recipientId: req.rep_id,
+    type: "invoice_approved",
+    title: "Invoice approved",
+    body: "Your deal was approved and the invoice is being processed.",
+    link: "/rep/deals",
+  });
+  await notifyInternal({
+    recipientId: req.rep_id,
+    type: "commission_recorded",
+    title: `Commission recorded — ${formatCurrency(commissionAmount)}`,
+    link: "/rep/earnings",
   });
 
   revalidatePath("/admin/invoices");
@@ -691,11 +709,28 @@ export async function rejectInvoiceRequestAction(
 ): Promise<ActionResult> {
   const profile = await requireAdmin();
   const supabase = await createClient();
+  const { data: req } = await supabase
+    .from("invoice_requests")
+    .select("rep_id, status")
+    .eq("id", requestId)
+    .single();
+
   const { error } = await supabase
     .from("invoice_requests")
     .update({ status: "rejected", approved_by: profile.id })
     .eq("id", requestId);
   if (error) return { error: error.message };
+
+  if (req?.rep_id) {
+    await notifyInternal({
+      recipientId: req.rep_id,
+      type: "invoice_rejected",
+      title: "Invoice request rejected",
+      body: "Please review the deal details or contact the team.",
+      link: "/rep/deals",
+    });
+  }
+
   revalidatePath("/admin/invoices");
   revalidatePath("/rep");
   return { ok: true };

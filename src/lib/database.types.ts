@@ -23,6 +23,18 @@ export type InvoiceRequestStatus =
   | "failed";
 export type CommissionStatus = "pending" | "paid";
 
+export type InternalNotificationType =
+  | "deal_submitted"
+  | "invoice_request"
+  | "rep_created"
+  | "rep_deactivated"
+  | "maintenance_toggled"
+  | "invoice_approved"
+  | "invoice_rejected"
+  | "commission_recorded"
+  | "deal_status"
+  | "admin_comment";
+
 export type ClientStatus =
   | "lead"
   | "onboarding"
@@ -467,6 +479,28 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["commissions"]["Row"]>;
         Relationships: [];
       };
+      internal_notifications: {
+        Row: {
+          id: string;
+          recipient_id: string;
+          type: InternalNotificationType;
+          title: string;
+          body: string | null;
+          link: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          recipient_id: string;
+          type: InternalNotificationType;
+          title: string;
+          body?: string | null;
+          link?: string | null;
+          read_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["internal_notifications"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -498,3 +532,4 @@ export type Rep = Database["public"]["Tables"]["reps"]["Row"];
 export type Deal = Database["public"]["Tables"]["deals"]["Row"];
 export type InvoiceRequest = Database["public"]["Tables"]["invoice_requests"]["Row"];
 export type Commission = Database["public"]["Tables"]["commissions"]["Row"];
+export type InternalNotification = Database["public"]["Tables"]["internal_notifications"]["Row"];

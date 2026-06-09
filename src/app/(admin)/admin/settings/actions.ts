@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { notifyAdmins } from "@/lib/internal-notifications";
 
 export interface SettingsActionResult {
   ok?: boolean;
@@ -26,6 +27,15 @@ export async function setMaintenanceModeAction(
     .eq("id", true);
 
   if (error) return { error: error.message };
+
+  await notifyAdmins({
+    type: "maintenance_toggled",
+    title: `Maintenance mode ${enabled ? "enabled" : "disabled"}`,
+    body: enabled
+      ? "Clients now see the maintenance notice."
+      : "Clients have normal portal access again.",
+    link: "/admin/settings",
+  });
 
   // Refresh the client portal (its layout reads the flag) and the settings page.
   revalidatePath("/dashboard", "layout");
