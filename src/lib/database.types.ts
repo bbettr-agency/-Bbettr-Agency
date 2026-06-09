@@ -327,6 +327,22 @@ export interface Database {
           }
         ];
       };
+      portal_settings: {
+        Row: {
+          id: boolean;
+          maintenance_mode: boolean;
+          maintenance_message: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: boolean;
+          maintenance_mode?: boolean;
+          maintenance_message?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["portal_settings"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -353,3 +369,4 @@ export type Update = Database["public"]["Tables"]["updates"]["Row"];
 export type Report = Database["public"]["Tables"]["reports"]["Row"];
 export type FileRecord = Database["public"]["Tables"]["files"]["Row"];
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"];
+export type PortalSettings = Database["public"]["Tables"]["portal_settings"]["Row"];

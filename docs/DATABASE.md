@@ -1,7 +1,13 @@
 # Database & Supabase Notes
 
-## Schema (8 tables)
-Defined in `supabase/migrations/0001_initial_schema.sql`.
+## Migrations (run in order)
+`0001_initial_schema` · `0002_rls_policies` · `0003_storage` ·
+`0004_notifications` (section-view dots) · `0005_client_notifications`
+(notifications event log) · `0006_portal_settings` (global settings /
+maintenance mode).
+
+## Schema (core tables)
+Core schema in `supabase/migrations/0001_initial_schema.sql`.
 
 | Table | Purpose | Key columns |
 |---|---|---|
@@ -13,8 +19,17 @@ Defined in `supabase/migrations/0001_initial_schema.sql`.
 | `updates` | Project update feed | `title`, `body`, `published_at` |
 | `reports` | Monthly performance reports | metrics + narrative, `pdf_path` |
 | `files` | Metadata for Storage objects | `path`, `category` |
+| `client_section_views` | Last-viewed time per section (dots) | `section`, `last_viewed_at` (0004) |
+| `notifications` | Event log → emails + in-portal feed | `type`, `action_required`, `read_at` (0005) |
+| `portal_settings` | Single-row global config (admin toggles) | `maintenance_mode`, `maintenance_message` (0006) |
 
 All tenant child tables are `ON DELETE CASCADE` from `clients(id)`.
+
+### Maintenance mode (`portal_settings`, 0006)
+Single-row table (`id = true` singleton). Admins toggle `maintenance_mode` from
+**Admin → Settings**; when ON, the client layout renders a branded maintenance
+screen instead of the portal. Admin routes and auth/login are unaffected. RLS:
+anyone may read the flag; only admins may write.
 
 ## Row-Level Security (the isolation boundary)
 Defined in `0002_rls_policies.sql`. Rule of thumb:

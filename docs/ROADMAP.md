@@ -3,6 +3,14 @@
 Captured at the end of the V1 launch session. Nothing here is a launch blocker;
 ordered by impact.
 
+## ✅ Shipped
+- **Email notifications** — Event → DB notification → branded Resend email
+  (update / report / stage advanced / assets-needed / action-required) +
+  client action-required banner. Resend = production transactional provider.
+- **Client Portal Maintenance Mode** — admin toggle (Admin → Settings) backed by
+  the `portal_settings` table (migration 0006); clients see a branded
+  maintenance screen, admin access unaffected.
+
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or
    client tab refreshes without navigation. Closes the one gap revalidation

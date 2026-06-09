@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
-import { Palette, ShieldCheck, Database, Building2 } from "lucide-react";
+import { Palette, ShieldCheck, Database, Building2, Wrench } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
+import { getPortalSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { MaintenanceToggle } from "@/components/admin/maintenance-toggle";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const profile = await requireAdmin();
+  const settings = await getPortalSettings();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -16,6 +19,16 @@ export default async function SettingsPage() {
         title="Settings"
         description="Workspace configuration and platform details."
       />
+
+      <Card>
+        <CardHeader className="flex-row items-center gap-2">
+          <Wrench className="h-4.5 w-4.5 text-brand-500" />
+          <CardTitle>Maintenance</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MaintenanceToggle initialOn={settings.maintenanceMode} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

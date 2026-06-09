@@ -7,13 +7,25 @@ import {
   SECTION_HREF,
 } from "@/lib/queries";
 import { AppShell, type NavBadges } from "@/components/layout/app-shell";
+import { getPortalSettings } from "@/lib/settings";
+import { MaintenanceScreen } from "@/components/client/maintenance-screen";
 
 export default async function ClientLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // requireClient redirects admins to /admin, so this layout (and the
+  // maintenance gate below) only ever applies to client users.
   const profile = await requireClient();
+
+  // Maintenance mode gate — clients see the notice; admins are unaffected
+  // (they never reach this layout). Auth/login routes are a separate group.
+  const settings = await getPortalSettings();
+  if (settings.maintenanceMode) {
+    return <MaintenanceScreen message={settings.maintenanceMessage} />;
+  }
+
   const supabase = await createClient();
 
   const [{ data: client }, { data: services }, notifications] =
