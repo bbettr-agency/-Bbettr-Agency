@@ -28,14 +28,25 @@ ordered by impact.
   pinned), per-item mark-as-read on click + "Mark all as read". Reuses the
   existing `notifications` table / `read_at` (no migration). Client-only.
 
+## Post-V1 increments (shipped as patches)
+- **Deal Client Location (patch `feat-deal-client-location.patch`):** stores
+  where the client is based (`south_africa` / `international`) on the deal, so
+  payments can later be routed. Migration `0010_deal_client_location` (enum +
+  column). Rep picks it on New Deal (required); shown in admin + rep deal views
+  and the new-request email. **Storage/display only** — future routing:
+  `south_africa` → QuickBooks invoice / EFT; `international` → QuickBooks invoice
+  + PayFast payment link. No QuickBooks/PayFast/approval changes.
+
 ## Next major feature
 - **Sales Rep Portal (Phase 2 — ⏸️ built but UNDEPLOYED, do not proceed without
   approval):** QuickBooks Online integration — admin OAuth connect,
   find-or-create customer, create invoice on approval (ZAR, once-off first).
   Lives on a separate branch (`claude/modest-darwin-zBsfw`); its migration was
-  drafted as `0009` and **must be renumbered to `0010`** now that `0009` is
-  rep-portal hardening. **Rep Portal V1 is the baseline to review it against.**
-  Recurring / monthly invoices later.
+  drafted as `0009` and **must be renumbered to `0011`** now that `0009` is
+  rep-portal hardening and `0010` is deal client location. **Rep Portal V1 is the
+  baseline to review it against.** Recurring / monthly invoices later.
+- **PayFast (international payments — not started):** online payment link for
+  `international` deals, paired with the QuickBooks invoice. Depends on Phase 2.
 
 ## Pre-production cleanup (before launch)
 - **Restore the Delete Rep history guard** (or ship the **Archive Rep**

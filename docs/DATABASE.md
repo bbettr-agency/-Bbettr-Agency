@@ -6,17 +6,32 @@
 (notifications event log) · `0006_portal_settings` (global settings /
 maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
 commissions) · `0008_internal_notifications` (admin/rep in-app notifications) ·
-`0009_rep_portal_hardening` (drops the rep deal `UPDATE` policy).
+`0009_rep_portal_hardening` (drops the rep deal `UPDATE` policy) ·
+`0010_deal_client_location` (deal client location enum + column).
 
 > **🏁 Rep Portal V1 baseline.** `0009_rep_portal_hardening` is the only schema
 > change in the **Sales Rep Portal V1 milestone** (the rest of V1 is app-layer).
 > Production currently runs `0001`–`0008`; applying the V1 stabilisation patch
-> adds `0009`. **No other rep migration exists.**
+> adds `0009`, and the client-location patch adds `0010`.
 
-> **`0009` is rep-portal hardening.** The QuickBooks integration work was
-> originally drafted as `0009` on a separate, **undeployed** branch — it must be
-> **renumbered to `0010`** before it is ever taken forward, so both can apply in
-> order.
+> **`0009` = rep hardening · `0010` = deal client location.** The QuickBooks
+> integration work (separate, **undeployed** branch) was previously slated for
+> `0009`/`0010`; now that both are taken it **must be renumbered to `0011`**
+> before it is ever taken forward, so all migrations apply in order.
+
+### Deal client location (`0010`)
+Adds enum `client_location` (`'south_africa'`, `'international'`) and
+`deals.client_location client_location not null default 'south_africa'`
+(idempotent; the default backfills existing rows). Stores where the client is
+based so payments can later be routed — **storage/display only, no payment
+logic**:
+- `south_africa` → QuickBooks invoice / **EFT** (avoid PayFast fees).
+- `international` → QuickBooks invoice + **PayFast** payment link (future).
+
+The rep chooses it on the New Deal form (required, defaults to South Africa);
+it shows in Admin → Invoice Requests, Admin → Reps → Rep detail, Rep → My Deals,
+and the new-request email to `info@bbettragency.com`. Lives only on `deals`
+(single source of truth; the admin queue reads it via the deal join).
 
 ### Delete Rep cascade (app action, no migration) — ⚠️ TESTING-ONLY bypass
 `deleteRepAction` (admin) deletes a rep's auth user, which cascades via existing

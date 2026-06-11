@@ -21,7 +21,8 @@ sequence of patches to apply to `main`. Verified on every patch: `tsc` ✅ ·
   to `main` in order + deployed by the operator). They are **not** auto-merged
   to remote `main`; the operator applies/deploys them.
 - **Migrations in production:** `0001`–`0008` on base `main`; **`0009_rep_portal_hardening`**
-  ships with patch ①. No other rep migrations.
+  ships with patch ①; **`0010_deal_client_location`** ships with the
+  client-location patch (post-V1 increment below).
 
 ### Rep Portal V1 — deployed/complete features
 - **Roles & access:** `rep` role, role-aware routing, login → `/rep`. Reps can't
@@ -57,6 +58,19 @@ sequence of patches to apply to `main`. Verified on every patch: `tsc` ✅ ·
 > `origin/main` — it requires ①–③ first (verified). `RESEND_API_KEY` must be set
 > for emails to send (they degrade gracefully if absent).
 
+### Post-V1 increment — Deal **Client Location** (patch ⑤)
+Patch `feat-deal-client-location.patch` (applies after ①–④). Adds where the
+client is based so payments can later be routed — **storage + display only, no
+QuickBooks / PayFast / payment-link / approval-logic changes.**
+- **Values:** `south_africa` · `international` (DB enum, controlled).
+- **Migration `0010_deal_client_location.sql`** — `client_location` enum +
+  `deals.client_location not null default 'south_africa'` (idempotent, backfills).
+- Rep chooses it on **New Deal** (required, defaults to South Africa); validated
+  server-side. Shown in Admin → Invoice Requests, Admin → Reps → Rep detail,
+  Rep → My Deals, and the new-request email to `info@bbettragency.com`.
+- **Future payment routing (not built):** `south_africa` → QuickBooks invoice /
+  **EFT**; `international` → QuickBooks invoice + **PayFast** payment link.
+
 ### ⚠️ Known TEMPORARY testing-only item — Delete Rep bypass
 Patch ③ **removes the historical-data guard** on `deleteRepAction` so test reps
 can be wiped repeatedly. With it gone, deleting a rep **permanently cascades
@@ -69,14 +83,16 @@ invoice requests / commissions) or swap in the planned **Archive Rep** workflow.
 
 ### QuickBooks — NOT deployed
 QuickBooks **Phase 2 is built but UNDEPLOYED** on a separate branch
-(`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009` and **must be
-renumbered to `0010`** now that `0009` is rep-portal hardening. **Do not start /
+(`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009`; now that
+`0009` (rep hardening) and `0010` (deal client location) are both taken, it
+**must be renumbered to `0011`** before it is ever taken forward. **Do not start /
 deploy QuickBooks without explicit approval.** This milestone is the baseline to
 review it against.
 
 ### Migration numbering (important)
-Production runs `0001`–`0008`; this milestone adds **`0009_rep_portal_hardening`**.
-The QuickBooks migration (currently `0009` on its branch) must become **`0010`**.
+Production runs `0001`–`0008`; this milestone adds **`0009_rep_portal_hardening`**,
+and the post-V1 client-location patch adds **`0010_deal_client_location`**.
+The QuickBooks migration (currently `0009` on its branch) must become **`0011`**.
 
 > ⚠️ **History divergence note (read this first).** On 2026-06-04 we found that
 > the deployed `main` had drifted from the intended state: several patches were
