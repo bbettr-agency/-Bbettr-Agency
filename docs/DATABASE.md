@@ -8,25 +8,36 @@ maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
 commissions) · `0008_internal_notifications` (admin/rep in-app notifications) ·
 `0009_rep_portal_hardening` (drops the rep deal `UPDATE` policy) ·
 `0010_deal_client_location` (deal client location enum + column) ·
-`0011_quickbooks` (QuickBooks OAuth connection + invoice fields).
+`0011_quickbooks` (QuickBooks OAuth connection + invoice fields) ·
+`0012_quickbooks_audit` (QuickBooks audit/diagnostic fields).
 
 > **🏁 Rep Portal V1 baseline.** `0009_rep_portal_hardening` is the only schema
 > change in the **Sales Rep Portal V1 milestone** (the rest of V1 is app-layer).
-> Production currently runs `0001`–`0008`; applying the V1 stabilisation patch
-> adds `0009`, and the client-location patch adds `0010`.
+> Live `main` (production) currently runs `0001`–`0008`; applying the V1
+> stabilisation patch adds `0009`, and the client-location patch adds `0010`.
 
-> **`0009` = rep hardening · `0010` = deal client location · `0011` =
-> QuickBooks.** The QuickBooks integration has been **re-integrated onto the V1
-> baseline as `0011`** (it was previously drafted as `0009` on the old branch).
-> QuickBooks is **undeployed pending sandbox testing** — apply `0011` only when
-> deploying QuickBooks.
+> **`0009` = rep hardening · `0010` = deal client location · `0011` + `0012` =
+> QuickBooks.** QuickBooks is **re-integrated onto the V1 baseline** as `0011`
+> (connection + invoice fields) and `0012` (audit/diagnostics). Both are applied
+> in the **sandbox/test** environment, where the integration is **verified
+> end-to-end (2026-06-11)**. Apply `0011`/`0012` to production only when
+> connecting production QuickBooks. **PayFast, when built, becomes `0013`.**
 
-### QuickBooks (`0011`) — ⏸️ not yet deployed
-Single-row `quickbooks_connection` (encrypted OAuth tokens, admin-only RLS,
-read/written via the service role) + `invoice_requests.quickbooks_invoice_number`
-/ `.invoiced_at` + `deals.quickbooks_customer_id`. Additive and isolated.
-Approving an invoice request raises a QBO invoice (decoupled/best-effort/
-retryable; **ZAR for all clients** — no multicurrency). Full detail in
+### QuickBooks (`0011` + `0012`) — ✅ sandbox-verified, ⏸️ production not connected
+- **`0011_quickbooks`** — single-row `quickbooks_connection` (encrypted OAuth
+  tokens, admin-only RLS, read/written via the service role) +
+  `invoice_requests.quickbooks_invoice_number` / `.invoiced_at` +
+  `deals.quickbooks_customer_id`.
+- **`0012_quickbooks_audit`** — adds `invoice_requests.quickbooks_realm_id`,
+  `.quickbooks_email_status`, `.quickbooks_emailed_at`,
+  `.quickbooks_last_attempt_at`, `.quickbooks_log` (jsonb) for audit/debug.
+
+Additive and isolated. Approving an invoice request finds-or-reuses the customer,
+raises a QBO invoice and emails it (decoupled / best-effort / idempotent /
+retryable; **ZAR for all clients** — no multicurrency). A request is only marked
+`invoiced` after the invoice is re-read from QBO with a valid Id + `DocNumber`.
+Sandbox-verified 2026-06-11 (customer create/reuse, invoice create + numbering,
+sandbox visibility, email send, audit panel, realm verification). Full detail in
 `docs/QUICKBOOKS.md`.
 
 ### Deal client location (`0010`)

@@ -7,6 +7,40 @@ docs live under [`docs/`](./).
 
 ---
 
+## 📌 Session outcome — 2026-06-11 (documentation-only session)
+
+End-of-day status. **No code changes, patches, migrations or deployments today** —
+this was a documentation pass recording the verified state.
+
+**Done & verified:**
+- ✅ Rep Portal **V1 complete and stable**
+- ✅ In-app **notifications** working
+- ✅ **Welcome emails** working
+- ✅ **Invoice request workflow** working
+- ✅ **QuickBooks sandbox integration complete**
+- ✅ Customer **creation** verified · ✅ customer **reuse** verified
+- ✅ Invoice **creation** verified · ✅ invoice **numbering** verified (real QBO `DocNumber`)
+- ✅ Invoice **visible inside the QuickBooks sandbox**
+- ✅ Invoice **email sending** verified (octet-stream send fix)
+- ✅ **Audit / debug panel** verified
+- ✅ **Realm verification** completed
+- ✅ Migrations **current through `0012`**
+
+**Outstanding:**
+- ⏸️ Production QuickBooks **not connected** (still `QBO_ENVIRONMENT=sandbox`)
+- ⏸️ **PayFast not started**
+
+**Tomorrow's starting point:**
+1. Review documentation (this file, `ROADMAP.md`, `DATABASE.md`, `QUICKBOOKS.md`).
+2. Decide whether to move **QuickBooks to production**, **or**
+3. Begin **PayFast planning**.
+
+All QuickBooks work lives on branch `claude/quickbooks-reintegration`; delivered
+to the operator as code-only patches (see `QUICKBOOKS.md`). Nothing is auto-merged
+or deployed.
+
+---
+
 ## 🏁 MILESTONE — Sales Rep Portal **V1 complete** (2026-06-11)
 
 **This is the stable baseline to build on before QuickBooks Phase 2 begins.**
@@ -81,28 +115,54 @@ launch."`
 **Before production:** restore the guard (block delete when the rep has deals /
 invoice requests / commissions) or swap in the planned **Archive Rep** workflow.
 
-### QuickBooks — re-integrated, ⏸️ UNDEPLOYED (sandbox testing pending)
-QuickBooks Phase 2 has been **re-integrated onto the V1 + client-location
-baseline** (branch `claude/quickbooks-reintegration`, patch
-`feat-quickbooks-reintegration.patch` + migration **`0011_quickbooks.sql`**) —
-**not** a merge of the old `claude/modest-darwin-zBsfw` branch. The self-contained
-parts (`src/lib/quickbooks/*`, `/api/quickbooks/{connect,callback}`, Admin →
+### QuickBooks — sandbox integration ✅ COMPLETE & VERIFIED (⏸️ production not connected)
+QuickBooks Phase 2 is **re-integrated onto the V1 + client-location baseline**
+(branch `claude/quickbooks-reintegration`) and, as of **2026-06-11**, the full
+sandbox flow has been **end-to-end tested and verified** — **not** a merge of the
+old `claude/modest-darwin-zBsfw` branch. The self-contained parts
+(`src/lib/quickbooks/*`, `/api/quickbooks/{connect,callback}`, Admin →
 Integrations, `QBO_*` env) port over; the approve flow was re-stitched on top of
 the current action, preserving the reject guard, commission recording, rep
 notifications + blue-dot revalidation, rep emails, and `client_location`.
-- **Additive & isolated**, decoupled/best-effort/idempotent/retryable — a QBO
-  failure never reverses approval or commission.
-- **Currency: ZAR for all** (no multicurrency). SA pays EFT; international will
-  later get a PayFast link (not built).
-- **Deploy plan:** connect an Intuit **sandbox** app, set `QBO_*`, run `0011`,
-  test approve→invoice + retry + disconnect, then switch to production.
-- **PayFast:** not started — comes after QuickBooks is stable.
+
+**Verified in the QuickBooks sandbox (2026-06-11):**
+- ✅ Customer **creation** and ✅ **reuse** (with existence re-check; stale ids recreated).
+- ✅ Invoice **creation**; ✅ invoice **numbering** stored is the real QBO `DocNumber`
+  (e.g. invoice **#1039**), re-read from QBO to confirm it persisted.
+- ✅ Invoice **visible inside the QuickBooks sandbox** (customer “Bbettr Agency \`test”).
+- ✅ Invoice **email sending** (fixed: send must use `Content-Type:
+  application/octet-stream` + empty body — JSON caused QBO `SystemFailureError` /
+  `NullPointerException`).
+- ✅ **Audit / debug panel** on Admin → Invoice Requests (customer/invoice/realm
+  ids, invoiced/emailed/last-attempt times, email status, last error).
+- ✅ **Realm verification** — Integrations page shows environment + realm id +
+  company name; realm id recorded per invoice request for reconciliation.
+
+**Design invariants (unchanged):** additive & isolated; decoupled / best-effort /
+idempotent / retryable — a QBO failure never reverses approval or commission.
+**Currency: ZAR for all** (no multicurrency). Status integrity: a request is only
+marked `invoiced` when a customer exists, the invoice is created **and re-read**,
+and QBO returns a valid **Id + DocNumber**; otherwise it stays `approved` with the
+error recorded for retry.
+
+**Migrations for QuickBooks:** `0011_quickbooks` (connection + invoice fields) and
+`0012_quickbooks_audit` (realm id, email status/emailed-at, last-attempt, log
+jsonb). Both applied in the sandbox/test environment.
+
+**Outstanding:**
+- ⏸️ **Production QuickBooks not connected** — still on `QBO_ENVIRONMENT=sandbox`.
+  Going live = flip to `production`, reconnect (re-auth against the live company),
+  verify realm/company on Integrations, then approve a real deal.
+- ⏸️ **PayFast not started** — comes after QuickBooks is stable in production.
 
 ### Migration numbering (important)
-Production runs `0001`–`0008`; the V1 milestone adds **`0009_rep_portal_hardening`**,
-the client-location patch adds **`0010_deal_client_location`**, and the
-QuickBooks re-integration adds **`0011_quickbooks`** (apply only when deploying
-QuickBooks).
+Production (live `main`) runs `0001`–`0008`; the V1 milestone adds
+**`0009_rep_portal_hardening`**, the client-location patch adds
+**`0010_deal_client_location`**, the QuickBooks re-integration adds
+**`0011_quickbooks`**, and the QuickBooks audit/hardening adds
+**`0012_quickbooks_audit`**. The QuickBooks migrations (`0011`, `0012`) are applied
+in the **sandbox/test** environment; apply them to production only when connecting
+production QuickBooks. **PayFast, when built, becomes `0013`.**
 
 > ⚠️ **History divergence note (read this first).** On 2026-06-04 we found that
 > the deployed `main` had drifted from the intended state: several patches were

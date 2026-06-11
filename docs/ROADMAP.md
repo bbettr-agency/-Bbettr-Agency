@@ -38,17 +38,26 @@ ordered by impact.
   + PayFast payment link. No QuickBooks/PayFast/approval changes.
 
 ## Next major feature
-- **QuickBooks Online (Phase 2 — ✅ re-integrated, ⏸️ UNDEPLOYED, sandbox-test
-  pending):** invoicing on invoice-request approval — admin OAuth connect,
-  find-or-create customer, create invoice (ZAR, once-off). **Re-integrated onto
-  the V1 + client-location baseline** as branch `claude/quickbooks-reintegration`
-  + migration `0011_quickbooks` (not a merge of the old branch). Decoupled /
-  best-effort / idempotent / retryable; preserves all V1 behaviour. Next: Intuit
-  sandbox app → set `QBO_*` → run `0011` → test → production. Recurring / monthly
-  invoices and paid-status sync later.
-- **PayFast (international payments — not started, after QuickBooks is stable):**
-  dedicated `payfast_payments` table + `0012`, signed payment link for
-  `international` deals + ITN webhook, paired with the QuickBooks invoice.
+- **QuickBooks Online (Phase 2 — ✅ SANDBOX COMPLETE & VERIFIED, ⏸️ production
+  not connected):** invoicing on invoice-request approval — admin OAuth connect,
+  find-or-create (and reuse) customer, create invoice (ZAR, once-off), and email
+  it. **Re-integrated onto the V1 + client-location baseline** as branch
+  `claude/quickbooks-reintegration` + migrations `0011_quickbooks` and
+  `0012_quickbooks_audit` (not a merge of the old branch). Decoupled /
+  best-effort / idempotent / retryable; preserves all V1 behaviour.
+  - **Verified in sandbox (2026-06-11):** customer create + reuse, invoice create,
+    invoice numbering (real QBO `DocNumber`, e.g. #1039), invoice visible in the
+    sandbox, invoice email send (octet-stream send fix for the QBO
+    `SystemFailureError`/`NullPointerException`), admin audit/debug panel, realm
+    verification. Status integrity: only marked `invoiced` after the invoice is
+    re-read and a valid Id + DocNumber are returned.
+  - **To go live:** flip `QBO_ENVIRONMENT=production`, reconnect against the live
+    company, verify realm/company on Integrations, then invoice a real deal.
+  - **Later:** recurring / monthly invoices, paid-status sync.
+- **PayFast (international payments — not started, after QuickBooks is in
+  production):** dedicated `payfast_payments` table + migration **`0013`** (now
+  that `0012` is the QuickBooks audit), signed payment link for `international`
+  deals + ITN webhook, paired with the QuickBooks invoice.
 
 ## Pre-production cleanup (before launch)
 - **Restore the Delete Rep history guard** (or ship the **Archive Rep**
