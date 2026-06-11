@@ -441,6 +441,11 @@ export interface Database {
           approved_by: string | null;
           error: string | null;
           invoiced_at: string | null;
+          quickbooks_realm_id: string | null;
+          quickbooks_email_status: string | null;
+          quickbooks_emailed_at: string | null;
+          quickbooks_last_attempt_at: string | null;
+          quickbooks_log: Record<string, unknown> | null;
           created_at: string;
           updated_at: string;
         };
@@ -456,6 +461,11 @@ export interface Database {
           approved_by?: string | null;
           error?: string | null;
           invoiced_at?: string | null;
+          quickbooks_realm_id?: string | null;
+          quickbooks_email_status?: string | null;
+          quickbooks_emailed_at?: string | null;
+          quickbooks_last_attempt_at?: string | null;
+          quickbooks_log?: Record<string, unknown> | null;
         };
         Update: Partial<Database["public"]["Tables"]["invoice_requests"]["Row"]>;
         Relationships: [

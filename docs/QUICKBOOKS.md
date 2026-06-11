@@ -61,6 +61,32 @@ exists).
 - `deals` — adds `quickbooks_customer_id` (so repeat invoices reuse the
   customer).
 
+### Audit & status integrity (`0012_quickbooks_audit.sql`)
+Adds diagnostic columns to `invoice_requests`: `quickbooks_realm_id`,
+`quickbooks_email_status` (`sent` | `failed` | `no_email`), `quickbooks_emailed_at`,
+`quickbooks_last_attempt_at`, and `quickbooks_log` (jsonb — last-attempt
+customer/invoice/send responses + error payloads). PayFast, when built, becomes
+`0013`.
+
+**Status integrity contract.** A request is marked `invoiced` **only** when: a
+customer exists (reused after an existence check, or freshly created); the
+invoice was created **and re-read** from QuickBooks; and QBO returned a non-empty
+invoice **Id and DocNumber**. Otherwise it stays `approved`, the failure + raw
+QBO payload are recorded, and the admin can retry. The portal's invoice number is
+the **verified `DocNumber`** (the value visible in QuickBooks).
+
+**Email.** After the invoice is verified, the portal explicitly calls QBO's send
+endpoint (`POST /invoice/{id}/send?sendTo=…`) to the deal's client email and
+records whether QuickBooks confirmed it (`EmailStatus = EmailSent`). A failed
+email does **not** un-invoice a real invoice; it's surfaced for follow-up.
+
+> ⚠️ **Sandbox vs production.** With `QBO_ENVIRONMENT=sandbox` everything is
+> created in the QuickBooks **sandbox** company (auto-numbered like `1038`), not
+> your live company (which may use a custom format like `INV-001058`). Admin →
+> Integrations shows the environment, realm id and company name; the realm id is
+> also recorded per invoice request so you can reconcile exactly which company an
+> invoice lives in.
+
 ## Environment variables
 
 | Var | Purpose |

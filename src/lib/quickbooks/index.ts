@@ -9,7 +9,14 @@ import {
   getActiveConnection,
   getConnectionStatus,
 } from "./connection";
-import { createInvoice, findOrCreateCustomer } from "./api";
+import {
+  createInvoice,
+  customerExists,
+  findOrCreateCustomer,
+  getInvoice,
+  sendInvoiceEmail,
+  QboApiError,
+} from "./api";
 
 /**
  * Public QuickBooks surface used by the rest of the app. The OAuth callback
@@ -41,26 +48,49 @@ export function getAuthorizeUrl(state: string): string | null {
   return `${QBO_AUTHORIZE_URL}?${params.toString()}`;
 }
 
+export type QboEmailStatus = "sent" | "failed" | "no_email";
+
 export interface InvoiceCreationResult {
   ok: boolean;
   invoiceNumber?: string | null;
   invoiceId?: string;
+  realmId?: string;
+  customerId?: string;
+  emailStatus?: QboEmailStatus;
   error?: string;
 }
 
+/** Extract a persistable detail string from an arbitrary thrown error. */
+function errorDetail(e: unknown): string {
+  if (e instanceof QboApiError) return e.body || e.message;
+  if (e instanceof Error) return e.message;
+  return "QuickBooks invoicing failed.";
+}
+
 /**
- * Create a QuickBooks invoice for an approved invoice request and record the
- * result on the request + its deal. Idempotent: a request that already has a
- * QBO invoice is treated as success.
+ * Create (and email) a QuickBooks invoice for an approved invoice request, then
+ * record the verified result on the request + its deal.
  *
- * Best-effort by contract — it returns an error result rather than throwing, so
- * the caller (the approval action / retry) can surface it without ever undoing
- * the approval or the recorded commission.
+ * STATUS INTEGRITY — a request is only marked "invoiced" when ALL hold:
+ *   - a customer exists (reused after existence check, or freshly created);
+ *   - the invoice was created AND re-read back from QuickBooks;
+ *   - QuickBooks returned a non-empty invoice Id AND DocNumber (the human
+ *     number visible in QuickBooks).
+ * If any step fails the request stays "approved", the failure + raw QBO payload
+ * are recorded, and the admin can retry. Approval and commission are never
+ * touched. Idempotent: an already-invoiced request is a no-op success.
+ *
+ * The invoice email is sent explicitly (QBO's send endpoint) and its outcome is
+ * recorded separately — a failed email does NOT block "invoiced", because the
+ * invoice genuinely exists, but it is surfaced for follow-up.
+ *
+ * Best-effort by contract — returns an error result rather than throwing.
  */
 export async function createInvoiceForRequest(
   requestId: string
 ): Promise<InvoiceCreationResult> {
   const admin = createAdminClient();
+  const attemptedAt = new Date().toISOString();
 
   const { data: req } = await admin
     .from("invoice_requests")
@@ -71,7 +101,8 @@ export async function createInvoiceForRequest(
     .maybeSingle();
 
   if (!req) return { ok: false, error: "Invoice request not found." };
-  if (req.quickbooks_invoice_id) {
+  // Already fully invoiced (valid id + number) → idempotent success.
+  if (req.quickbooks_invoice_id && req.quickbooks_invoice_number) {
     return {
       ok: true,
       invoiceId: req.quickbooks_invoice_id,
@@ -87,33 +118,121 @@ export async function createInvoiceForRequest(
   } | null;
   if (!deal) return { ok: false, error: "Deal not found for this request." };
 
+  // Accumulating diagnostics persisted on every outcome (success or failure).
+  const log: Record<string, unknown> = { attemptedAt };
+  let realmId: string | undefined;
+
+  const recordFailure = async (error: string, step: string) => {
+    log.failedStep = step;
+    log.error = error;
+    await admin
+      .from("invoice_requests")
+      .update({
+        error,
+        quickbooks_realm_id: realmId ?? null,
+        quickbooks_last_attempt_at: attemptedAt,
+        quickbooks_log: log,
+      })
+      .eq("id", requestId);
+    return { ok: false as const, error, realmId };
+  };
+
   try {
     const conn = await getActiveConnection();
+    realmId = conn.realmId;
+    log.realmId = conn.realmId;
+    log.environment = conn.environment;
 
-    // Reuse the deal's stored QBO customer if we have one, else find-or-create.
-    const customerId =
-      deal.quickbooks_customer_id ||
-      (await findOrCreateCustomer(conn, {
+    // 1) Customer — reuse the deal's stored id (after confirming it still
+    //    exists in this realm) else find-or-create. Re-creates if a stored id
+    //    is stale, e.g. left over from a different/sandbox company.
+    let customerId = deal.quickbooks_customer_id ?? null;
+    if (customerId) {
+      const stillThere = await customerExists(conn, customerId);
+      log.customer = stillThere
+        ? { action: "reused", id: customerId }
+        : { action: "stale_recreate", staleId: customerId };
+      if (!stillThere) customerId = null;
+    }
+    if (!customerId) {
+      const c = await findOrCreateCustomer(conn, {
         displayName: deal.business_name,
         email: deal.email,
-      }));
+      });
+      customerId = c.id;
+      log.customer = { action: c.created ? "created" : "found", id: c.id };
+    }
+    if (!customerId) return recordFailure("No QuickBooks customer id.", "customer");
 
-    const invoice = await createInvoice(conn, {
+    // 2) Create the invoice.
+    const created = await createInvoice(conn, {
       customerId,
       amount: Number(req.amount),
       description: deal.package,
       email: deal.email,
     });
+    log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
 
+    // 3) Re-read it to confirm it persisted and get the authoritative number.
+    const verified = await getInvoice(conn, created.id);
+    log.invoiceVerify = verified
+      ? { id: verified.id, docNumber: verified.docNumber }
+      : { found: false };
+
+    // 4) Integrity gate — require a real id AND number before we trust it.
+    if (!verified || !verified.id) {
+      return recordFailure(
+        `Invoice ${created.id} could not be read back from QuickBooks; not marking as invoiced.`,
+        "verify"
+      );
+    }
+    const docNumber = verified.docNumber;
+    if (!docNumber) {
+      return recordFailure(
+        "QuickBooks did not return an invoice number (DocNumber); not marking as invoiced.",
+        "doc_number"
+      );
+    }
+
+    // 5) Email the invoice (explicit send). Does not gate "invoiced".
+    let emailStatus: QboEmailStatus = "no_email";
+    let emailedAt: string | null = null;
+    let emailError: string | null = null;
+    if (deal.email) {
+      try {
+        const send = await sendInvoiceEmail(conn, verified.id, deal.email);
+        emailStatus = send.sent ? "sent" : "failed";
+        emailedAt = send.sent ? new Date().toISOString() : null;
+        log.email = { to: deal.email, status: send.emailStatus, sent: send.sent };
+        if (!send.sent) {
+          emailError = `QuickBooks did not confirm the invoice email (status: ${
+            send.emailStatus ?? "unknown"
+          }).`;
+        }
+      } catch (e) {
+        emailStatus = "failed";
+        emailError = `Invoice created, but emailing it failed: ${errorDetail(e)}`;
+        log.email = { to: deal.email, error: errorDetail(e) };
+      }
+    } else {
+      log.email = { skipped: "no client email on deal" };
+    }
+
+    // 6) Persist the verified result.
     await admin
       .from("invoice_requests")
       .update({
         status: "invoiced",
-        quickbooks_invoice_id: invoice.id,
-        quickbooks_invoice_number: invoice.docNumber,
+        quickbooks_invoice_id: verified.id,
+        quickbooks_invoice_number: docNumber,
         quickbooks_customer_id: customerId,
+        quickbooks_realm_id: conn.realmId,
         invoiced_at: new Date().toISOString(),
-        error: null,
+        quickbooks_email_status: emailStatus,
+        quickbooks_emailed_at: emailedAt,
+        quickbooks_last_attempt_at: attemptedAt,
+        quickbooks_log: log,
+        error: emailError,
       })
       .eq("id", requestId);
 
@@ -122,14 +241,16 @@ export async function createInvoiceForRequest(
       .update({ status: "invoiced", quickbooks_customer_id: customerId })
       .eq("id", req.deal_id);
 
-    return { ok: true, invoiceId: invoice.id, invoiceNumber: invoice.docNumber };
+    return {
+      ok: true,
+      invoiceId: verified.id,
+      invoiceNumber: docNumber,
+      realmId: conn.realmId,
+      customerId,
+      emailStatus,
+    };
   } catch (e) {
-    const error = e instanceof Error ? e.message : "QuickBooks invoicing failed.";
-    // Record the failure for admin visibility + retry; approval stays intact.
-    await admin
-      .from("invoice_requests")
-      .update({ error })
-      .eq("id", requestId);
-    return { ok: false, error };
+    // Any thrown error → approval stays intact; record for visibility + retry.
+    return recordFailure(errorDetail(e), "exception");
   }
 }
