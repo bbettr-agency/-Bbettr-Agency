@@ -6,7 +6,7 @@ import { requireRep, isRepActive } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { notifyAdmins } from "@/lib/internal-notifications";
 import { sendInvoiceRequestEmail } from "@/lib/email/rep-notifications";
-import type { BillingType } from "@/lib/database.types";
+import type { BillingType, ClientLocation } from "@/lib/database.types";
 
 export interface DealActionResult {
   error?: string;
@@ -47,6 +47,16 @@ export async function createDealAction(
   }
 
   const billing = String(formData.get("billing_type") ?? "once_off") as BillingType;
+
+  // Client location must be one of the two controlled values. It's stored now
+  // and used later to route payments (SA = EFT, International = payment link).
+  const location = String(
+    formData.get("client_location") ?? ""
+  ) as ClientLocation;
+  if (location !== "south_africa" && location !== "international") {
+    return { error: "Please choose a client location." };
+  }
+
   const text = (k: string) => String(formData.get(k) ?? "").trim() || null;
 
   const { data: deal, error } = await supabase
@@ -60,6 +70,7 @@ export async function createDealAction(
       package: text("package"),
       price,
       billing_type: billing,
+      client_location: location,
       notes: text("notes"),
       status: "invoice_requested",
     })
@@ -106,6 +117,7 @@ export async function createDealAction(
     packageName: text("package"),
     amount: price,
     billingType: billing,
+    location,
   });
 
   revalidatePath("/rep");

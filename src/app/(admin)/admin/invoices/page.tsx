@@ -7,7 +7,10 @@ import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { InvoiceRequestStatusBadge } from "@/components/ui/status-badge";
+import {
+  InvoiceRequestStatusBadge,
+  ClientLocationBadge,
+} from "@/components/ui/status-badge";
 import { InvoiceRequestActions } from "@/components/admin/invoice-request-actions";
 
 export const metadata: Metadata = { title: "Invoice Requests" };
@@ -85,17 +88,19 @@ function RequestCard({
     contact_name: string | null;
     email: string | null;
     package: string | null;
+    client_location: import("@/lib/database.types").ClientLocation;
   } | null;
 
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-ink-900">
               {deal?.business_name ?? "Deal"}
             </p>
             <InvoiceRequestStatusBadge status={request.status} />
+            {deal && <ClientLocationBadge location={deal.client_location} />}
           </div>
           <p className="mt-0.5 text-sm text-ink-500">
             {deal?.package ?? "—"} ·{" "}
