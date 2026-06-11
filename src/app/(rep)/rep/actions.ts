@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireRep } from "@/lib/auth";
+import { requireRep, isRepActive } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { notifyAdmins } from "@/lib/internal-notifications";
 import type { BillingType } from "@/lib/database.types";
@@ -23,6 +23,13 @@ export async function createDealAction(
   formData: FormData
 ): Promise<DealActionResult> {
   const profile = await requireRep();
+
+  // A deactivated rep must not be able to submit deals (this action runs outside
+  // the layout that gates the UI).
+  if (!(await isRepActive(profile.id))) {
+    return { error: "Your rep account is deactivated. Contact your administrator." };
+  }
+
   const supabase = await createClient();
 
   const businessName = String(formData.get("business_name") ?? "").trim();
@@ -31,8 +38,11 @@ export async function createDealAction(
   const priceRaw = formData.get("price");
   const price =
     priceRaw !== null && String(priceRaw) !== "" ? Number(priceRaw) : null;
-  if (price !== null && !Number.isFinite(price)) {
-    return { error: "Price must be a valid number." };
+  // Price drives the invoice request and the rep's commission, so it must be a
+  // positive amount — not blank, zero or negative.
+  if (price === null) return { error: "Price is required." };
+  if (!Number.isFinite(price) || price <= 0) {
+    return { error: "Price must be greater than zero." };
   }
 
   const billing = String(formData.get("billing_type") ?? "once_off") as BillingType;
@@ -64,11 +74,16 @@ export async function createDealAction(
     .insert({
       deal_id: deal.id,
       rep_id: profile.id,
-      amount: price ?? 0,
+      amount: price,
       billing_type: billing,
       status: "pending",
     });
-  if (requestError) return { error: requestError.message };
+  if (requestError) {
+    // The invoice request is the whole point of submitting a deal — if it fails,
+    // remove the just-created deal so we don't leave an orphan with no request.
+    await supabase.from("deals").delete().eq("id", deal.id);
+    return { error: requestError.message };
+  }
 
   // Notify admins that a new deal / invoice request needs review.
   await notifyAdmins({

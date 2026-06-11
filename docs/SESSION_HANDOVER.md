@@ -1,9 +1,66 @@
 # Session Handover — Bbettr Agency Client Portal
 
-_Last updated: 2026-06-04 · Production: https://portal.bbettragency.com_
+_Last updated: 2026-06-11 · Production: https://portal.bbettragency.com_
 
 This is the single source of truth for picking the project back up. All project
 docs live under [`docs/`](./).
+
+---
+
+## ⭐ Latest session (2026-06-11) — Sales Rep Portal stabilisation
+
+**Status: complete. Delivered as a patch to apply to `main`, not a PR.**
+Patch: `fix-rep-portal-stabilisation.patch` · branch `claude/rep-portal-stabilise`
+(branched from `origin/main` @ `19f465f`). Verified: `tsc` ✅ · `lint` ✅ ·
+`build` ✅. **Not merged, not deployed.**
+
+Full audit of the rep portal (auth, dashboard, My Deals, New Deal, My Earnings,
+Admin Reps, Invoice Requests, RLS, UX). All approved P1 + P2 + P3 fixes applied:
+
+- **P1 (critical)**
+  - **Rep deactivation is now enforced.** New `isRepActive()` gates the `(rep)`
+    layout (inactive reps see a branded "Account Deactivated" screen + sign-out)
+    and `createDealAction` (returns an error). Previously `reps.active` was
+    display-only — a deactivated rep could still log in and submit deals.
+  - **`rejectInvoiceRequestAction` guarded** with a not-found return +
+    `status === 'pending'` check (matching approve), so an already-approved
+    request with a recorded commission can't be flipped to rejected.
+- **P2 (integrity/accuracy)**
+  - Deal **price is now required and must be > 0** (client `required`/`min` +
+    server validation); invoice amounts are never R0/negative.
+  - **Orphan deals removed**: if the `invoice_request` insert fails, the
+    just-created deal is deleted.
+  - Relabelled the duplicated **"Pending Commission" → "Unpaid Commission"** card
+    and the dashboard month tile → **"Awaiting Approval"**.
+- **P3 (hardening/polish)**
+  - Commission-insert failure on approve is now surfaced, not swallowed.
+  - **Migration `0009_rep_portal_hardening.sql`** drops the unused
+    `"Reps update own deals"` RLS policy (closes a rep self-tamper vector).
+  - Added a **confirm step to Reject**; tidied the Invoice Requests copy.
+
+**Files:** `src/lib/auth.ts`, `src/app/(rep)/layout.tsx`,
+`src/app/(rep)/rep/actions.ts`, `src/app/(rep)/rep/page.tsx`,
+`src/app/(rep)/rep/earnings/page.tsx`, `src/components/rep/new-deal-form.tsx`,
+`src/components/rep/rep-disabled-screen.tsx` (new),
+`src/app/(admin)/admin/actions.ts`,
+`src/app/(admin)/admin/invoices/page.tsx`,
+`src/components/admin/invoice-request-actions.tsx`,
+`supabase/migrations/0009_rep_portal_hardening.sql` (new).
+
+**To apply (when you're ready — not done here):**
+```bash
+git checkout main && git pull
+git am < fix-rep-portal-stabilisation.patch     # or: git apply
+# then run migration 0009_rep_portal_hardening.sql in Supabase (single DROP POLICY)
+```
+
+### ⚠️ Migration numbering — `0009` is now rep hardening
+- Production is at migrations `0001`–`0008`. **This patch adds `0009`** =
+  `0009_rep_portal_hardening.sql`.
+- **QuickBooks Phase 2 remains UNDEPLOYED** on its own branch
+  (`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009` and **must
+  be renumbered to `0010`** before it is ever taken forward, so both can apply in
+  order. **Do not proceed with QuickBooks without explicit approval.**
 
 > ⚠️ **History divergence note (read this first).** On 2026-06-04 we found that
 > the deployed `main` had drifted from the intended state: several patches were

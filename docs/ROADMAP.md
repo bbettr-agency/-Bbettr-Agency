@@ -20,9 +20,20 @@ ordered by impact.
   form, invoice-request approval queue for admins, commissions (record-only),
   **Admin → Reps management** (create rep + login, activate/deactivate, reset
   password, send welcome/reset email, per-rep deals & commission totals).
-- **Sales Rep Portal (Phase 2 — next):** QuickBooks Online integration — admin
-  OAuth connect, find-or-create customer, create invoice on approval (ZAR,
-  once-off first). Recurring/monthly invoices later.
+- **Sales Rep Portal — stabilisation (✅ complete, patch
+  `fix-rep-portal-stabilisation.patch`):** full audit + P1/P2/P3 fixes.
+  - P1: enforce rep deactivation (inactive reps blocked from the portal and from
+    submitting deals); guard `rejectInvoiceRequestAction` (pending-only).
+  - P2: require a positive deal price; delete orphan deals on partial failure;
+    relabel the duplicated "Pending Commission" → "Unpaid Commission" card.
+  - P3: surface commission-insert failures; drop the rep deal `UPDATE` RLS
+    policy (migration `0009_rep_portal_hardening`); add a Reject confirm step.
+- **Sales Rep Portal (Phase 2 — ⏸️ built but UNDEPLOYED, do not proceed without
+  approval):** QuickBooks Online integration — admin OAuth connect,
+  find-or-create customer, create invoice on approval (ZAR, once-off first).
+  Lives on a separate branch; its migration was drafted as `0009` and **must be
+  renumbered to `0010`** now that `0009` is rep-portal hardening. Recurring /
+  monthly invoices later.
 
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or

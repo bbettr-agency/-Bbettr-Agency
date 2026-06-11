@@ -675,13 +675,22 @@ export async function approveInvoiceRequestAction(
     .maybeSingle();
   const rate = Number(rep?.commission_rate ?? 0);
   const commissionAmount = Number(req.amount) * (rate / 100);
-  await supabase.from("commissions").insert({
+  const { error: commissionError } = await supabase.from("commissions").insert({
     rep_id: req.rep_id,
     deal_id: req.deal_id,
     amount: commissionAmount,
     rate,
     status: "pending",
   });
+  // The request is already approved; surface (don't swallow) a commission
+  // failure so the admin knows to follow up rather than assuming it recorded.
+  if (commissionError) {
+    revalidatePath("/admin/invoices");
+    return {
+      ok: true,
+      error: `Approved, but the commission could not be recorded: ${commissionError.message}`,
+    };
+  }
 
   // Notify the rep: invoice approved + commission recorded.
   await notifyInternal({
@@ -714,6 +723,12 @@ export async function rejectInvoiceRequestAction(
     .select("rep_id, status")
     .eq("id", requestId)
     .single();
+  // Guard like approve: only a pending request can be rejected, so an already
+  // approved request (with a recorded commission) can't be flipped to rejected.
+  if (!req) return { error: "Invoice request not found." };
+  if (req.status !== "pending") {
+    return { error: "This request has already been actioned." };
+  }
 
   const { error } = await supabase
     .from("invoice_requests")
@@ -721,7 +736,7 @@ export async function rejectInvoiceRequestAction(
     .eq("id", requestId);
   if (error) return { error: error.message };
 
-  if (req?.rep_id) {
+  if (req.rep_id) {
     await notifyInternal({
       recipientId: req.rep_id,
       type: "invoice_rejected",

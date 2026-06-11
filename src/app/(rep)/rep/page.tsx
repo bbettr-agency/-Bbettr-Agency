@@ -79,7 +79,7 @@ export default async function RepDashboardPage({
             <Tile label="Deals Closed" value={data.month.dealsClosed} />
             <Tile label="Sales Value" value={formatCurrency(data.month.salesValue)} />
             <Tile label="Commission Earned" value={formatCurrency(data.month.commission)} />
-            <Tile label="Pending Approval" value={data.month.pending} />
+            <Tile label="Awaiting Approval" value={data.month.pending} />
           </CardContent>
         </Card>
 
