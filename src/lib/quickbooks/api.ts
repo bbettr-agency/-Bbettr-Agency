@@ -236,19 +236,47 @@ export interface SendResult {
  * Ask QuickBooks to email the invoice to the given address. QBO sends the email
  * server-side and returns the updated invoice with EmailStatus = "EmailSent".
  * We treat that as confirmation.
+ *
+ * IMPORTANT: the send operation must be POSTed with Content-Type
+ * `application/octet-stream` and an EMPTY body. Calling it with
+ * `application/json` (the default for other QBO calls) makes Intuit's server
+ * attempt to parse an empty JSON payload and throw a NullPointerException /
+ * SystemFailureError. We override the content type here and send no body.
  */
 export async function sendInvoiceEmail(
   conn: ActiveConnection,
   invoiceId: string,
   email: string
 ): Promise<SendResult> {
-  const res = await qboFetch<{ Invoice?: { EmailStatus?: string } }>(
-    conn,
-    `invoice/${encodeURIComponent(invoiceId)}/send?sendTo=${encodeURIComponent(
-      email
-    )}`,
-    { method: "POST", body: "" }
-  );
+  const path = `invoice/${encodeURIComponent(
+    invoiceId
+  )}/send?sendTo=${encodeURIComponent(email)}`;
+
+  const attempt = () =>
+    qboFetch<{ Invoice?: { EmailStatus?: string } }>(conn, path, {
+      method: "POST",
+      // No body; octet-stream so QBO doesn't try to parse a JSON payload.
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+
+  let res: { Invoice?: { EmailStatus?: string } };
+  try {
+    res = await attempt();
+  } catch (e) {
+    // QBO sandbox occasionally throws a transient SystemFailureError /
+    // NullPointerException on send; retry once after a short pause. Scoped to
+    // that signature so we never re-send on an ordinary error.
+    if (
+      e instanceof QboApiError &&
+      /SystemFailureError|NullPointer/i.test(e.body)
+    ) {
+      await new Promise((r) => setTimeout(r, 600));
+      res = await attempt();
+    } else {
+      throw e;
+    }
+  }
+
   const emailStatus = res.Invoice?.EmailStatus ?? null;
   return { sent: emailStatus === "EmailSent", emailStatus };
 }
