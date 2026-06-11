@@ -67,8 +67,18 @@ export function NewDealForm() {
               <Input id="package" name="package" placeholder="e.g. Website Pro" />
             </div>
             <div>
-              <Label htmlFor="price">Price (ZAR)</Label>
-              <Input id="price" name="price" type="number" step="0.01" placeholder="0" />
+              <Label htmlFor="price" required>
+                Price (ZAR)
+              </Label>
+              <Input
+                id="price"
+                name="price"
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                placeholder="0"
+              />
             </div>
             <div className="sm:col-span-2">
               <Label htmlFor="billing_type">Billing</Label>

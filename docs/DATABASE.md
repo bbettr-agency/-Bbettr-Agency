@@ -5,7 +5,21 @@
 `0004_notifications` (section-view dots) · `0005_client_notifications`
 (notifications event log) · `0006_portal_settings` (global settings /
 maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
-commissions) · `0008_internal_notifications` (admin/rep in-app notifications).
+commissions) · `0008_internal_notifications` (admin/rep in-app notifications) ·
+`0009_rep_portal_hardening` (drops the rep deal `UPDATE` policy).
+
+> **`0009` is rep-portal hardening.** The QuickBooks integration work was
+> originally drafted as `0009` on a separate, **undeployed** branch — it must be
+> **renumbered to `0010`** before it is ever taken forward, so both can apply in
+> order. As of now production is at `0001`–`0008`; this patch adds `0009`.
+
+### Rep Portal hardening (`0009`)
+`drop policy if exists "Reps update own deals" on deals;`. No app feature lets a
+rep edit a deal after submission, but the old policy allowed a rep to change
+their own deal's `price`/`status` directly via the API. Reps keep `insert` +
+`select` on their own deals; admins still manage all deals. Commission is taken
+from `invoice_requests.amount` at approval (which reps cannot update), so this
+closes a tamper vector with no functional loss. Idempotent.
 
 ### Internal notifications (`0008`)
 `internal_notifications` is addressed by `recipient_id` (a profiles/auth user),

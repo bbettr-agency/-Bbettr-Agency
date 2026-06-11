@@ -61,3 +61,23 @@ export async function requireRep(): Promise<Profile> {
   if (profile.role !== "rep") redirect(homePath(profile.role));
   return profile;
 }
+
+/**
+ * Whether a rep's account is currently active. Deactivating a rep
+ * (`reps.active = false`) must block portal use, not just hide them from lists.
+ * A `rep`-role user with no `reps` row is treated as inactive (misconfigured).
+ * Returns false on any read error so a failure can't silently grant access.
+ */
+export async function isRepActive(repId: string): Promise<boolean> {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("reps")
+      .select("active")
+      .eq("id", repId)
+      .maybeSingle();
+    return data?.active === true;
+  } catch {
+    return false;
+  }
+}

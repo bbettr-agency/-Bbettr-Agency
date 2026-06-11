@@ -35,7 +35,7 @@ export default async function MyEarningsPage() {
         />
         <StatCard label="Approved Deals" value={earnings.approvedDeals} icon={CheckCircle2} />
         <StatCard
-          label="Pending Commission"
+          label="Unpaid Commission"
           value={formatCurrency(earnings.pendingCommission)}
           icon={Clock}
         />

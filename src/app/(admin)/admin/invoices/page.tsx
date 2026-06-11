@@ -22,7 +22,7 @@ export default async function InvoiceRequestsPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Invoice Requests"
-        description="Review and approve invoice requests raised by sales reps. Approving records the rep's commission; QuickBooks invoicing is configured separately."
+        description="Review and approve invoice requests raised by sales reps. Approving records the rep's commission."
       />
 
       {requests.length === 0 ? (
