@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DealStatusBadge } from "@/components/ui/status-badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { RepAccessControl } from "@/components/admin/rep-access-control";
+import { RepDangerZone } from "@/components/admin/rep-danger-zone";
 import { Handshake } from "lucide-react";
 
 export const metadata: Metadata = { title: "Rep" };
@@ -128,6 +129,8 @@ export default async function RepDetailPage({
           )}
         </CardContent>
       </Card>
+
+      <RepDangerZone repId={rep.id} repName={rep.name} />
     </div>
   );
 }
