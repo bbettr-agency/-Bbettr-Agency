@@ -170,14 +170,20 @@ export async function sendRepEmailAction(
 /**
  * Permanently delete a rep — TESTING ONLY (later replaced by an Archive
  * workflow). Removes the auth login (so they can no longer sign in), which
- * cascades the profile and the `reps` row away; explicit deletes follow as a
- * safety net.
+ * cascades away EVERYTHING the rep owns; explicit deletes follow as a safety
+ * net.
  *
- * SAFETY GUARD: refuses to delete a rep that has ANY historical data (deals,
- * invoice requests or commissions). Deleting the auth user cascades
- * profiles → reps → deals → invoice_requests → commissions, so without this
- * guard a delete would silently wipe sales history. In that case the admin is
- * told to deactivate the rep instead.
+ * Testing-only behaviour. Restore historical-data protection before production
+ * launch. The previous version refused to delete a rep that had any deals,
+ * invoice requests or commissions; that guard has been TEMPORARILY removed so
+ * test reps can be cleaned up repeatedly. With it gone, this hard-deletes the
+ * rep and all of their sales history.
+ *
+ * Deleting the auth user cascades (ON DELETE CASCADE), in order:
+ *   auth.users → profiles → { reps, deals, invoice_requests, commissions,
+ *   internal_notifications }  (deals also re-cascade their invoice_requests &
+ *   commissions). The client-facing `notifications` table is tenant-addressed
+ *   and holds no rep rows, so it is untouched.
  *
  * Requires admin + service role. `confirmationName` must match the rep's name
  * exactly (defence-in-depth on top of the UI's type-to-confirm).
@@ -212,32 +218,14 @@ export async function deleteRepAction(
     return { error: "The name you typed does not match this rep." };
   }
 
-  // 2. Safety check — refuse to delete if the rep has any historical data.
-  const [deals, requests, commissions] = await Promise.all([
-    admin.from("deals").select("id", { count: "exact", head: true }).eq("rep_id", repId),
-    admin
-      .from("invoice_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("rep_id", repId),
-    admin
-      .from("commissions")
-      .select("id", { count: "exact", head: true })
-      .eq("rep_id", repId),
-  ]);
-  const hasHistory =
-    (deals.count ?? 0) > 0 ||
-    (requests.count ?? 0) > 0 ||
-    (commissions.count ?? 0) > 0;
-  if (hasHistory) {
-    return {
-      error:
-        "This rep has historical data and cannot be permanently deleted. Deactivate the rep instead to revoke their access while keeping their records.",
-    };
-  }
+  // 2. TESTING-ONLY: the historical-data guard has been removed on purpose so
+  //    test reps (with deals / invoice requests / commissions) can be wiped.
+  //    Restore historical-data protection before production launch.
 
   // 3. Delete the auth login first (so they can no longer sign in); this
-  //    cascades the profile and reps rows. Explicit deletes follow as a safety
-  //    net in case the cascade is ever unavailable.
+  //    cascades the profile and ALL rep-owned rows (reps, deals,
+  //    invoice_requests, commissions, internal_notifications). Explicit deletes
+  //    follow as a safety net in case the cascade is ever unavailable.
   const { error: authError } = await admin.auth.admin.deleteUser(repId);
   if (authError) return { error: authError.message };
   await admin.from("reps").delete().eq("id", repId);
