@@ -4,6 +4,19 @@ Captured at the end of the V1 launch session. Nothing here is a launch blocker;
 ordered by impact.
 
 ## ✅ Shipped
+- **🏁 Sales Rep Portal V1 (milestone — complete, stable baseline):** the rep
+  portal end-to-end. `rep` role + role-aware routing; **deactivation enforced**;
+  Dashboard / My Deals (filters) / New Deal (price required) / My Earnings;
+  Admin → Reps (create, activate/deactivate, reset password, **welcome email with
+  credentials**, Sales Value & Commission totals, **Delete Rep**); Invoice
+  Requests approve/reject (commission record-only) with guards; **in-app bell
+  blue dots** for submit/approve/reject; **Resend emails** (welcome creds, new
+  request → `info@bbettragency.com`, approve/reject → rep); correct invoice-
+  request status on the rep detail page; RLS hardening (migration `0009`).
+  Delivered as 4 sequential patches (`fix-rep-portal-stabilisation` →
+  `add-delete-rep` → `delete-rep-bypass-history-guard` → `fix-rep-portal-final`).
+  ⚠️ **Testing-only:** the Delete Rep history guard is bypassed (patch ③) —
+  restore it (or ship Archive Rep) before production. See `SESSION_HANDOVER.md`.
 - **Email notifications** — Event → DB notification → branded Resend email
   (update / report / stage advanced / assets-needed / action-required) +
   client action-required banner. Resend = production transactional provider.
@@ -15,25 +28,20 @@ ordered by impact.
   pinned), per-item mark-as-read on click + "Mark all as read". Reuses the
   existing `notifications` table / `read_at` (no migration). Client-only.
 
-## In progress
-- **Sales Rep Portal (Phase 1 — shipped):** `rep` role, rep dashboard, log-deal
-  form, invoice-request approval queue for admins, commissions (record-only),
-  **Admin → Reps management** (create rep + login, activate/deactivate, reset
-  password, send welcome/reset email, per-rep deals & commission totals).
-- **Sales Rep Portal — stabilisation (✅ complete, patch
-  `fix-rep-portal-stabilisation.patch`):** full audit + P1/P2/P3 fixes.
-  - P1: enforce rep deactivation (inactive reps blocked from the portal and from
-    submitting deals); guard `rejectInvoiceRequestAction` (pending-only).
-  - P2: require a positive deal price; delete orphan deals on partial failure;
-    relabel the duplicated "Pending Commission" → "Unpaid Commission" card.
-  - P3: surface commission-insert failures; drop the rep deal `UPDATE` RLS
-    policy (migration `0009_rep_portal_hardening`); add a Reject confirm step.
+## Next major feature
 - **Sales Rep Portal (Phase 2 — ⏸️ built but UNDEPLOYED, do not proceed without
   approval):** QuickBooks Online integration — admin OAuth connect,
   find-or-create customer, create invoice on approval (ZAR, once-off first).
-  Lives on a separate branch; its migration was drafted as `0009` and **must be
-  renumbered to `0010`** now that `0009` is rep-portal hardening. Recurring /
-  monthly invoices later.
+  Lives on a separate branch (`claude/modest-darwin-zBsfw`); its migration was
+  drafted as `0009` and **must be renumbered to `0010`** now that `0009` is
+  rep-portal hardening. **Rep Portal V1 is the baseline to review it against.**
+  Recurring / monthly invoices later.
+
+## Pre-production cleanup (before launch)
+- **Restore the Delete Rep history guard** (or ship the **Archive Rep**
+  workflow). Patch ③ removed it for testing — deleting a rep currently cascades
+  away all their sales history. Marked in code:
+  "Restore historical-data protection before production launch."
 
 ## High impact
 1. **Supabase Realtime** — live cross-tab updates so an already-open admin or

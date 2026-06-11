@@ -7,60 +7,76 @@ docs live under [`docs/`](./).
 
 ---
 
-## ⭐ Latest session (2026-06-11) — Sales Rep Portal stabilisation
+## 🏁 MILESTONE — Sales Rep Portal **V1 complete** (2026-06-11)
 
-**Status: complete. Delivered as a patch to apply to `main`, not a PR.**
-Patch: `fix-rep-portal-stabilisation.patch` · branch `claude/rep-portal-stabilise`
-(branched from `origin/main` @ `19f465f`). Verified: `tsc` ✅ · `lint` ✅ ·
-`build` ✅. **Not merged, not deployed.**
+**This is the stable baseline to build on before QuickBooks Phase 2 begins.**
+Work lives on branch `claude/rep-portal-stabilise` @ `603c566`, delivered as a
+sequence of patches to apply to `main`. Verified on every patch: `tsc` ✅ ·
+`lint` ✅ · `build` ✅.
 
-Full audit of the rep portal (auth, dashboard, My Deals, New Deal, My Earnings,
-Admin Reps, Invoice Requests, RLS, UX). All approved P1 + P2 + P3 fixes applied:
+### Current production status
+- **Base `main` deployed:** `19f465f` — Sales Rep Portal **Phase 1**, internal
+  notifications, Resend email, maintenance mode, full client portal/admin OS.
+- **Rep Portal V1 completion** is delivered as the **4 patches below** (applied
+  to `main` in order + deployed by the operator). They are **not** auto-merged
+  to remote `main`; the operator applies/deploys them.
+- **Migrations in production:** `0001`–`0008` on base `main`; **`0009_rep_portal_hardening`**
+  ships with patch ①. No other rep migrations.
 
-- **P1 (critical)**
-  - **Rep deactivation is now enforced.** New `isRepActive()` gates the `(rep)`
-    layout (inactive reps see a branded "Account Deactivated" screen + sign-out)
-    and `createDealAction` (returns an error). Previously `reps.active` was
-    display-only — a deactivated rep could still log in and submit deals.
-  - **`rejectInvoiceRequestAction` guarded** with a not-found return +
-    `status === 'pending'` check (matching approve), so an already-approved
-    request with a recorded commission can't be flipped to rejected.
-- **P2 (integrity/accuracy)**
-  - Deal **price is now required and must be > 0** (client `required`/`min` +
-    server validation); invoice amounts are never R0/negative.
-  - **Orphan deals removed**: if the `invoice_request` insert fails, the
-    just-created deal is deleted.
-  - Relabelled the duplicated **"Pending Commission" → "Unpaid Commission"** card
-    and the dashboard month tile → **"Awaiting Approval"**.
-- **P3 (hardening/polish)**
-  - Commission-insert failure on approve is now surfaced, not swallowed.
-  - **Migration `0009_rep_portal_hardening.sql`** drops the unused
-    `"Reps update own deals"` RLS policy (closes a rep self-tamper vector).
-  - Added a **confirm step to Reject**; tidied the Invoice Requests copy.
+### Rep Portal V1 — deployed/complete features
+- **Roles & access:** `rep` role, role-aware routing, login → `/rep`. Reps can't
+  reach admin/client surfaces; **deactivated reps are fully blocked** (branded
+  "Account Deactivated" screen + blocked from submitting deals).
+- **Rep portal:** Dashboard (Total Deals / Commission Earned / Awaiting Approval,
+  This-Month + Lifetime, Recent Activity) · My Deals (filters: All/Pending/
+  Approved/Rejected) · New Deal (price required & > 0) · My Earnings
+  (Total / This-month / Approved deals / **Unpaid** Commission + monthly table).
+- **Admin → Reps:** create rep (+login, temp-password shown once), activate/
+  deactivate, reset password, **welcome email with login URL + email + temp
+  password**, per-rep Sales Value & Commission Total, **Delete Rep** (testing —
+  see below), and **correct invoice-request status** on the rep detail page.
+- **Admin → Invoice Requests:** approve (records commission, rate from the rep) /
+  reject (with confirm step); guarded so only `pending` can be actioned.
+- **Notifications (in-app bell):** rep submits → **admins** get an unread blue
+  dot; admin approves/rejects → the **rep** gets one. Recipient layout is
+  revalidated so the badge actually appears.
+- **Emails (Resend, best-effort):** rep welcome credentials; submit → email to
+  `info@bbettragency.com`; approve/reject → email to the rep. Reuses the shared
+  Resend sender + branded template (no change to client email logic).
+- **RLS hardening:** dropped the unused `"Reps update own deals"` policy.
 
-**Files:** `src/lib/auth.ts`, `src/app/(rep)/layout.tsx`,
-`src/app/(rep)/rep/actions.ts`, `src/app/(rep)/rep/page.tsx`,
-`src/app/(rep)/rep/earnings/page.tsx`, `src/components/rep/new-deal-form.tsx`,
-`src/components/rep/rep-disabled-screen.tsx` (new),
-`src/app/(admin)/admin/actions.ts`,
-`src/app/(admin)/admin/invoices/page.tsx`,
-`src/components/admin/invoice-request-actions.tsx`,
-`supabase/migrations/0009_rep_portal_hardening.sql` (new).
+### The patch set (apply in this order)
+| # | Patch | Adds | Migration |
+|---|---|---|---|
+| ① | `fix-rep-portal-stabilisation.patch` | P1/P2/P3 audit fixes (deactivation enforcement, reject guard, price validation, relabels, polish) | **`0009_rep_portal_hardening.sql`** (drop policy) |
+| ② | `add-delete-rep.patch` | Delete Rep button + history-guarded delete | — |
+| ③ | `delete-rep-bypass-history-guard.patch` | **TESTING-ONLY** bypass of the history guard | — |
+| ④ | `fix-rep-portal-final.patch` | Welcome-credentials email, bell revalidation, sales-flow emails, rep-detail status | — |
 
-**To apply (when you're ready — not done here):**
-```bash
-git checkout main && git pull
-git am < fix-rep-portal-stabilisation.patch     # or: git apply
-# then run migration 0009_rep_portal_hardening.sql in Supabase (single DROP POLICY)
-```
+> Patches ①→④ are sequential and share files. ④ does **not** apply on a bare
+> `origin/main` — it requires ①–③ first (verified). `RESEND_API_KEY` must be set
+> for emails to send (they degrade gracefully if absent).
 
-### ⚠️ Migration numbering — `0009` is now rep hardening
-- Production is at migrations `0001`–`0008`. **This patch adds `0009`** =
-  `0009_rep_portal_hardening.sql`.
-- **QuickBooks Phase 2 remains UNDEPLOYED** on its own branch
-  (`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009` and **must
-  be renumbered to `0010`** before it is ever taken forward, so both can apply in
-  order. **Do not proceed with QuickBooks without explicit approval.**
+### ⚠️ Known TEMPORARY testing-only item — Delete Rep bypass
+Patch ③ **removes the historical-data guard** on `deleteRepAction` so test reps
+can be wiped repeatedly. With it gone, deleting a rep **permanently cascades
+away all of their data** (auth user → profile → reps, deals, invoice_requests,
+commissions, internal_notifications). The code is marked:
+`"Testing-only behaviour. Restore historical-data protection before production
+launch."`
+**Before production:** restore the guard (block delete when the rep has deals /
+invoice requests / commissions) or swap in the planned **Archive Rep** workflow.
+
+### QuickBooks — NOT deployed
+QuickBooks **Phase 2 is built but UNDEPLOYED** on a separate branch
+(`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009` and **must be
+renumbered to `0010`** now that `0009` is rep-portal hardening. **Do not start /
+deploy QuickBooks without explicit approval.** This milestone is the baseline to
+review it against.
+
+### Migration numbering (important)
+Production runs `0001`–`0008`; this milestone adds **`0009_rep_portal_hardening`**.
+The QuickBooks migration (currently `0009` on its branch) must become **`0010`**.
 
 > ⚠️ **History divergence note (read this first).** On 2026-06-04 we found that
 > the deployed `main` had drifted from the intended state: several patches were
@@ -72,6 +88,7 @@ git am < fix-rep-portal-stabilisation.patch     # or: git apply
 > `git log --oneline` after applying to confirm what actually landed.
 
 ---
+
 
 ## 1. What was built (full intended state)
 
