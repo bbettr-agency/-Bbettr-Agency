@@ -222,10 +222,15 @@ export async function getAllReps(): Promise<RepSummary[]> {
   });
 }
 
+/** A rep's deal annotated with its invoice-request status (for admin display). */
+export type RepDetailDeal = import("@/lib/database.types").Deal & {
+  requestStatus: import("@/lib/database.types").InvoiceRequestStatus;
+};
+
 export interface RepDetail extends RepSummary {
   lastSignInAt: string | null;
   createdAt: string | null;
-  deals: import("@/lib/database.types").Deal[];
+  deals: RepDetailDeal[];
 }
 
 /** Full rep detail for the admin rep page (profile, login activity, deals). */
@@ -236,7 +241,7 @@ export async function getRepDetail(repId: string): Promise<RepDetail | null> {
       supabase.from("reps").select("*").eq("id", repId).maybeSingle(),
       supabase.from("profiles").select("full_name, email").eq("id", repId).maybeSingle(),
       supabase.from("deals").select("*").eq("rep_id", repId).order("created_at", { ascending: false }),
-      supabase.from("invoice_requests").select("status").eq("rep_id", repId),
+      supabase.from("invoice_requests").select("deal_id, status").eq("rep_id", repId),
       supabase.from("commissions").select("amount").eq("rep_id", repId),
     ]);
   if (!rep) return null;
@@ -253,6 +258,9 @@ export async function getRepDetail(repId: string): Promise<RepDetail | null> {
   }
 
   const reqs = requests ?? [];
+  // Each deal's current invoice-request status (so the table reflects approvals
+  // / rejections, not the raw deal.status which stays "invoice_requested").
+  const statusByDeal = new Map(reqs.map((r) => [r.deal_id, r.status]));
   return {
     id: rep.id,
     name: profile?.full_name || rep.display_name || "Rep",
@@ -267,6 +275,10 @@ export async function getRepDetail(repId: string): Promise<RepDetail | null> {
     commissionTotal: (commissions ?? []).reduce((s, c) => s + Number(c.amount || 0), 0),
     lastSignInAt,
     createdAt,
-    deals: deals ?? [],
+    deals: (deals ?? []).map((d) => ({
+      ...d,
+      requestStatus: (statusByDeal.get(d.id) ?? "pending") as
+        import("@/lib/database.types").InvoiceRequestStatus,
+    })),
   };
 }

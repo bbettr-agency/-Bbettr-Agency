@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireRep, isRepActive } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { notifyAdmins } from "@/lib/internal-notifications";
+import { sendInvoiceRequestEmail } from "@/lib/email/rep-notifications";
 import type { BillingType } from "@/lib/database.types";
 
 export interface DealActionResult {
@@ -85,7 +86,7 @@ export async function createDealAction(
     return { error: requestError.message };
   }
 
-  // Notify admins that a new deal / invoice request needs review.
+  // Notify admins that a new deal / invoice request needs review (in-app bell).
   await notifyAdmins({
     type: "deal_submitted",
     title: `New deal submitted — ${businessName}`,
@@ -95,7 +96,21 @@ export async function createDealAction(
     link: "/admin/invoices",
   });
 
+  // Email the agency inbox with the full deal details (best-effort).
+  await sendInvoiceRequestEmail({
+    repName: profile.full_name ?? "A rep",
+    businessName,
+    contactName: text("contact_name"),
+    email: text("email"),
+    phone: text("phone"),
+    packageName: text("package"),
+    amount: price,
+    billingType: billing,
+  });
+
   revalidatePath("/rep");
   revalidatePath("/admin/invoices");
+  // Refresh the admin layout so the notification bell's unread badge updates.
+  revalidatePath("/admin", "layout");
   redirect("/rep?created=1");
 }

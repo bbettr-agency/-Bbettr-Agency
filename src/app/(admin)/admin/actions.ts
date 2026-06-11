@@ -8,6 +8,10 @@ import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
 import { notify } from "@/lib/notifications";
 import { notifyInternal } from "@/lib/internal-notifications";
+import {
+  sendInvoiceApprovedEmail,
+  sendInvoiceRejectedEmail,
+} from "@/lib/email/rep-notifications";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
@@ -692,7 +696,7 @@ export async function approveInvoiceRequestAction(
     };
   }
 
-  // Notify the rep: invoice approved + commission recorded.
+  // Notify the rep: invoice approved + commission recorded (in-app bell).
   await notifyInternal({
     recipientId: req.rep_id,
     type: "invoice_approved",
@@ -707,8 +711,24 @@ export async function approveInvoiceRequestAction(
     link: "/rep/earnings",
   });
 
+  // Email the rep that their request was approved (best-effort).
+  const [{ data: deal }, { data: repProfile }] = await Promise.all([
+    supabase.from("deals").select("business_name, package").eq("id", req.deal_id).maybeSingle(),
+    supabase.from("profiles").select("email").eq("id", req.rep_id).maybeSingle(),
+  ]);
+  if (repProfile?.email && deal) {
+    await sendInvoiceApprovedEmail({
+      to: repProfile.email,
+      businessName: deal.business_name,
+      packageName: deal.package,
+      amount: Number(req.amount),
+      commission: commissionAmount,
+    });
+  }
+
   revalidatePath("/admin/invoices");
-  revalidatePath("/rep");
+  // Refresh the rep's layout so their notification bell's unread badge updates.
+  revalidatePath("/rep", "layout");
   return { ok: true };
 }
 
@@ -720,7 +740,7 @@ export async function rejectInvoiceRequestAction(
   const supabase = await createClient();
   const { data: req } = await supabase
     .from("invoice_requests")
-    .select("rep_id, status")
+    .select("deal_id, rep_id, amount, status")
     .eq("id", requestId)
     .single();
   // Guard like approve: only a pending request can be rejected, so an already
@@ -737,6 +757,7 @@ export async function rejectInvoiceRequestAction(
   if (error) return { error: error.message };
 
   if (req.rep_id) {
+    // In-app bell.
     await notifyInternal({
       recipientId: req.rep_id,
       type: "invoice_rejected",
@@ -744,9 +765,24 @@ export async function rejectInvoiceRequestAction(
       body: "Please review the deal details or contact the team.",
       link: "/rep/deals",
     });
+
+    // Email the rep that their request was rejected (best-effort).
+    const [{ data: deal }, { data: repProfile }] = await Promise.all([
+      supabase.from("deals").select("business_name, package").eq("id", req.deal_id).maybeSingle(),
+      supabase.from("profiles").select("email").eq("id", req.rep_id).maybeSingle(),
+    ]);
+    if (repProfile?.email && deal) {
+      await sendInvoiceRejectedEmail({
+        to: repProfile.email,
+        businessName: deal.business_name,
+        packageName: deal.package,
+        amount: Number(req.amount),
+      });
+    }
   }
 
   revalidatePath("/admin/invoices");
-  revalidatePath("/rep");
+  // Refresh the rep's layout so their notification bell's unread badge updates.
+  revalidatePath("/rep", "layout");
   return { ok: true };
 }

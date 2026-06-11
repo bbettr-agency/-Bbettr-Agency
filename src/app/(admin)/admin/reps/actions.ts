@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmailService, type EmailKind } from "@/lib/email";
+import { sendRepWelcomeEmail } from "@/lib/email/rep-notifications";
 import { notifyAdmins } from "@/lib/internal-notifications";
 
 export interface RepActionResult {
@@ -144,6 +145,53 @@ export async function resetRepPasswordAction(
   const { error } = await admin.auth.admin.updateUserById(repId, { password });
   if (error) return { error: error.message };
   return { ok: true, password };
+}
+
+/**
+ * Send the rep a branded WELCOME email that includes their login credentials:
+ * login URL, login email and the supplied temporary password.
+ *
+ * The password is provided by the caller — the one generated at creation or a
+ * freshly reset/generated one. We never read a stored password (Supabase only
+ * keeps the hash), so existing passwords are never exposed. If no password is
+ * available the caller must reset/generate one first; this action refuses
+ * without one.
+ */
+export async function sendRepWelcomeEmailAction(
+  repId: string,
+  password: string
+): Promise<RepActionResult> {
+  await requireAdmin();
+
+  if (!password) {
+    return {
+      error:
+        "Generate a temporary password first (Reset password), then send the welcome email so it can include login credentials.",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", repId)
+    .maybeSingle();
+  if (!profile?.email) return { error: "This rep has no email on file." };
+
+  const result = await sendRepWelcomeEmail({
+    to: profile.email,
+    name: profile.full_name,
+    loginEmail: profile.email,
+    password,
+  });
+  if (!result.ok) {
+    return {
+      error:
+        result.error ??
+        "Could not send the welcome email. Check the Resend configuration.",
+    };
+  }
+  return { ok: true };
 }
 
 /** Send a rep a portal email (welcome / reset) via the shared email service. */

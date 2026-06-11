@@ -2,8 +2,18 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { AlertCircle, Check, Copy, UserPlus, CheckCircle2 } from "lucide-react";
-import { createRepAction } from "@/app/(admin)/admin/reps/actions";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  UserPlus,
+  CheckCircle2,
+  Send,
+} from "lucide-react";
+import {
+  createRepAction,
+  sendRepWelcomeEmailAction,
+} from "@/app/(admin)/admin/reps/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FieldHelp } from "@/components/ui/input";
@@ -11,13 +21,22 @@ import { Input, Label, FieldHelp } from "@/components/ui/input";
 export function CreateRepForm() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ tempPassword?: string } | null>(null);
+  // `password` is the credential we can email: the admin-typed one or the
+  // generated temp password. It exists only in this session — never re-read.
+  const [done, setDone] = useState<{ repId?: string; password?: string } | null>(
+    null
+  );
   const [copied, setCopied] = useState(false);
+  const [welcome, setWelcome] = useState<{ ok: boolean; msg: string } | null>(
+    null
+  );
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    setWelcome(null);
     const formData = new FormData(e.currentTarget);
+    const typedPassword = String(formData.get("password") ?? "");
     startTransition(async () => {
       const res = await createRepAction(formData);
       if (res.error && !res.ok) {
@@ -25,7 +44,21 @@ export function CreateRepForm() {
         return;
       }
       if (res.error) setError(res.error); // non-fatal warning
-      setDone({ tempPassword: res.password });
+      // Use the generated password if one was returned, else the admin-typed one.
+      setDone({ repId: res.repId, password: res.password || typedPassword });
+    });
+  }
+
+  function sendWelcome() {
+    if (!done?.repId || !done.password) return;
+    setWelcome(null);
+    startTransition(async () => {
+      const res = await sendRepWelcomeEmailAction(done.repId!, done.password!);
+      setWelcome(
+        res.error
+          ? { ok: false, msg: res.error }
+          : { ok: true, msg: "Welcome email sent with login credentials." }
+      );
     });
   }
 
@@ -37,19 +70,19 @@ export function CreateRepForm() {
             <CheckCircle2 className="h-5 w-5" />
             <p className="text-sm font-semibold text-ink-900">Rep created</p>
           </div>
-          {done.tempPassword ? (
+          {done.password ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
               <p className="text-xs font-semibold text-amber-700">
                 Temporary password (shown once)
               </p>
               <div className="mt-1.5 flex items-center gap-2">
                 <code className="flex-1 rounded-lg bg-white px-2.5 py-1.5 font-mono text-sm text-ink-900 ring-1 ring-inset ring-amber-200">
-                  {done.tempPassword}
+                  {done.password}
                 </code>
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(done.tempPassword!);
+                    navigator.clipboard.writeText(done.password!);
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1500);
                   }}
@@ -64,7 +97,8 @@ export function CreateRepForm() {
                 </button>
               </div>
               <p className="mt-1.5 text-xs text-amber-700">
-                Share securely. The rep can sign in at the portal and change it.
+                Share securely, or send the welcome email below to deliver the
+                login URL, email and this password to the rep.
               </p>
             </div>
           ) : (
@@ -72,12 +106,42 @@ export function CreateRepForm() {
               The rep can sign in with the password you set.
             </p>
           )}
+
+          {done.password && done.repId && (
+            <div>
+              <Button variant="outline" loading={pending} onClick={sendWelcome}>
+                <Send className="h-4 w-4" /> Send welcome email with credentials
+              </Button>
+              {welcome && (
+                <p
+                  className={`mt-2 flex items-center gap-1.5 text-sm ${
+                    welcome.ok ? "text-emerald-600" : "text-red-600"
+                  }`}
+                >
+                  {welcome.ok ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  {welcome.msg}
+                </p>
+              )}
+            </div>
+          )}
+
           {error && <p className="text-sm text-amber-700">{error}</p>}
           <div className="flex gap-3">
             <Button asChild>
               <Link href="/admin/reps">Go to reps</Link>
             </Button>
-            <Button variant="outline" onClick={() => { setDone(null); setError(null); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDone(null);
+                setError(null);
+                setWelcome(null);
+              }}
+            >
               Create another
             </Button>
           </div>
