@@ -12,7 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { InvoiceRequestStatusBadge } from "@/components/ui/status-badge";
+import {
+  InvoiceRequestStatusBadge,
+  ClientLocationBadge,
+} from "@/components/ui/status-badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { RepAccessControl } from "@/components/admin/rep-access-control";
 import { RepDangerZone } from "@/components/admin/rep-danger-zone";
@@ -101,6 +104,7 @@ export default async function RepDetailPage({
               <THead>
                 <TR className="hover:bg-transparent">
                   <TH>Business</TH>
+                  <TH>Location</TH>
                   <TH>Package</TH>
                   <TH>Price</TH>
                   <TH>Billing</TH>
@@ -115,6 +119,7 @@ export default async function RepDetailPage({
                       <p className="font-semibold text-ink-900">{d.business_name}</p>
                       <p className="text-xs text-ink-400">{d.contact_name ?? d.email ?? "—"}</p>
                     </TD>
+                    <TD><ClientLocationBadge location={d.client_location} /></TD>
                     <TD>{d.package ?? "—"}</TD>
                     <TD>{formatCurrency(d.price)}</TD>
                     <TD className="capitalize">{d.billing_type === "once_off" ? "Once-off" : "Monthly"}</TD>

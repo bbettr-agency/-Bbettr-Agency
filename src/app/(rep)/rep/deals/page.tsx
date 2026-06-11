@@ -9,7 +9,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { InvoiceRequestStatusBadge } from "@/components/ui/status-badge";
+import {
+  InvoiceRequestStatusBadge,
+  ClientLocationBadge,
+} from "@/components/ui/status-badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 
 export const metadata: Metadata = { title: "My Deals" };
@@ -111,6 +114,7 @@ export default async function MyDealsPage({
             <THead>
               <TR className="hover:bg-transparent">
                 <TH>Client</TH>
+                <TH>Location</TH>
                 <TH>Package</TH>
                 <TH>Value</TH>
                 <TH>Billing Type</TH>
@@ -127,6 +131,7 @@ export default async function MyDealsPage({
                       {d.contact_name ?? d.email ?? "—"}
                     </p>
                   </TD>
+                  <TD><ClientLocationBadge location={d.client_location} /></TD>
                   <TD>{d.package ?? "—"}</TD>
                   <TD>{formatCurrency(d.price)}</TD>
                   <TD className="capitalize">

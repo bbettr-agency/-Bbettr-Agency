@@ -2,7 +2,7 @@ import "server-only";
 import { sendTransactionalEmail, type SendResult } from "@/lib/email/resend";
 import { renderEmail } from "@/lib/email/templates";
 import { formatCurrency } from "@/lib/utils";
-import type { BillingType } from "@/lib/database.types";
+import type { BillingType, ClientLocation } from "@/lib/database.types";
 
 /**
  * Rep-flow transactional emails (welcome credentials + invoice-request events).
@@ -22,6 +22,10 @@ const AGENCY_INBOX = "info@bbettragency.com";
 
 function billingLabel(b: BillingType): string {
   return b === "once_off" ? "Once-off" : "Monthly";
+}
+
+function locationLabel(l: ClientLocation): string {
+  return l === "south_africa" ? "South Africa" : "International";
 }
 
 /**
@@ -67,6 +71,7 @@ export async function sendInvoiceRequestEmail(opts: {
   packageName: string | null;
   amount: number;
   billingType: BillingType;
+  location: ClientLocation;
 }): Promise<SendResult> {
   const html = renderEmail({
     preheader: `New deal from ${opts.repName}: ${opts.businessName}`,
@@ -75,6 +80,7 @@ export async function sendInvoiceRequestEmail(opts: {
       `${opts.repName} submitted a new deal for approval.`,
       `Rep: ${opts.repName}`,
       `Business: ${opts.businessName}`,
+      `Client location: ${locationLabel(opts.location)}`,
       `Contact person: ${opts.contactName || "—"}`,
       `Email: ${opts.email || "—"}`,
       `Phone: ${opts.phone || "—"}`,

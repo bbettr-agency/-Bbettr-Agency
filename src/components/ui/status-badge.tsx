@@ -5,7 +5,30 @@ import type {
   StageStatus,
   DealStatus,
   InvoiceRequestStatus,
+  ClientLocation,
 } from "@/lib/database.types";
+
+const clientLocationMap: Record<
+  ClientLocation,
+  { label: string; tone: "brand" | "info" }
+> = {
+  south_africa: { label: "South Africa", tone: "brand" },
+  international: { label: "International", tone: "info" },
+};
+
+/** Human label for a client location (e.g. for plain-text / email use). */
+export function clientLocationLabel(location: ClientLocation): string {
+  return clientLocationMap[location].label;
+}
+
+export function ClientLocationBadge({ location }: { location: ClientLocation }) {
+  const cfg = clientLocationMap[location];
+  return (
+    <Badge tone={cfg.tone} dot>
+      {cfg.label}
+    </Badge>
+  );
+}
 
 const dealStatusMap: Record<
   DealStatus,

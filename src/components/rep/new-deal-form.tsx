@@ -46,6 +46,24 @@ export function NewDealForm() {
               <Label htmlFor="contact_name">Contact Person</Label>
               <Input id="contact_name" name="contact_name" />
             </div>
+            <div className="sm:col-span-2">
+              <Label htmlFor="client_location" required>
+                Client Location
+              </Label>
+              <Select
+                id="client_location"
+                name="client_location"
+                defaultValue="south_africa"
+                required
+              >
+                <option value="south_africa">South Africa</option>
+                <option value="international">International</option>
+              </Select>
+              <FieldHelp>
+                South African clients are invoiced for EFT; international clients
+                will later receive an online payment link.
+              </FieldHelp>
+            </div>
             <div>
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" />
