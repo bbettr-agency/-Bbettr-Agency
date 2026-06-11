@@ -1,7 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptToken, encryptToken } from "./crypto";
 import {
+  apiBaseUrl,
   getQboConfig,
+  QBO_MINOR_VERSION,
   QBO_TOKEN_URL,
   type QboConfig,
   type QboEnvironment,
@@ -99,6 +101,35 @@ export async function getConnectionStatus(): Promise<QboConnectionStatus> {
 }
 
 /**
+ * Best-effort fetch of the connected company's legal/display name, so the admin
+ * can confirm WHICH QuickBooks company the portal is wired to. Returns null on
+ * any failure (never blocks connecting).
+ */
+async function fetchCompanyName(
+  cfg: QboConfig,
+  realmId: string,
+  accessToken: string
+): Promise<string | null> {
+  try {
+    const url = `${apiBaseUrl(
+      cfg.environment
+    )}/v3/company/${realmId}/companyinfo/${realmId}?minorversion=${QBO_MINOR_VERSION}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      CompanyInfo?: { CompanyName?: string; LegalName?: string };
+    };
+    return (
+      data.CompanyInfo?.CompanyName ?? data.CompanyInfo?.LegalName ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Exchange an OAuth authorization code for tokens and persist the connection.
  * Called from the OAuth callback route after admin verification.
  */
@@ -116,6 +147,8 @@ export async function exchangeAndStore(
     redirect_uri: cfg.redirectUri,
   });
 
+  const companyName = await fetchCompanyName(cfg, realmId, tokens.access_token);
+
   const now = Date.now();
   const admin = createAdminClient();
   await admin.from("quickbooks_connection").upsert(
@@ -129,6 +162,7 @@ export async function exchangeAndStore(
         now + tokens.x_refresh_token_expires_in * 1000
       ).toISOString(),
       environment: cfg.environment,
+      company_name: companyName,
       connected_by: connectedBy,
       connected_at: new Date().toISOString(),
     },

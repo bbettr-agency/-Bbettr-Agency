@@ -86,11 +86,26 @@ export default async function IntegrationsPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-ink-600">
-            When you approve an invoice request, the deal is automatically
-            invoiced in QuickBooks: the customer is created (or reused) and an
-            invoice is raised in your company&rsquo;s currency. The invoice
-            number is recorded against the request.
+            When you approve an invoice request, the deal is invoiced in
+            QuickBooks: the customer is created (or reused), an invoice is raised
+            in your company&rsquo;s currency, and QuickBooks emails it to the
+            client. The verified invoice number is recorded against the request.
           </p>
+
+          {status.connected && status.environment === "sandbox" && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Connected to a QuickBooks <strong>sandbox</strong> company (realm{" "}
+                <code className="font-mono">{status.realmId}</code>). Invoices,
+                customers and numbers live in the sandbox — they will{" "}
+                <strong>not</strong> appear in your live QuickBooks company. Switch{" "}
+                <code className="font-mono">QBO_ENVIRONMENT</code> to{" "}
+                <code className="font-mono">production</code> and reconnect when
+                you&rsquo;re ready to invoice for real.
+              </span>
+            </div>
+          )}
 
           {!status.configured && (
             <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

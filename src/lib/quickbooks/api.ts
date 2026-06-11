@@ -3,9 +3,22 @@ import type { ActiveConnection } from "./connection";
 
 /**
  * Thin QuickBooks Online Accounting API client: enough to find-or-create a
- * customer and raise an invoice. Amounts use the company's home currency (we
- * don't set CurrencyRef), so a ZAR company produces ZAR invoices automatically.
+ * customer, raise an invoice, re-read it, and email it. Amounts use the
+ * company's home currency (we don't set CurrencyRef), so a ZAR company produces
+ * ZAR invoices automatically.
  */
+
+/** Error carrying the QBO HTTP status + raw response body for diagnostics. */
+export class QboApiError extends Error {
+  status: number;
+  body: string;
+  constructor(status: number, body: string) {
+    super(`QuickBooks API ${status}: ${body.slice(0, 500)}`);
+    this.name = "QboApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
 
 function buildUrl(conn: ActiveConnection, path: string): string {
   const base = apiBaseUrl(conn.environment);
@@ -30,7 +43,7 @@ async function qboFetch<T>(
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`QuickBooks API ${res.status}: ${detail.slice(0, 500)}`);
+    throw new QboApiError(res.status, detail);
   }
   return (await res.json()) as T;
 }
@@ -44,14 +57,21 @@ interface QueryResponse<T> {
   QueryResponse: Record<string, T[] | undefined>;
 }
 
+export interface CustomerResult {
+  id: string;
+  /** true if we created it this call, false if an existing match was reused. */
+  created: boolean;
+}
+
 /**
- * Find a customer by exact DisplayName, or create one. Returns the QBO
- * customer Id. Reuses an existing match so we never create duplicates.
+ * Find a customer by exact DisplayName, or create one. Returns the QBO customer
+ * Id and whether it was newly created. Reuses an existing match so we never
+ * create duplicates.
  */
 export async function findOrCreateCustomer(
   conn: ActiveConnection,
   opts: { displayName: string; email?: string | null }
-): Promise<string> {
+): Promise<CustomerResult> {
   const query = `select Id from Customer where DisplayName = '${ql(
     opts.displayName
   )}'`;
@@ -60,7 +80,7 @@ export async function findOrCreateCustomer(
     `query?query=${encodeURIComponent(query)}`
   );
   const existing = found.QueryResponse.Customer?.[0];
-  if (existing) return existing.Id;
+  if (existing?.Id) return { id: existing.Id, created: false };
 
   const created = await qboFetch<{ Customer: { Id: string } }>(conn, "customer", {
     method: "POST",
@@ -69,7 +89,27 @@ export async function findOrCreateCustomer(
       ...(opts.email ? { PrimaryEmailAddr: { Address: opts.email } } : {}),
     }),
   });
-  return created.Customer.Id;
+  if (!created.Customer?.Id) {
+    throw new Error("QuickBooks did not return a customer id.");
+  }
+  return { id: created.Customer.Id, created: true };
+}
+
+/** Confirm a customer still exists (used when reusing a stored id). */
+export async function customerExists(
+  conn: ActiveConnection,
+  customerId: string
+): Promise<boolean> {
+  try {
+    const res = await qboFetch<{ Customer?: { Id?: string } }>(
+      conn,
+      `customer/${encodeURIComponent(customerId)}`
+    );
+    return Boolean(res.Customer?.Id);
+  } catch (e) {
+    if (e instanceof QboApiError && e.status === 404) return false;
+    throw e;
+  }
 }
 
 /**
@@ -119,7 +159,9 @@ export interface CreatedInvoice {
 
 /**
  * Create an invoice for a customer. A single line item carries the full amount.
- * Returns the QBO invoice Id and its DocNumber (the human invoice number).
+ * Returns the QBO invoice Id and its DocNumber (the human invoice number, the
+ * value visible inside QuickBooks). The email is sent separately via
+ * `sendInvoiceEmail` — setting BillEmail here only records the address.
  */
 export async function createInvoice(
   conn: ActiveConnection,
@@ -150,14 +192,63 @@ export async function createInvoice(
           },
         },
       ],
-      ...(opts.email
-        ? { BillEmail: { Address: opts.email }, EmailStatus: "NeedToSend" }
-        : {}),
+      ...(opts.email ? { BillEmail: { Address: opts.email } } : {}),
     }),
   });
 
+  if (!created.Invoice?.Id) {
+    throw new Error("QuickBooks did not return an invoice id.");
+  }
   return {
     id: created.Invoice.Id,
     docNumber: created.Invoice.DocNumber ?? null,
   };
+}
+
+/**
+ * Re-read an invoice by Id to confirm it persisted and obtain the authoritative
+ * DocNumber (the number actually visible in QuickBooks). Returns null if the
+ * invoice cannot be found.
+ */
+export async function getInvoice(
+  conn: ActiveConnection,
+  invoiceId: string
+): Promise<CreatedInvoice | null> {
+  try {
+    const res = await qboFetch<{
+      Invoice?: { Id?: string; DocNumber?: string };
+    }>(conn, `invoice/${encodeURIComponent(invoiceId)}`);
+    if (!res.Invoice?.Id) return null;
+    return { id: res.Invoice.Id, docNumber: res.Invoice.DocNumber ?? null };
+  } catch (e) {
+    if (e instanceof QboApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export interface SendResult {
+  /** true when QuickBooks confirmed EmailStatus = EmailSent. */
+  sent: boolean;
+  emailStatus: string | null;
+}
+
+/**
+ * Ask QuickBooks to email the invoice to the given address. QBO sends the email
+ * server-side and returns the updated invoice with EmailStatus = "EmailSent".
+ * We treat that as confirmation.
+ */
+export async function sendInvoiceEmail(
+  conn: ActiveConnection,
+  invoiceId: string,
+  email: string
+): Promise<SendResult> {
+  const res = await qboFetch<{ Invoice?: { EmailStatus?: string } }>(
+    conn,
+    `invoice/${encodeURIComponent(invoiceId)}/send?sendTo=${encodeURIComponent(
+      email
+    )}`,
+    { method: "POST", body: "" }
+  );
+  const emailStatus = res.Invoice?.EmailStatus ?? null;
+  return { sent: emailStatus === "EmailSent", emailStatus };
 }
