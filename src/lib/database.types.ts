@@ -405,6 +405,7 @@ export interface Database {
           notes: string | null;
           status: DealStatus;
           client_id: string | null;
+          quickbooks_customer_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -421,6 +422,7 @@ export interface Database {
           notes?: string | null;
           status?: DealStatus;
           client_id?: string | null;
+          quickbooks_customer_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["deals"]["Row"]>;
         Relationships: [];
@@ -434,9 +436,11 @@ export interface Database {
           billing_type: BillingType;
           status: InvoiceRequestStatus;
           quickbooks_invoice_id: string | null;
+          quickbooks_invoice_number: string | null;
           quickbooks_customer_id: string | null;
           approved_by: string | null;
           error: string | null;
+          invoiced_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -447,9 +451,11 @@ export interface Database {
           billing_type: BillingType;
           status?: InvoiceRequestStatus;
           quickbooks_invoice_id?: string | null;
+          quickbooks_invoice_number?: string | null;
           quickbooks_customer_id?: string | null;
           approved_by?: string | null;
           error?: string | null;
+          invoiced_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["invoice_requests"]["Row"]>;
         Relationships: [
@@ -504,6 +510,36 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["internal_notifications"]["Row"]>;
         Relationships: [];
       };
+      quickbooks_connection: {
+        Row: {
+          id: boolean;
+          realm_id: string;
+          access_token: string;
+          refresh_token: string;
+          token_expires_at: string;
+          refresh_expires_at: string | null;
+          environment: string;
+          company_name: string | null;
+          connected_by: string | null;
+          connected_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: boolean;
+          realm_id: string;
+          access_token: string;
+          refresh_token: string;
+          token_expires_at: string;
+          refresh_expires_at?: string | null;
+          environment?: string;
+          company_name?: string | null;
+          connected_by?: string | null;
+          connected_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["quickbooks_connection"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -536,3 +572,4 @@ export type Deal = Database["public"]["Tables"]["deals"]["Row"];
 export type InvoiceRequest = Database["public"]["Tables"]["invoice_requests"]["Row"];
 export type Commission = Database["public"]["Tables"]["commissions"]["Row"];
 export type InternalNotification = Database["public"]["Tables"]["internal_notifications"]["Row"];
+export type QuickbooksConnection = Database["public"]["Tables"]["quickbooks_connection"]["Row"];

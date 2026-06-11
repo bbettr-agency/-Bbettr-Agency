@@ -12,6 +12,7 @@ import {
   Receipt,
   Headset,
   Wallet,
+  Plug,
 } from "lucide-react";
 
 export interface NavItem {
@@ -39,6 +40,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Reports", href: "/admin/reports", icon: BarChart3 },
   { label: "Updates", href: "/admin/updates", icon: Megaphone },
   { label: "Files", href: "/admin/files", icon: FolderOpen },
+  { label: "Integrations", href: "/admin/integrations", icon: Plug },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

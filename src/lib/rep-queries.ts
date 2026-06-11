@@ -23,7 +23,9 @@ async function fetchRepData(repId: string) {
         .order("created_at", { ascending: false }),
       supabase
         .from("invoice_requests")
-        .select("deal_id, status, amount, updated_at, created_at")
+        .select(
+          "deal_id, status, amount, quickbooks_invoice_number, updated_at, created_at"
+        )
         .eq("rep_id", repId),
       supabase
         .from("commissions")
@@ -37,16 +39,23 @@ async function fetchRepData(repId: string) {
   };
 }
 
-export type DealView = Deal & { requestStatus: InvoiceRequestStatus };
+export type DealView = Deal & {
+  requestStatus: InvoiceRequestStatus;
+  invoiceNumber: string | null;
+};
 
-/** A rep's deals, each annotated with its invoice-request status. */
+/** A rep's deals, each annotated with its invoice-request status + number. */
 export async function getRepDealViews(repId: string): Promise<DealView[]> {
   const { deals, requests } = await fetchRepData(repId);
-  const statusByDeal = new Map(requests.map((r) => [r.deal_id, r.status]));
-  return deals.map((d) => ({
-    ...d,
-    requestStatus: (statusByDeal.get(d.id) ?? "pending") as InvoiceRequestStatus,
-  }));
+  const byDeal = new Map(requests.map((r) => [r.deal_id, r]));
+  return deals.map((d) => {
+    const req = byDeal.get(d.id);
+    return {
+      ...d,
+      requestStatus: (req?.status ?? "pending") as InvoiceRequestStatus,
+      invoiceNumber: req?.quickbooks_invoice_number ?? null,
+    };
+  });
 }
 
 export interface ActivityItem {

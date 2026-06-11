@@ -119,6 +119,7 @@ export default async function MyDealsPage({
                 <TH>Value</TH>
                 <TH>Billing Type</TH>
                 <TH>Status</TH>
+                <TH>Invoice</TH>
                 <TH>Date</TH>
               </TR>
             </THead>
@@ -139,6 +140,15 @@ export default async function MyDealsPage({
                   </TD>
                   <TD>
                     <InvoiceRequestStatusBadge status={d.requestStatus} />
+                  </TD>
+                  <TD className="whitespace-nowrap text-xs">
+                    {d.invoiceNumber ? (
+                      <span className="font-medium text-ink-700">
+                        #{d.invoiceNumber}
+                      </span>
+                    ) : (
+                      <span className="text-ink-400">—</span>
+                    )}
                   </TD>
                   <TD className="whitespace-nowrap text-xs text-ink-500">
                     {format(new Date(d.created_at), "d MMM yyyy")}
