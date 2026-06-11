@@ -166,3 +166,83 @@ export async function sendRepEmailAction(
   }
   return { ok: true };
 }
+
+/**
+ * Permanently delete a rep — TESTING ONLY (later replaced by an Archive
+ * workflow). Removes the auth login (so they can no longer sign in), which
+ * cascades the profile and the `reps` row away; explicit deletes follow as a
+ * safety net.
+ *
+ * SAFETY GUARD: refuses to delete a rep that has ANY historical data (deals,
+ * invoice requests or commissions). Deleting the auth user cascades
+ * profiles → reps → deals → invoice_requests → commissions, so without this
+ * guard a delete would silently wipe sales history. In that case the admin is
+ * told to deactivate the rep instead.
+ *
+ * Requires admin + service role. `confirmationName` must match the rep's name
+ * exactly (defence-in-depth on top of the UI's type-to-confirm).
+ */
+export async function deleteRepAction(
+  repId: string,
+  confirmationName: string
+): Promise<RepActionResult> {
+  await requireAdmin();
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return {
+      error:
+        "Server is missing its service-role key, so the rep could not be deleted.",
+    };
+  }
+
+  // 1. Verify the rep exists and the typed name matches exactly.
+  const [{ data: rep }, { data: profile }] = await Promise.all([
+    admin.from("reps").select("display_name").eq("id", repId).maybeSingle(),
+    admin.from("profiles").select("full_name, role").eq("id", repId).maybeSingle(),
+  ]);
+  if (!rep && !profile) return { error: "Rep not found." };
+  if (profile && profile.role !== "rep") {
+    return { error: "This account is not a sales rep." };
+  }
+  const name = profile?.full_name || rep?.display_name || "Rep";
+  if (confirmationName.trim() !== name) {
+    return { error: "The name you typed does not match this rep." };
+  }
+
+  // 2. Safety check — refuse to delete if the rep has any historical data.
+  const [deals, requests, commissions] = await Promise.all([
+    admin.from("deals").select("id", { count: "exact", head: true }).eq("rep_id", repId),
+    admin
+      .from("invoice_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("rep_id", repId),
+    admin
+      .from("commissions")
+      .select("id", { count: "exact", head: true })
+      .eq("rep_id", repId),
+  ]);
+  const hasHistory =
+    (deals.count ?? 0) > 0 ||
+    (requests.count ?? 0) > 0 ||
+    (commissions.count ?? 0) > 0;
+  if (hasHistory) {
+    return {
+      error:
+        "This rep has historical data and cannot be permanently deleted. Deactivate the rep instead to revoke their access while keeping their records.",
+    };
+  }
+
+  // 3. Delete the auth login first (so they can no longer sign in); this
+  //    cascades the profile and reps rows. Explicit deletes follow as a safety
+  //    net in case the cascade is ever unavailable.
+  const { error: authError } = await admin.auth.admin.deleteUser(repId);
+  if (authError) return { error: authError.message };
+  await admin.from("reps").delete().eq("id", repId);
+  await admin.from("profiles").delete().eq("id", repId);
+
+  revalidatePath("/admin/reps");
+  return { ok: true };
+}
