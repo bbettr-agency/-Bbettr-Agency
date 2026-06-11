@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { DealStatusBadge } from "@/components/ui/status-badge";
+import { InvoiceRequestStatusBadge } from "@/components/ui/status-badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { RepAccessControl } from "@/components/admin/rep-access-control";
 import { RepDangerZone } from "@/components/admin/rep-danger-zone";
@@ -118,7 +118,7 @@ export default async function RepDetailPage({
                     <TD>{d.package ?? "—"}</TD>
                     <TD>{formatCurrency(d.price)}</TD>
                     <TD className="capitalize">{d.billing_type === "once_off" ? "Once-off" : "Monthly"}</TD>
-                    <TD><DealStatusBadge status={d.status} /></TD>
+                    <TD><InvoiceRequestStatusBadge status={d.requestStatus} /></TD>
                     <TD className="whitespace-nowrap text-xs text-ink-500">
                       {format(new Date(d.created_at), "d MMM yyyy")}
                     </TD>

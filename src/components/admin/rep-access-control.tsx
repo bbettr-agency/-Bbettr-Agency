@@ -16,6 +16,7 @@ import {
   setRepActiveAction,
   resetRepPasswordAction,
   sendRepEmailAction,
+  sendRepWelcomeEmailAction,
 } from "@/app/(admin)/admin/reps/actions";
 
 export function RepAccessControl({
@@ -66,7 +67,7 @@ export function RepAccessControl({
     });
   }
 
-  function sendEmail(kind: "welcome" | "password_reset", label: string) {
+  function sendEmail(kind: "password_reset", label: string) {
     setFeedback(null);
     setBusy(kind);
     startTransition(async () => {
@@ -74,6 +75,30 @@ export function RepAccessControl({
       setBusy(null);
       setFeedback(
         res.error ? { ok: false, msg: res.error } : { ok: true, msg: `${label} sent.` }
+      );
+    });
+  }
+
+  // Welcome email includes login credentials, so it needs a password we have in
+  // this session. Reset the password first to generate one (we never read a
+  // stored password).
+  function sendWelcome() {
+    setFeedback(null);
+    if (!tempPassword) {
+      setFeedback({
+        ok: false,
+        msg: "Reset the password first, then send the welcome email so it can include login credentials.",
+      });
+      return;
+    }
+    setBusy("welcome");
+    startTransition(async () => {
+      const res = await sendRepWelcomeEmailAction(repId, tempPassword);
+      setBusy(null);
+      setFeedback(
+        res.error
+          ? { ok: false, msg: res.error }
+          : { ok: true, msg: "Welcome email sent with login credentials." }
       );
     });
   }
@@ -133,16 +158,23 @@ export function RepAccessControl({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 border-t border-ink-100 pt-4">
-        <Button variant="outline" size="sm" loading={busy === "reset"} disabled={pending} onClick={resetPassword}>
-          <KeyRound className="h-4 w-4" /> Reset password
-        </Button>
-        <Button variant="outline" size="sm" loading={busy === "welcome"} disabled={pending} onClick={() => sendEmail("welcome", "Welcome email")}>
-          <Send className="h-4 w-4" /> Send welcome email
-        </Button>
-        <Button variant="outline" size="sm" loading={busy === "password_reset"} disabled={pending} onClick={() => sendEmail("password_reset", "Password reset email")}>
-          <KeyRound className="h-4 w-4" /> Send reset email
-        </Button>
+      <div className="space-y-2 border-t border-ink-100 pt-4">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" loading={busy === "reset"} disabled={pending} onClick={resetPassword}>
+            <KeyRound className="h-4 w-4" /> Reset password
+          </Button>
+          <Button variant="outline" size="sm" loading={busy === "welcome"} disabled={pending} onClick={sendWelcome}>
+            <Send className="h-4 w-4" /> Send welcome email
+          </Button>
+          <Button variant="outline" size="sm" loading={busy === "password_reset"} disabled={pending} onClick={() => sendEmail("password_reset", "Password reset email")}>
+            <KeyRound className="h-4 w-4" /> Send reset email
+          </Button>
+        </div>
+        <p className="text-xs text-ink-400">
+          The welcome email includes the login URL, the rep&rsquo;s email and a
+          temporary password. Reset the password first to generate one — stored
+          passwords can&rsquo;t be retrieved.
+        </p>
       </div>
 
       {feedback && (
