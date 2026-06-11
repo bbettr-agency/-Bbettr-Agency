@@ -7,11 +7,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
 import { notify } from "@/lib/notifications";
-import { notifyInternal } from "@/lib/internal-notifications";
+import { notifyInternal, notifyAdmins } from "@/lib/internal-notifications";
 import {
   sendInvoiceApprovedEmail,
   sendInvoiceRejectedEmail,
 } from "@/lib/email/rep-notifications";
+import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
@@ -645,9 +646,12 @@ export async function resolveNotificationAction(
 }
 
 /**
- * Approve an invoice request (admin). V1: marks the request approved and records
- * the rep's commission (record-only). In the QuickBooks phase this is where the
- * QBO invoice gets created and the status becomes "invoiced".
+ * Approve an invoice request (admin): mark it approved, record the rep's
+ * commission, notify + email the rep, then create the QuickBooks invoice.
+ *
+ * Approval/commission/notifications are unchanged from V1; the QuickBooks invoice
+ * is a decoupled, best-effort, retryable step appended at the end — a QBO failure
+ * never reverses approval or commission.
  */
 export async function approveInvoiceRequestAction(
   requestId: string
@@ -726,8 +730,80 @@ export async function approveInvoiceRequestAction(
     });
   }
 
+  // QuickBooks invoicing — decoupled, best-effort and idempotent. Runs for every
+  // approved deal (SA + international; currency is the QBO company's home ZAR).
+  // A QuickBooks failure (or QBO not connected) never reverses the approval or
+  // the commission: the request stays "approved" with the error recorded and the
+  // admin can retry. On success it becomes "invoiced" with the QBO number.
+  const invoiceResult = await createInvoiceForRequest(requestId);
+  if (invoiceResult.ok) {
+    await notifyInternal({
+      recipientId: req.rep_id,
+      type: "invoice_approved",
+      title: invoiceResult.invoiceNumber
+        ? `Invoice #${invoiceResult.invoiceNumber} created`
+        : "Invoice created in QuickBooks",
+      body: "Your deal has been invoiced in QuickBooks.",
+      link: "/rep/deals",
+    });
+  } else {
+    await notifyAdmins({
+      type: "invoice_request",
+      title: "QuickBooks invoice not created",
+      body: `Approval succeeded but invoicing failed: ${invoiceResult.error}. You can retry from Invoice Requests.`,
+      link: "/admin/invoices",
+    });
+  }
+
   revalidatePath("/admin/invoices");
   // Refresh the rep's layout so their notification bell's unread badge updates.
+  revalidatePath("/rep", "layout");
+  return {
+    ok: true,
+    error: invoiceResult.ok
+      ? undefined
+      : `Approved and commission recorded, but the QuickBooks invoice could not be created: ${invoiceResult.error}. You can retry it from this page.`,
+  };
+}
+
+/**
+ * Retry creating the QuickBooks invoice for a request that was approved but
+ * whose invoicing failed (or was attempted before QBO was connected). Safe to
+ * call repeatedly — idempotent, won't duplicate an existing invoice.
+ */
+export async function retryInvoiceRequestAction(
+  requestId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: req } = await supabase
+    .from("invoice_requests")
+    .select("id, rep_id, status, quickbooks_invoice_id")
+    .eq("id", requestId)
+    .single();
+  if (!req) return { error: "Invoice request not found." };
+  if (req.quickbooks_invoice_id) {
+    return { error: "This request has already been invoiced." };
+  }
+  if (req.status !== "approved") {
+    return { error: "Only approved requests can be invoiced." };
+  }
+
+  const result = await createInvoiceForRequest(requestId);
+  if (!result.ok) return { error: result.error };
+
+  await notifyInternal({
+    recipientId: req.rep_id,
+    type: "invoice_approved",
+    title: result.invoiceNumber
+      ? `Invoice #${result.invoiceNumber} created`
+      : "Invoice created in QuickBooks",
+    body: "Your deal has been invoiced in QuickBooks.",
+    link: "/rep/deals",
+  });
+
+  revalidatePath("/admin/invoices");
   revalidatePath("/rep", "layout");
   return { ok: true };
 }

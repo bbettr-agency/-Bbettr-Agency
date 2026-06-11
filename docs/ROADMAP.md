@@ -38,15 +38,17 @@ ordered by impact.
   + PayFast payment link. No QuickBooks/PayFast/approval changes.
 
 ## Next major feature
-- **Sales Rep Portal (Phase 2 — ⏸️ built but UNDEPLOYED, do not proceed without
-  approval):** QuickBooks Online integration — admin OAuth connect,
-  find-or-create customer, create invoice on approval (ZAR, once-off first).
-  Lives on a separate branch (`claude/modest-darwin-zBsfw`); its migration was
-  drafted as `0009` and **must be renumbered to `0011`** now that `0009` is
-  rep-portal hardening and `0010` is deal client location. **Rep Portal V1 is the
-  baseline to review it against.** Recurring / monthly invoices later.
-- **PayFast (international payments — not started):** online payment link for
-  `international` deals, paired with the QuickBooks invoice. Depends on Phase 2.
+- **QuickBooks Online (Phase 2 — ✅ re-integrated, ⏸️ UNDEPLOYED, sandbox-test
+  pending):** invoicing on invoice-request approval — admin OAuth connect,
+  find-or-create customer, create invoice (ZAR, once-off). **Re-integrated onto
+  the V1 + client-location baseline** as branch `claude/quickbooks-reintegration`
+  + migration `0011_quickbooks` (not a merge of the old branch). Decoupled /
+  best-effort / idempotent / retryable; preserves all V1 behaviour. Next: Intuit
+  sandbox app → set `QBO_*` → run `0011` → test → production. Recurring / monthly
+  invoices and paid-status sync later.
+- **PayFast (international payments — not started, after QuickBooks is stable):**
+  dedicated `payfast_payments` table + `0012`, signed payment link for
+  `international` deals + ITN webhook, paired with the QuickBooks invoice.
 
 ## Pre-production cleanup (before launch)
 - **Restore the Delete Rep history guard** (or ship the **Archive Rep**

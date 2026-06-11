@@ -7,17 +7,27 @@
 maintenance mode) · `0007_sales_reps` (rep role + deals + invoice requests +
 commissions) · `0008_internal_notifications` (admin/rep in-app notifications) ·
 `0009_rep_portal_hardening` (drops the rep deal `UPDATE` policy) ·
-`0010_deal_client_location` (deal client location enum + column).
+`0010_deal_client_location` (deal client location enum + column) ·
+`0011_quickbooks` (QuickBooks OAuth connection + invoice fields).
 
 > **🏁 Rep Portal V1 baseline.** `0009_rep_portal_hardening` is the only schema
 > change in the **Sales Rep Portal V1 milestone** (the rest of V1 is app-layer).
 > Production currently runs `0001`–`0008`; applying the V1 stabilisation patch
 > adds `0009`, and the client-location patch adds `0010`.
 
-> **`0009` = rep hardening · `0010` = deal client location.** The QuickBooks
-> integration work (separate, **undeployed** branch) was previously slated for
-> `0009`/`0010`; now that both are taken it **must be renumbered to `0011`**
-> before it is ever taken forward, so all migrations apply in order.
+> **`0009` = rep hardening · `0010` = deal client location · `0011` =
+> QuickBooks.** The QuickBooks integration has been **re-integrated onto the V1
+> baseline as `0011`** (it was previously drafted as `0009` on the old branch).
+> QuickBooks is **undeployed pending sandbox testing** — apply `0011` only when
+> deploying QuickBooks.
+
+### QuickBooks (`0011`) — ⏸️ not yet deployed
+Single-row `quickbooks_connection` (encrypted OAuth tokens, admin-only RLS,
+read/written via the service role) + `invoice_requests.quickbooks_invoice_number`
+/ `.invoiced_at` + `deals.quickbooks_customer_id`. Additive and isolated.
+Approving an invoice request raises a QBO invoice (decoupled/best-effort/
+retryable; **ZAR for all clients** — no multicurrency). Full detail in
+`docs/QUICKBOOKS.md`.
 
 ### Deal client location (`0010`)
 Adds enum `client_location` (`'south_africa'`, `'international'`) and

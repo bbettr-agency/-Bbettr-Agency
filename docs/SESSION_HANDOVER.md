@@ -81,18 +81,28 @@ launch."`
 **Before production:** restore the guard (block delete when the rep has deals /
 invoice requests / commissions) or swap in the planned **Archive Rep** workflow.
 
-### QuickBooks — NOT deployed
-QuickBooks **Phase 2 is built but UNDEPLOYED** on a separate branch
-(`claude/modest-darwin-zBsfw`). Its migration was drafted as `0009`; now that
-`0009` (rep hardening) and `0010` (deal client location) are both taken, it
-**must be renumbered to `0011`** before it is ever taken forward. **Do not start /
-deploy QuickBooks without explicit approval.** This milestone is the baseline to
-review it against.
+### QuickBooks — re-integrated, ⏸️ UNDEPLOYED (sandbox testing pending)
+QuickBooks Phase 2 has been **re-integrated onto the V1 + client-location
+baseline** (branch `claude/quickbooks-reintegration`, patch
+`feat-quickbooks-reintegration.patch` + migration **`0011_quickbooks.sql`**) —
+**not** a merge of the old `claude/modest-darwin-zBsfw` branch. The self-contained
+parts (`src/lib/quickbooks/*`, `/api/quickbooks/{connect,callback}`, Admin →
+Integrations, `QBO_*` env) port over; the approve flow was re-stitched on top of
+the current action, preserving the reject guard, commission recording, rep
+notifications + blue-dot revalidation, rep emails, and `client_location`.
+- **Additive & isolated**, decoupled/best-effort/idempotent/retryable — a QBO
+  failure never reverses approval or commission.
+- **Currency: ZAR for all** (no multicurrency). SA pays EFT; international will
+  later get a PayFast link (not built).
+- **Deploy plan:** connect an Intuit **sandbox** app, set `QBO_*`, run `0011`,
+  test approve→invoice + retry + disconnect, then switch to production.
+- **PayFast:** not started — comes after QuickBooks is stable.
 
 ### Migration numbering (important)
-Production runs `0001`–`0008`; this milestone adds **`0009_rep_portal_hardening`**,
-and the post-V1 client-location patch adds **`0010_deal_client_location`**.
-The QuickBooks migration (currently `0009` on its branch) must become **`0011`**.
+Production runs `0001`–`0008`; the V1 milestone adds **`0009_rep_portal_hardening`**,
+the client-location patch adds **`0010_deal_client_location`**, and the
+QuickBooks re-integration adds **`0011_quickbooks`** (apply only when deploying
+QuickBooks).
 
 > ⚠️ **History divergence note (read this first).** On 2026-06-04 we found that
 > the deployed `main` had drifted from the intended state: several patches were

@@ -12,6 +12,7 @@ import {
   ClientLocationBadge,
 } from "@/components/ui/status-badge";
 import { InvoiceRequestActions } from "@/components/admin/invoice-request-actions";
+import { InvoiceRetryButton } from "@/components/admin/invoice-retry-button";
 
 export const metadata: Metadata = { title: "Invoice Requests" };
 
@@ -25,7 +26,7 @@ export default async function InvoiceRequestsPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Invoice Requests"
-        description="Review and approve invoice requests raised by sales reps. Approving records the rep's commission."
+        description="Review and approve invoice requests raised by sales reps. Approving records the rep's commission and raises the invoice in QuickBooks (connect it under Integrations)."
       />
 
       {requests.length === 0 ? (
@@ -91,6 +92,10 @@ function RequestCard({
     client_location: import("@/lib/database.types").ClientLocation;
   } | null;
 
+  // Approved but not yet invoiced in QuickBooks → offer a retry.
+  const needsInvoice =
+    request.status === "approved" && !request.quickbooks_invoice_id;
+
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -101,6 +106,11 @@ function RequestCard({
             </p>
             <InvoiceRequestStatusBadge status={request.status} />
             {deal && <ClientLocationBadge location={deal.client_location} />}
+            {request.quickbooks_invoice_number && (
+              <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                Invoice #{request.quickbooks_invoice_number}
+              </span>
+            )}
           </div>
           <p className="mt-0.5 text-sm text-ink-500">
             {deal?.package ?? "—"} ·{" "}
@@ -113,8 +123,17 @@ function RequestCard({
             {deal?.contact_name ?? deal?.email ?? "—"} ·{" "}
             {format(new Date(request.created_at), "d MMM yyyy")}
           </p>
+          {needsInvoice && request.error && (
+            <p className="mt-1.5 text-xs text-amber-700">
+              QuickBooks: {request.error}
+            </p>
+          )}
         </div>
-        {actionable && <InvoiceRequestActions requestId={request.id} />}
+        {actionable ? (
+          <InvoiceRequestActions requestId={request.id} />
+        ) : needsInvoice ? (
+          <InvoiceRetryButton requestId={request.id} />
+        ) : null}
       </CardContent>
     </Card>
   );

@@ -166,7 +166,7 @@ export async function getInvoiceRequests() {
   const { data } = await supabase
     .from("invoice_requests")
     .select(
-      "id, amount, billing_type, status, created_at, deal_id, rep_id, deals(business_name, contact_name, email, package, client_location)"
+      "id, amount, billing_type, status, created_at, deal_id, rep_id, quickbooks_invoice_number, quickbooks_invoice_id, invoiced_at, error, deals(business_name, contact_name, email, package, client_location)"
     )
     .order("created_at", { ascending: false });
   return data ?? [];
