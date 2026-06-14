@@ -53,7 +53,10 @@ export async function getRepDealViews(repId: string): Promise<DealView[]> {
     return {
       ...d,
       requestStatus: (req?.status ?? "pending") as InvoiceRequestStatus,
-      invoiceNumber: req?.quickbooks_invoice_number ?? null,
+      // Only surface the number once the invoice actually exists — a number can
+      // be reserved before creation succeeds.
+      invoiceNumber:
+        req?.status === "invoiced" ? req?.quickbooks_invoice_number ?? null : null,
     };
   });
 }

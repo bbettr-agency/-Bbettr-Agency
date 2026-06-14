@@ -186,6 +186,7 @@ export async function createInvoice(
     customerId: string;
     amount: number;
     itemName: string;
+    docNumber?: string | null;
     description?: string | null;
     email?: string | null;
   }
@@ -198,6 +199,9 @@ export async function createInvoice(
     method: "POST",
     body: JSON.stringify({
       CustomerRef: { value: opts.customerId },
+      // Portal-assigned invoice number (requires "Custom transaction numbers"
+      // ON in QBO). QBO echoes it back and prints it on the PDF/email.
+      ...(opts.docNumber ? { DocNumber: opts.docNumber } : {}),
       Line: [
         {
           DetailType: "SalesItemLineDetail",
@@ -247,6 +251,27 @@ export async function getInvoice(
     if (e instanceof QboApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * Find an invoice by its exact DocNumber. Used for retry-idempotency: if a prior
+ * attempt already created the invoice in QBO (but we failed to persist its Id),
+ * we adopt that invoice instead of creating a duplicate with the same number.
+ */
+export async function findInvoiceByDocNumber(
+  conn: ActiveConnection,
+  docNumber: string
+): Promise<CreatedInvoice | null> {
+  const query = `select Id, DocNumber from Invoice where DocNumber = '${ql(
+    docNumber
+  )}'`;
+  const res = await qboFetch<QueryResponse<{ Id: string; DocNumber?: string }>>(
+    conn,
+    `query?query=${encodeURIComponent(query)}`
+  );
+  const found = res.QueryResponse.Invoice?.[0];
+  if (!found?.Id) return null;
+  return { id: found.Id, docNumber: found.DocNumber ?? docNumber, raw: found };
 }
 
 export interface SendResult {

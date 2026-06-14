@@ -13,6 +13,7 @@ import {
 import {
   createInvoice,
   customerExists,
+  findInvoiceByDocNumber,
   findOrCreateCustomer,
   getInvoice,
   sendInvoiceEmail,
@@ -198,18 +199,47 @@ export async function createInvoiceForRequest(
     }
     if (!customerId) return recordFailure("No QuickBooks customer id.", "customer");
 
-    // 2) Create the invoice. Invoice.Id is the authoritative success signal;
-    //    log the raw response plus Id/DocNumber separately for diagnostics.
-    const created = await createInvoice(conn, {
-      customerId,
-      amount: Number(req.amount),
-      itemName: lineItem.qboItemName,
-      description: lineItem.description,
-      email: deal.email,
-    });
+    // 2) Reserve a stable, unique portal invoice number (BBTTR-000001 …). Reuse
+    //    one already reserved on a prior attempt so a retry never consumes a new
+    //    number; only draw a fresh one when none is reserved yet.
+    let reservedDocNumber = req.quickbooks_invoice_number ?? null;
+    if (!reservedDocNumber) {
+      const { data: dn, error: dnError } = await admin.rpc(
+        "next_qbo_invoice_docnumber"
+      );
+      if (dnError || !dn) {
+        return recordFailure(
+          `Could not assign an invoice number: ${dnError?.message ?? "no value"}`,
+          "docnumber"
+        );
+      }
+      reservedDocNumber = dn as string;
+      // Persist the reservation immediately so a retry reuses this exact number.
+      await admin
+        .from("invoice_requests")
+        .update({ quickbooks_invoice_number: reservedDocNumber })
+        .eq("id", requestId);
+    }
+    log.docNumber = reservedDocNumber;
+
+    // 3) Create the invoice — but if a prior attempt already created one with
+    //    this DocNumber, adopt it instead of creating a duplicate.
+    let created = await findInvoiceByDocNumber(conn, reservedDocNumber);
+    if (created) {
+      log.invoiceAdopted = { id: created.id, docNumber: created.docNumber };
+    } else {
+      created = await createInvoice(conn, {
+        customerId,
+        amount: Number(req.amount),
+        itemName: lineItem.qboItemName,
+        docNumber: reservedDocNumber,
+        description: lineItem.description,
+        email: deal.email,
+      });
+      log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
+      log.invoiceCreateRaw = created.raw ?? null;
+    }
     log.lineItem = { item: lineItem.qboItemName, description: lineItem.description };
-    log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
-    log.invoiceCreateRaw = created.raw ?? null;
 
     // 3) Re-read the invoice using the returned Id to get the authoritative
     //    DocNumber when available. Best-effort — a failed or sparse re-read must
@@ -234,7 +264,8 @@ export async function createInvoiceForRequest(
         "invoice_id"
       );
     }
-    const docNumber = verified?.docNumber ?? created.docNumber ?? null;
+    const docNumber =
+      verified?.docNumber ?? created.docNumber ?? reservedDocNumber;
 
     // 5) Email the invoice (explicit send). Does not gate "invoiced".
     let emailStatus: QboEmailStatus = "no_email";
