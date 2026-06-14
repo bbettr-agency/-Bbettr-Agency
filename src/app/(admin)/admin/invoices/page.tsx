@@ -129,11 +129,15 @@ function RequestCard({
               </p>
               <InvoiceRequestStatusBadge status={request.status} />
               {deal && <ClientLocationBadge location={deal.client_location} />}
-              {request.quickbooks_invoice_number && (
+              {request.quickbooks_invoice_number ? (
                 <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
                   Invoice #{request.quickbooks_invoice_number}
                 </span>
-              )}
+              ) : request.quickbooks_invoice_id ? (
+                <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  Invoiced · QBO ID {request.quickbooks_invoice_id}
+                </span>
+              ) : null}
               {emailLabel && (
                 <span
                   className={`rounded-md px-2 py-0.5 text-xs font-medium ${emailTone}`}

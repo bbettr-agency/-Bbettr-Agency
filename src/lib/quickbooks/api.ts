@@ -155,13 +155,18 @@ async function findOrCreateServiceItem(conn: ActiveConnection): Promise<string> 
 export interface CreatedInvoice {
   id: string;
   docNumber: string | null;
+  /** The raw parsed QBO create/read response, for diagnostics/logging. */
+  raw?: unknown;
 }
 
 /**
  * Create an invoice for a customer. A single line item carries the full amount.
  * Returns the QBO invoice Id and its DocNumber (the human invoice number, the
- * value visible inside QuickBooks). The email is sent separately via
- * `sendInvoiceEmail` — setting BillEmail here only records the address.
+ * value visible inside QuickBooks) plus the raw response. NOTE: DocNumber can be
+ * absent in the create response (e.g. companies with "Custom transaction
+ * numbers" disabled) — the Id is the authoritative success signal. The email is
+ * sent separately via `sendInvoiceEmail`; setting BillEmail here only records
+ * the address.
  */
 export async function createInvoice(
   conn: ActiveConnection,
@@ -174,7 +179,7 @@ export async function createInvoice(
 ): Promise<CreatedInvoice> {
   const itemId = await findOrCreateServiceItem(conn);
 
-  const created = await qboFetch<{
+  const response = await qboFetch<{
     Invoice: { Id: string; DocNumber?: string };
   }>(conn, "invoice", {
     method: "POST",
@@ -196,12 +201,13 @@ export async function createInvoice(
     }),
   });
 
-  if (!created.Invoice?.Id) {
+  if (!response.Invoice?.Id) {
     throw new Error("QuickBooks did not return an invoice id.");
   }
   return {
-    id: created.Invoice.Id,
-    docNumber: created.Invoice.DocNumber ?? null,
+    id: response.Invoice.Id,
+    docNumber: response.Invoice.DocNumber ?? null,
+    raw: response,
   };
 }
 
@@ -219,7 +225,11 @@ export async function getInvoice(
       Invoice?: { Id?: string; DocNumber?: string };
     }>(conn, `invoice/${encodeURIComponent(invoiceId)}`);
     if (!res.Invoice?.Id) return null;
-    return { id: res.Invoice.Id, docNumber: res.Invoice.DocNumber ?? null };
+    return {
+      id: res.Invoice.Id,
+      docNumber: res.Invoice.DocNumber ?? null,
+      raw: res,
+    };
   } catch (e) {
     if (e instanceof QboApiError && e.status === 404) return null;
     throw e;

@@ -101,8 +101,29 @@ export async function createInvoiceForRequest(
     .maybeSingle();
 
   if (!req) return { ok: false, error: "Invoice request not found." };
-  // Already fully invoiced (valid id + number) → idempotent success.
-  if (req.quickbooks_invoice_id && req.quickbooks_invoice_number) {
+  // Idempotency: the QBO invoice Id is the key. If one already exists we never
+  // create a second invoice on retry. If we have an Id but no stored DocNumber
+  // yet, best-effort re-read to backfill the number; either way report success.
+  if (req.quickbooks_invoice_id) {
+    if (!req.quickbooks_invoice_number) {
+      try {
+        const conn = await getActiveConnection();
+        const v = await getInvoice(conn, req.quickbooks_invoice_id);
+        if (v?.docNumber) {
+          await admin
+            .from("invoice_requests")
+            .update({ quickbooks_invoice_number: v.docNumber })
+            .eq("id", requestId);
+          return {
+            ok: true,
+            invoiceId: req.quickbooks_invoice_id,
+            invoiceNumber: v.docNumber,
+          };
+        }
+      } catch {
+        // Re-read failed — still a success; the invoice already exists in QBO.
+      }
+    }
     return {
       ok: true,
       invoiceId: req.quickbooks_invoice_id,
@@ -164,7 +185,8 @@ export async function createInvoiceForRequest(
     }
     if (!customerId) return recordFailure("No QuickBooks customer id.", "customer");
 
-    // 2) Create the invoice.
+    // 2) Create the invoice. Invoice.Id is the authoritative success signal;
+    //    log the raw response plus Id/DocNumber separately for diagnostics.
     const created = await createInvoice(conn, {
       customerId,
       amount: Number(req.amount),
@@ -172,27 +194,32 @@ export async function createInvoiceForRequest(
       email: deal.email,
     });
     log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
+    log.invoiceCreateRaw = created.raw ?? null;
 
-    // 3) Re-read it to confirm it persisted and get the authoritative number.
-    const verified = await getInvoice(conn, created.id);
+    // 3) Re-read the invoice using the returned Id to get the authoritative
+    //    DocNumber when available. Best-effort — a failed or sparse re-read must
+    //    NOT fail an invoice QuickBooks has already created.
+    let verified: { id: string; docNumber: string | null } | null = null;
+    try {
+      verified = await getInvoice(conn, created.id);
+    } catch (e) {
+      log.invoiceVerifyError = errorDetail(e);
+    }
     log.invoiceVerify = verified
       ? { id: verified.id, docNumber: verified.docNumber }
       : { found: false };
 
-    // 4) Integrity gate — require a real id AND number before we trust it.
-    if (!verified || !verified.id) {
+    // 4) Success = a real Invoice.Id exists. We do NOT fail on a missing
+    //    DocNumber (e.g. companies with "Custom transaction numbers" disabled):
+    //    store the number when QBO gives one, otherwise just the Id.
+    const invoiceId = verified?.id ?? created.id;
+    if (!invoiceId) {
       return recordFailure(
-        `Invoice ${created.id} could not be read back from QuickBooks; not marking as invoiced.`,
-        "verify"
+        "QuickBooks did not return an invoice id; not marking as invoiced.",
+        "invoice_id"
       );
     }
-    const docNumber = verified.docNumber;
-    if (!docNumber) {
-      return recordFailure(
-        "QuickBooks did not return an invoice number (DocNumber); not marking as invoiced.",
-        "doc_number"
-      );
-    }
+    const docNumber = verified?.docNumber ?? created.docNumber ?? null;
 
     // 5) Email the invoice (explicit send). Does not gate "invoiced".
     let emailStatus: QboEmailStatus = "no_email";
@@ -200,7 +227,7 @@ export async function createInvoiceForRequest(
     let emailError: string | null = null;
     if (deal.email) {
       try {
-        const send = await sendInvoiceEmail(conn, verified.id, deal.email);
+        const send = await sendInvoiceEmail(conn, invoiceId, deal.email);
         emailStatus = send.sent ? "sent" : "failed";
         emailedAt = send.sent ? new Date().toISOString() : null;
         log.email = { to: deal.email, status: send.emailStatus, sent: send.sent };
@@ -218,12 +245,14 @@ export async function createInvoiceForRequest(
       log.email = { skipped: "no client email on deal" };
     }
 
-    // 6) Persist the verified result.
+    // 6) Persist the result. The invoice exists (we have an Id); DocNumber is
+    //    stored when QBO provided one, otherwise left null (the Id is recorded
+    //    in quickbooks_invoice_id and shown in the admin debug panel).
     await admin
       .from("invoice_requests")
       .update({
         status: "invoiced",
-        quickbooks_invoice_id: verified.id,
+        quickbooks_invoice_id: invoiceId,
         quickbooks_invoice_number: docNumber,
         quickbooks_customer_id: customerId,
         quickbooks_realm_id: conn.realmId,
@@ -243,7 +272,7 @@ export async function createInvoiceForRequest(
 
     return {
       ok: true,
-      invoiceId: verified.id,
+      invoiceId,
       invoiceNumber: docNumber,
       realmId: conn.realmId,
       customerId,
