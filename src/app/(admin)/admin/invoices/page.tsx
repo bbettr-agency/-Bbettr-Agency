@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/status-badge";
 import { InvoiceRequestActions } from "@/components/admin/invoice-request-actions";
 import { InvoiceRetryButton } from "@/components/admin/invoice-retry-button";
+import { PayfastActions } from "@/components/admin/payfast-actions";
 
 export const metadata: Metadata = { title: "Invoice Requests" };
 
@@ -230,6 +231,20 @@ function RequestCard({
             </dl>
           </details>
         )}
+
+        {deal?.client_location === "international" &&
+          request.quickbooks_invoice_id && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-ink-100 bg-ink-50/40 px-3 py-2">
+              <span className="text-xs font-medium text-ink-600">
+                International payment (PayFast)
+              </span>
+              <PayfastActions
+                requestId={request.id}
+                status={request.payfast?.status ?? null}
+                paymentUrl={request.payfast?.payment_url ?? null}
+              />
+            </div>
+          )}
       </CardContent>
     </Card>
   );

@@ -161,6 +161,12 @@ export async function getAllFilesGlobal() {
 }
 
 /** All invoice requests (newest first) with their deal details, for the admin queue. */
+export interface PayfastSummary {
+  status: string;
+  payment_url: string;
+  paid_at: string | null;
+}
+
 export async function getInvoiceRequests() {
   const supabase = await createClient();
   const { data } = await supabase
@@ -169,7 +175,24 @@ export async function getInvoiceRequests() {
       "id, amount, billing_type, status, created_at, deal_id, rep_id, quickbooks_invoice_number, quickbooks_invoice_id, quickbooks_customer_id, quickbooks_realm_id, quickbooks_email_status, quickbooks_emailed_at, quickbooks_last_attempt_at, invoiced_at, error, deals(business_name, contact_name, email, package, client_location, has_monthly_retainer, monthly_retainer_name, monthly_retainer_amount)"
     )
     .order("created_at", { ascending: false });
-  return data ?? [];
+  const requests = data ?? [];
+
+  // Attach the PayFast payment (international only). Separate fetch + merge keeps
+  // the typed select simple; SA requests have no row → payfast stays null.
+  const { data: payments } = await supabase
+    .from("payfast_payments")
+    .select("invoice_request_id, status, payment_url, paid_at");
+  const byRequest = new Map(
+    (payments ?? []).map((p) => [
+      p.invoice_request_id,
+      { status: p.status, payment_url: p.payment_url, paid_at: p.paid_at } as PayfastSummary,
+    ])
+  );
+
+  return requests.map((r) => ({
+    ...r,
+    payfast: byRequest.get(r.id) ?? null,
+  }));
 }
 
 export interface RepSummary {
