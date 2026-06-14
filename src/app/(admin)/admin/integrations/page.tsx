@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
 import { getConnectionStatus } from "@/lib/quickbooks";
+import { getPayfastDebugInfo } from "@/lib/payfast";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,7 @@ export default async function IntegrationsPage({
     searchParams,
     getConnectionStatus(),
   ]);
+  const payfast = getPayfastDebugInfo();
 
   const banner = qbo ? STATUS_MESSAGES[qbo] : null;
 
@@ -153,14 +155,93 @@ export default async function IntegrationsPage({
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Plug className="h-4.5 w-4.5 text-brand-500" />
+            <CardTitle>PayFast (international payments)</CardTitle>
+          </div>
+          <Badge tone={payfast.environment === "live" ? "success" : "neutral"} dot>
+            {payfast.environment === "live" ? "Live" : "Sandbox"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-ink-600">
+            International deals get a PayFast payment link once invoiced. South
+            African clients pay by EFT and never get a link. Set{" "}
+            <code className="font-mono">PAYFAST_ENVIRONMENT</code> to{" "}
+            <code className="font-mono">live</code> (or{" "}
+            <code className="font-mono">production</code>) in Vercel to use the
+            real checkout. Diagnostics below never expose the merchant key or
+            passphrase.
+          </p>
+
+          {!payfast.configured && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                PayFast isn&rsquo;t fully configured — set the{" "}
+                <code className="font-mono">PAYFAST_*</code> environment variables
+                in Vercel.
+              </span>
+            </div>
+          )}
+
+          {payfast.configured && payfast.environment === "sandbox" && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                PayFast is in <strong>sandbox</strong> — links go to{" "}
+                <code className="font-mono">sandbox.payfast.co.za</code> and{" "}
+                <strong>no real money moves</strong>. Your current{" "}
+                <code className="font-mono">PAYFAST_ENVIRONMENT</code> value is{" "}
+                <code className="font-mono">
+                  {payfast.rawEnvValue ? `"${payfast.rawEnvValue}"` : "(unset)"}
+                </code>
+                . Set it to <code className="font-mono">live</code> or{" "}
+                <code className="font-mono">production</code> and redeploy.
+              </span>
+            </div>
+          )}
+
+          <div className="grid gap-2 text-sm sm:grid-cols-2">
+            <Row
+              label="PAYFAST_ENVIRONMENT (raw)"
+              value={payfast.rawEnvValue ? payfast.rawEnvValue : "(unset)"}
+            />
+            <Row label="Resolved environment" value={payfast.environment} />
+            <Row label="Active process URL" value={payfast.processUrl} wide />
+            <Row label="Merchant ID" value={payfast.merchantId ?? "—"} />
+            <Row label="App URL" value={payfast.appUrl ?? "—"} />
+            <Row
+              label="Passphrase set"
+              value={payfast.passphraseSet ? "Yes" : "No"}
+            />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  wide,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-50 px-3 py-2">
-      <span className="text-ink-500">{label}</span>
+    <div
+      className={
+        "flex items-center justify-between gap-3 rounded-lg bg-ink-50 px-3 py-2 " +
+        (wide ? "sm:col-span-2" : "")
+      }
+    >
+      <span className="shrink-0 text-ink-500">{label}</span>
       <span className="truncate font-medium text-ink-900">{value}</span>
     </div>
   );

@@ -18,6 +18,7 @@ import { payfastSignature } from "./signature";
  */
 
 export { isPayfastConfigured };
+export { getPayfastDebugInfo, type PayfastDebugInfo } from "./config";
 
 export interface PayfastPaymentResult {
   ok: boolean;
