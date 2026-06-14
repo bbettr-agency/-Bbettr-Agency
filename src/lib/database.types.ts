@@ -567,6 +567,10 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      next_qbo_invoice_docnumber: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
     };
   };
 }
