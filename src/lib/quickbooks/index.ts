@@ -18,6 +18,7 @@ import {
   getInvoice,
   sendInvoiceEmail,
   QboApiError,
+  type InvoiceLineInput,
 } from "./api";
 
 /**
@@ -97,7 +98,7 @@ export async function createInvoiceForRequest(
   const { data: req } = await admin
     .from("invoice_requests")
     .select(
-      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, package_key, custom_package_name, custom_package_description, quickbooks_customer_id)"
+      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, package_key, custom_package_name, custom_package_description, has_monthly_retainer, monthly_retainer_name, monthly_retainer_description, monthly_retainer_amount, quickbooks_customer_id)"
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -140,6 +141,10 @@ export async function createInvoiceForRequest(
     package_key: string | null;
     custom_package_name: string | null;
     custom_package_description: string | null;
+    has_monthly_retainer: boolean | null;
+    monthly_retainer_name: string | null;
+    monthly_retainer_description: string | null;
+    monthly_retainer_amount: number | null;
     quickbooks_customer_id: string | null;
   } | null;
   if (!deal) return { ok: false, error: "Deal not found for this request." };
@@ -152,6 +157,29 @@ export async function createInvoiceForRequest(
     customDescription: deal.custom_package_description,
     legacyPackage: deal.package,
   });
+
+  // Build the invoice lines: the once-off package line, plus — only when the
+  // deal has a valid monthly retainer — a second line for it. The retainer is
+  // invoiced but NOT commissioned (commission stays on invoice_request.amount).
+  const invoiceLines: InvoiceLineInput[] = [
+    {
+      itemName: lineItem.qboItemName,
+      amount: Number(req.amount),
+      description: lineItem.description,
+    },
+  ];
+  if (
+    deal.has_monthly_retainer &&
+    deal.monthly_retainer_name &&
+    deal.monthly_retainer_amount &&
+    Number(deal.monthly_retainer_amount) > 0
+  ) {
+    invoiceLines.push({
+      itemName: deal.monthly_retainer_name,
+      amount: Number(deal.monthly_retainer_amount),
+      description: deal.monthly_retainer_description,
+    });
+  }
 
   // Accumulating diagnostics persisted on every outcome (success or failure).
   const log: Record<string, unknown> = { attemptedAt };
@@ -230,16 +258,14 @@ export async function createInvoiceForRequest(
     } else {
       created = await createInvoice(conn, {
         customerId,
-        amount: Number(req.amount),
-        itemName: lineItem.qboItemName,
+        lines: invoiceLines,
         docNumber: reservedDocNumber,
-        description: lineItem.description,
         email: deal.email,
       });
       log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
       log.invoiceCreateRaw = created.raw ?? null;
     }
-    log.lineItem = { item: lineItem.qboItemName, description: lineItem.description };
+    log.lines = invoiceLines.map((l) => ({ item: l.itemName, amount: l.amount }));
 
     // 3) Re-read the invoice using the returned Id to get the authoritative
     //    DocNumber when available. Best-effort — a failed or sparse re-read must

@@ -80,6 +80,33 @@ export async function createDealAction(
   }
   const resolved = resolvePackage({ packageKey, customName, customDescription });
 
+  // Optional monthly retainer. When enabled, all three fields are required and
+  // the amount must be > 0. It becomes a second invoice line (not commissioned).
+  const hasRetainer =
+    String(formData.get("has_monthly_retainer") ?? "") === "on";
+  const retainerName = text("monthly_retainer_name");
+  const retainerDescription = text("monthly_retainer_description");
+  const retainerRaw = formData.get("monthly_retainer_amount");
+  const retainerAmount =
+    retainerRaw !== null && String(retainerRaw) !== ""
+      ? Number(retainerRaw)
+      : null;
+  if (hasRetainer) {
+    if (!retainerName || !retainerDescription) {
+      return {
+        error:
+          "Please enter the monthly retainer product/service and description.",
+      };
+    }
+    if (
+      retainerAmount === null ||
+      !Number.isFinite(retainerAmount) ||
+      retainerAmount <= 0
+    ) {
+      return { error: "Monthly retainer amount must be greater than zero." };
+    }
+  }
+
   const { data: deal, error } = await supabase
     .from("deals")
     .insert({
@@ -94,6 +121,10 @@ export async function createDealAction(
       custom_package_description: isCustomPackage(packageKey)
         ? customDescription
         : null,
+      has_monthly_retainer: hasRetainer,
+      monthly_retainer_name: hasRetainer ? retainerName : null,
+      monthly_retainer_description: hasRetainer ? retainerDescription : null,
+      monthly_retainer_amount: hasRetainer ? retainerAmount : null,
       price,
       billing_type: billing,
       client_location: location,

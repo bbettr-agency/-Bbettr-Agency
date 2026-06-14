@@ -14,6 +14,7 @@ export function NewDealForm() {
   const [error, setError] = useState<string | null>(null);
   const [packageKey, setPackageKey] = useState("");
   const isCustom = packageKey === CUSTOM_PACKAGE_KEY;
+  const [hasRetainer, setHasRetainer] = useState(false);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -160,6 +161,69 @@ export function NewDealForm() {
                 </div>
               </>
             )}
+            <div className="sm:col-span-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/40 p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  name="has_monthly_retainer"
+                  checked={hasRetainer}
+                  onChange={(e) => setHasRetainer(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                />
+                <span>
+                  <span className="text-sm font-medium text-ink-900">
+                    Add monthly retainer?{" "}
+                    <span className="font-normal text-ink-400">(optional)</span>
+                  </span>
+                  <span className="mt-0.5 block text-xs text-ink-500">
+                    Adds a second invoice line for an ongoing monthly service
+                    (e.g. hosting, maintenance, support) on top of the package.
+                  </span>
+                </span>
+              </label>
+
+              {hasRetainer && (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="monthly_retainer_name" required>
+                      Monthly Retainer Product / Service
+                    </Label>
+                    <Input
+                      id="monthly_retainer_name"
+                      name="monthly_retainer_name"
+                      placeholder="e.g. Monthly Website Retainer"
+                      required={hasRetainer}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="monthly_retainer_description" required>
+                      Monthly Retainer Description
+                    </Label>
+                    <Textarea
+                      id="monthly_retainer_description"
+                      name="monthly_retainer_description"
+                      rows={2}
+                      required={hasRetainer}
+                      placeholder="e.g. Monthly website hosting, maintenance, support and basic updates."
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="monthly_retainer_amount" required>
+                      Monthly Retainer Amount (ZAR)
+                    </Label>
+                    <Input
+                      id="monthly_retainer_amount"
+                      name="monthly_retainer_amount"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required={hasRetainer}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="sm:col-span-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" name="notes" rows={3} />
