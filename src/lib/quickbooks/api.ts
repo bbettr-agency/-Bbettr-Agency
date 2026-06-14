@@ -112,16 +112,28 @@ export async function customerExists(
   }
 }
 
+/** QBO item names cannot contain ':' (reserved for sub-items) and are capped at
+ *  100 chars; normalise a package name to a safe item name. */
+function safeItemName(name: string): string {
+  const cleaned = name.replace(/:/g, " ").replace(/\s+/g, " ").trim();
+  return (cleaned || "Agency Services").slice(0, 100);
+}
+
 /**
- * Find any active service/sales item to attach invoice lines to, creating a
- * generic "Agency Services" item the first time if none exists. QBO requires
- * every sales line to reference an Item.
+ * Find a Service item by its EXACT name, or create it (backed by the first
+ * income account). Each service package maps to its own named QBO product/
+ * service, created once — so an invoice line shows the correct product/service
+ * (the package sold) instead of reusing whatever item happened to exist first.
  */
-async function findOrCreateServiceItem(conn: ActiveConnection): Promise<string> {
+async function findOrCreateServiceItemByName(
+  conn: ActiveConnection,
+  name: string
+): Promise<string> {
+  const itemName = safeItemName(name);
   const found = await qboFetch<QueryResponse<{ Id: string }>>(
     conn,
     `query?query=${encodeURIComponent(
-      "select Id from Item where Type = 'Service' maxresults 1"
+      `select Id from Item where Name = '${ql(itemName)}'`
     )}`
   );
   const existing = found.QueryResponse.Item?.[0];
@@ -144,7 +156,7 @@ async function findOrCreateServiceItem(conn: ActiveConnection): Promise<string> 
   const created = await qboFetch<{ Item: { Id: string } }>(conn, "item", {
     method: "POST",
     body: JSON.stringify({
-      Name: "Agency Services",
+      Name: itemName,
       Type: "Service",
       IncomeAccountRef: { value: incomeAccountId },
     }),
@@ -173,11 +185,12 @@ export async function createInvoice(
   opts: {
     customerId: string;
     amount: number;
+    itemName: string;
     description?: string | null;
     email?: string | null;
   }
 ): Promise<CreatedInvoice> {
-  const itemId = await findOrCreateServiceItem(conn);
+  const itemId = await findOrCreateServiceItemByName(conn, opts.itemName);
 
   const response = await qboFetch<{
     Invoice: { Id: string; DocNumber?: string };
