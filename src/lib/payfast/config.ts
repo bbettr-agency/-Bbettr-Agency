@@ -58,6 +58,23 @@ export function payfastProcessUrl(env: PayfastEnvironment): string {
     : "https://sandbox.payfast.co.za/eng/process";
 }
 
+/** PayFast server-to-server ITN validation endpoint (source-authenticity check). */
+export function payfastValidateUrl(env: PayfastEnvironment): string {
+  return env === "live"
+    ? "https://www.payfast.co.za/eng/query/validate"
+    : "https://sandbox.payfast.co.za/eng/query/validate";
+}
+
+/**
+ * Whether the ITN webhook may auto-update payments. Default ON; set
+ * PAYFAST_ITN_ENABLED=false to fall back to manual "Mark as paid" only — the
+ * webhook then logs + acknowledges (200) without mutating anything. Instant
+ * rollback with no redeploy.
+ */
+export function isPayfastItnEnabled(): boolean {
+  return (process.env.PAYFAST_ITN_ENABLED ?? "true").trim().toLowerCase() !== "false";
+}
+
 /**
  * Non-secret config snapshot for the admin Integrations page. Surfaces the raw
  * env value, the resolved environment and the active process URL so a live/
@@ -74,6 +91,8 @@ export interface PayfastDebugInfo {
   appUrl: string | null;
   /** Boolean only — the passphrase value is never returned. */
   passphraseSet: boolean;
+  /** Whether the ITN webhook may auto-mark payments paid. */
+  itnEnabled: boolean;
 }
 
 export function getPayfastDebugInfo(): PayfastDebugInfo {
@@ -87,5 +106,6 @@ export function getPayfastDebugInfo(): PayfastDebugInfo {
     merchantId: process.env.PAYFAST_MERCHANT_ID ?? null,
     appUrl: process.env.NEXT_PUBLIC_APP_URL ?? null,
     passphraseSet: Boolean(process.env.PAYFAST_PASSPHRASE),
+    itnEnabled: isPayfastItnEnabled(),
   };
 }

@@ -218,6 +218,10 @@ export default async function IntegrationsPage({
               label="Passphrase set"
               value={payfast.passphraseSet ? "Yes" : "No"}
             />
+            <Row
+              label="ITN auto-mark paid"
+              value={payfast.itnEnabled ? "Enabled" : "Disabled (manual only)"}
+            />
           </div>
         </CardContent>
       </Card>
