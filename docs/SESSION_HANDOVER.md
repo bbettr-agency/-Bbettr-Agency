@@ -1,9 +1,40 @@
 # Session Handover — Bbettr Agency Client Portal
 
-_Last updated: 2026-06-11 · Production: https://portal.bbettragency.com_
+_Last updated: 2026-06-14 · Production: https://portal.bbettragency.com_
 
 This is the single source of truth for picking the project back up. All project
-docs live under [`docs/`](./).
+docs live under [`docs/`](./). A detailed day-log for the 2026-06-14 session also
+lives at the repo-root [`SESSION_HANDOVER.md`](../SESSION_HANDOVER.md).
+
+---
+
+## 📌 Session outcome — 2026-06-14 (QuickBooks live + PayFast V1/V2)
+
+Branch: `claude/quickbooks-reintegration`. Everything below is **tested and
+working in production**. Delivered as code-only patches; nothing auto-merged.
+
+**Done & verified:**
+- ✅ **QuickBooks live in production** — real invoicing confirmed.
+- ✅ QBO polish: `Invoice.Id` success handling; structured service packages
+  (`0013`); portal invoice numbers `BBTTR-000001` (`0014`); optional monthly
+  retainer as a second line (`0015`).
+- ✅ **PayFast V1 live & tested with a real payment** — international deals get a
+  signed link after invoicing; admin + rep can copy it; admin Mark Paid (`0016`).
+- ✅ Rep My Deals **Payment** column (EFT for SA; Pending+copy / Paid for intl).
+- ✅ PayFast **live/sandbox switch** fixed (`PAYFAST_ENVIRONMENT` accepts
+  `production`); admin Integrations → PayFast diagnostics card (no secrets).
+- ✅ **PayFast V2 ITN webhook tested & working** — `/api/payfast/notify`
+  auto-marks `paid` on verified `COMPLETE` (signature + validate postback +
+  merchant + amount); idempotent; `PAYFAST_ITN_ENABLED` kill-switch (`0017`).
+- ✅ Migrations **current through `0017`** (all applied).
+
+**Outstanding (non-blocking):** see `ROADMAP.md` → "Next for payments"
+(rep payment-received notification, auto-email the link, stale-link reconcile,
+unit tests, tidy debug card).
+
+**New env vars this session:** `PAYFAST_MERCHANT_ID`, `PAYFAST_MERCHANT_KEY`,
+`PAYFAST_PASSPHRASE`, `PAYFAST_ENVIRONMENT`, `PAYFAST_ITN_ENABLED`. `QBO_ENVIRONMENT`
+now `production`.
 
 ---
 

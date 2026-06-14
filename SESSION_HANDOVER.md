@@ -57,9 +57,8 @@ Run in order in the Supabase SQL Editor (each is idempotent / additive).
 | 0016 | `0016_payfast_payments.sql` | `payfast_payments` table (1:1 with invoice request, UNIQUE → no duplicate links), status check, admin RLS + rep read-own; service-role writes. Includes `raw_itn`, `pf_payment_id`, `paid_at` for V2. |
 | 0017 | `0017_payfast_itn.sql` | Additive **nullable** ITN audit columns: `pf_payment_status`, `amount_gross`, `itn_received_at`, `itn_valid`, `itn_error`. |
 
-**Status:** 0013–0016 reported applied and tested in production earlier today;
-**0017 must be run** alongside the V2 deploy. Confirm `0017` has been executed
-before relying on the ITN webhook.
+**Status:** 0013–0017 **all applied and tested in production.** Migrations are
+current through `0017`.
 
 ---
 
@@ -113,9 +112,9 @@ deals simply get no link — QuickBooks + EFT continue unaffected.
 - **Live/sandbox** controlled by `PAYFAST_ENVIRONMENT` (now accepts
   `production`). Verify on **Admin → Integrations → PayFast**: badge = Live,
   process URL = `https://www.payfast.co.za/eng/process`.
-- **V2 ITN webhook** deployed in code (`/api/payfast/notify`). Once `0017` is run
-  and the deploy is live, a verified `COMPLETE` notification flips a payment to
-  `paid` automatically. Manual Mark Paid remains as fallback.
+- **V2 ITN webhook live and tested** (`/api/payfast/notify`). A verified
+  `COMPLETE` notification flips a payment to `paid` automatically. Manual Mark
+  Paid remains as fallback; `PAYFAST_ITN_ENABLED` is the kill-switch.
 - **South African clients are unaffected** — they pay by EFT and never receive a
   PayFast link.
 
@@ -130,9 +129,6 @@ deals simply get no link — QuickBooks + EFT continue unaffected.
 
 ## 6. Known issues / watch-items
 
-- **0017 must be applied** before the ITN webhook can write its audit columns;
-  if missing, ITN writes will error (and be retried) — manual Mark Paid still
-  works in the meantime.
 - **ITN needs a public URL + outbound egress.** PayFast can't reach localhost;
   test on a deployed environment. The validate postback needs outbound HTTPS to
   `payfast.co.za` — on Vercel this is fine. If egress is ever blocked, the ITN
@@ -142,8 +138,9 @@ deals simply get no link — QuickBooks + EFT continue unaffected.
   never arrive (payments would then need manual Mark Paid).
 - **PayFast is ZAR-only.** International clients pay the ZAR invoice amount by
   card; there is no multi-currency conversion.
-- **No automated tests** were added for the PayFast/ITN flow; verification today
-  was manual (real payment for V1; V2 verified by build + design review).
+- **No automated tests** were added for the PayFast/ITN flow; verification was
+  manual end-to-end (real payment for V1; live ITN confirmed for V2). Unit tests
+  for the signature builder + ITN verification remain a recommended follow-up.
 - **Admin debug card** on Integrations is intentionally non-secret and left in
   place; can be removed or gated later if desired.
 - **Clipboard copy** on the rep "Copy payment link" button requires a secure
@@ -154,18 +151,15 @@ deals simply get no link — QuickBooks + EFT continue unaffected.
 
 ## 7. Next recommended tasks
 
-1. **Run migration 0017** and confirm the V2 deploy, then do an end-to-end ITN
-   test (real/sandbox payment → record auto-flips to `paid`; replay = no-op;
-   tampered amount / wrong merchant / bad signature = rejected with `itn_error`).
-2. **Optional: "payment received" notification** to the rep on a verified
+1. **Optional: "payment received" notification** to the rep on a verified
    `COMPLETE` ITN (deliberately deferred in V2).
-3. **Optional: reconcile/expire stale links** — surface payments stuck `pending`
+2. **Optional: reconcile/expire stale links** — surface payments stuck `pending`
    for N days for admin follow-up.
-4. **Optional: emailing the PayFast link** to the international client directly
+3. **Optional: emailing the PayFast link** to the international client directly
    (today it is copy/paste only — auto-send was intentionally not built).
-5. **Consider automated tests** for the signature builder and ITN verification
+4. **Consider automated tests** for the signature builder and ITN verification
    (pure functions — easy to unit test).
-6. **Tidy the temporary admin debug card** (remove or gate behind a flag) once
+5. **Tidy the temporary admin debug card** (remove or gate behind a flag) once
    live operation is confirmed stable.
 
 ---

@@ -37,27 +37,48 @@ ordered by impact.
   `south_africa` → QuickBooks invoice / EFT; `international` → QuickBooks invoice
   + PayFast payment link. No QuickBooks/PayFast/approval changes.
 
-## Next major feature
-- **QuickBooks Online (Phase 2 — ✅ SANDBOX COMPLETE & VERIFIED, ⏸️ production
-  not connected):** invoicing on invoice-request approval — admin OAuth connect,
-  find-or-create (and reuse) customer, create invoice (ZAR, once-off), and email
-  it. **Re-integrated onto the V1 + client-location baseline** as branch
-  `claude/quickbooks-reintegration` + migrations `0011_quickbooks` and
-  `0012_quickbooks_audit` (not a merge of the old branch). Decoupled /
-  best-effort / idempotent / retryable; preserves all V1 behaviour.
-  - **Verified in sandbox (2026-06-11):** customer create + reuse, invoice create,
-    invoice numbering (real QBO `DocNumber`, e.g. #1039), invoice visible in the
-    sandbox, invoice email send (octet-stream send fix for the QBO
-    `SystemFailureError`/`NullPointerException`), admin audit/debug panel, realm
-    verification. Status integrity: only marked `invoiced` after the invoice is
-    re-read and a valid Id + DocNumber are returned.
-  - **To go live:** flip `QBO_ENVIRONMENT=production`, reconnect against the live
-    company, verify realm/company on Integrations, then invoice a real deal.
-  - **Later:** recurring / monthly invoices, paid-status sync.
-- **PayFast (international payments — not started, after QuickBooks is in
-  production):** dedicated `payfast_payments` table + migration **`0013`** (now
-  that `0012` is the QuickBooks audit), signed payment link for `international`
-  deals + ITN webhook, paired with the QuickBooks invoice.
+## Shipped — 2026-06-14 (QuickBooks live + PayFast international payments)
+
+- **QuickBooks Online (Phase 2 — ✅ LIVE IN PRODUCTION):** invoicing on
+  invoice-request approval — admin OAuth connect, find-or-create (and reuse)
+  customer, create invoice (ZAR), and email it. Decoupled / best-effort /
+  idempotent / retryable; preserves all V1 behaviour.
+  - Verified in sandbox (2026-06-11), then taken **live** and confirmed with real
+    invoicing. Status integrity preserved: only marked `invoiced` after the
+    invoice is re-read and a valid Id is returned.
+  - **Polish shipped today:** treat `Invoice.Id` as the success signal (don't
+    fail on a briefly-missing `DocNumber`); **structured service packages** →
+    correct QBO product/service + description (migration `0013`); **portal-
+    assigned invoice numbers** `BBTTR-000001` on the PDF/email (migration `0014`,
+    `next_qbo_invoice_docnumber()`); **optional monthly retainer** as a second
+    invoice line (migration `0015`).
+  - **Later:** recurring / monthly automated invoices, deeper paid-status sync.
+
+- **PayFast (international payments — ✅ LIVE & TESTED, V1 + V2):** international
+  deals (`client_location = 'international'`) get a signed PayFast payment link
+  once invoiced; South African clients are unaffected (QuickBooks invoice + EFT,
+  never a link). Decoupled / env-flagged / idempotent; no QuickBooks, commission
+  or SA/EFT impact.
+  - **V1 (migration `0016_payfast_payments`):** generate + store + display the
+    link, with manual admin **Mark as paid**. `payfast_payments` table (1:1
+    UNIQUE per invoice request → no duplicate links). Admin Invoice Requests:
+    badge + copy link + mark paid. Rep My Deals: **Payment** column (EFT for SA;
+    Pending + copy link / Paid for international). Public `/pay/<id>` checkout
+    hand-off + `/pay/return` + `/pay/cancel`. **Tested with a real payment.**
+  - **Live/sandbox switch:** `PAYFAST_ENVIRONMENT` accepts `live` / `production`
+    / `prod`. Admin **Integrations → PayFast** diagnostics card (non-secret).
+  - **V2 (migration `0017_payfast_itn`):** `POST /api/payfast/notify` ITN webhook
+    auto-marks a payment `paid` on a verified `COMPLETE`. Verifies signature +
+    server-to-server validate postback + merchant id + amount. Idempotent,
+    tamper-resistant, always 200, no secrets logged. Manual Mark Paid retained as
+    fallback; `PAYFAST_ITN_ENABLED` kill-switch (default on). **Tested & working.**
+
+### Next for payments (deferred, not blockers)
+- "Payment received" notification to the rep on a verified `COMPLETE` ITN.
+- Email the PayFast link directly to the international client (today: copy/paste).
+- Reconcile / flag links stuck `pending` for N days for admin follow-up.
+- Unit tests for the signature builder + ITN verification (pure functions).
+- Tidy / gate the temporary admin PayFast debug card once stable.
 
 ## Pre-production cleanup (before launch)
 - **Restore the Delete Rep history guard** (or ship the **Archive Rep**
