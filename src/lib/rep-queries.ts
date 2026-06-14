@@ -14,7 +14,7 @@ function isThisMonth(ts: string): boolean {
 /** Fetch a rep's own raw data once (RLS scopes to rep_id = auth.uid()). */
 async function fetchRepData(repId: string) {
   const supabase = await createClient();
-  const [{ data: deals }, { data: requests }, { data: commissions }] =
+  const [{ data: deals }, { data: requests }, { data: commissions }, { data: payments }] =
     await Promise.all([
       supabase
         .from("deals")
@@ -24,30 +24,38 @@ async function fetchRepData(repId: string) {
       supabase
         .from("invoice_requests")
         .select(
-          "deal_id, status, amount, quickbooks_invoice_number, updated_at, created_at"
+          "id, deal_id, status, amount, quickbooks_invoice_number, updated_at, created_at"
         )
         .eq("rep_id", repId),
       supabase
         .from("commissions")
         .select("deal_id, amount, status, created_at")
         .eq("rep_id", repId),
+      // RLS lets a rep read PayFast payments for their own requests.
+      supabase
+        .from("payfast_payments")
+        .select("invoice_request_id, status"),
     ]);
   return {
     deals: deals ?? [],
     requests: requests ?? [],
     commissions: commissions ?? [],
+    payments: payments ?? [],
   };
 }
 
 export type DealView = Deal & {
   requestStatus: InvoiceRequestStatus;
   invoiceNumber: string | null;
+  /** PayFast status for international deals (null for SA / no link yet). */
+  paymentStatus: string | null;
 };
 
 /** A rep's deals, each annotated with its invoice-request status + number. */
 export async function getRepDealViews(repId: string): Promise<DealView[]> {
-  const { deals, requests } = await fetchRepData(repId);
+  const { deals, requests, payments } = await fetchRepData(repId);
   const byDeal = new Map(requests.map((r) => [r.deal_id, r]));
+  const payByRequest = new Map(payments.map((p) => [p.invoice_request_id, p.status]));
   return deals.map((d) => {
     const req = byDeal.get(d.id);
     return {
@@ -57,6 +65,7 @@ export async function getRepDealViews(repId: string): Promise<DealView[]> {
       // be reserved before creation succeeds.
       invoiceNumber:
         req?.status === "invoiced" ? req?.quickbooks_invoice_number ?? null : null,
+      paymentStatus: req ? payByRequest.get(req.id) ?? null : null,
     };
   });
 }

@@ -13,6 +13,7 @@ import {
   sendInvoiceRejectedEmail,
 } from "@/lib/email/rep-notifications";
 import { createInvoiceForRequest } from "@/lib/quickbooks";
+import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
@@ -717,7 +718,11 @@ export async function approveInvoiceRequestAction(
 
   // Email the rep that their request was approved (best-effort).
   const [{ data: deal }, { data: repProfile }] = await Promise.all([
-    supabase.from("deals").select("business_name, package").eq("id", req.deal_id).maybeSingle(),
+    supabase
+      .from("deals")
+      .select("business_name, package, client_location")
+      .eq("id", req.deal_id)
+      .maybeSingle(),
     supabase.from("profiles").select("email").eq("id", req.rep_id).maybeSingle(),
   ]);
   if (repProfile?.email && deal) {
@@ -753,6 +758,30 @@ export async function approveInvoiceRequestAction(
       body: `Approval succeeded but invoicing failed: ${invoiceResult.error}. You can retry from Invoice Requests.`,
       link: "/admin/invoices",
     });
+  }
+
+  // PayFast payment link — INTERNATIONAL clients only, and only once the QBO
+  // invoice exists. Decoupled/best-effort/idempotent: South African deals never
+  // get a link (they pay by EFT), and a PayFast failure never affects approval,
+  // commission or QuickBooks. (No external call — it builds a signed link + row.)
+  if (deal?.client_location === "international" && invoiceResult.ok) {
+    const payfast = await createPaymentForRequest(requestId);
+    if (payfast.ok) {
+      await notifyInternal({
+        recipientId: req.rep_id,
+        type: "invoice_approved",
+        title: "Payment link ready",
+        body: "A PayFast payment link was created for this international client.",
+        link: "/rep/deals",
+      });
+    } else if (isPayfastConfigured()) {
+      await notifyAdmins({
+        type: "invoice_request",
+        title: "PayFast link not created",
+        body: `Invoiced, but the PayFast link failed: ${payfast.error}. You can retry from Invoice Requests.`,
+        link: "/admin/invoices",
+      });
+    }
   }
 
   revalidatePath("/admin/invoices");
@@ -802,6 +831,56 @@ export async function retryInvoiceRequestAction(
     body: "Your deal has been invoiced in QuickBooks.",
     link: "/rep/deals",
   });
+
+  revalidatePath("/admin/invoices");
+  revalidatePath("/rep", "layout");
+  return { ok: true };
+}
+
+/**
+ * Generate (or reuse) the PayFast payment link for an international invoice
+ * request — used to retry a link that failed at approval time. Idempotent: never
+ * creates a second link. International-only (the lib enforces this).
+ */
+export async function generatePayfastLinkAction(
+  requestId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const result = await createPaymentForRequest(requestId);
+  if (!result.ok) return { error: result.error };
+  revalidatePath("/admin/invoices");
+  revalidatePath("/rep", "layout");
+  return { ok: true };
+}
+
+/**
+ * Manually mark a PayFast payment as paid (V1 — until the ITN webhook lands in
+ * V2). Records who confirmed it and when. Does not touch commission or the
+ * QuickBooks invoice.
+ */
+export async function markPayfastPaidAction(
+  requestId: string
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const admin = createAdminClient();
+
+  const { data: pay } = await admin
+    .from("payfast_payments")
+    .select("id, status")
+    .eq("invoice_request_id", requestId)
+    .maybeSingle();
+  if (!pay) return { error: "No PayFast payment found for this request." };
+  if (pay.status === "paid") return { error: "This payment is already marked paid." };
+
+  const { error } = await admin
+    .from("payfast_payments")
+    .update({
+      status: "paid",
+      paid_at: new Date().toISOString(),
+      marked_paid_by: profile.id,
+    })
+    .eq("invoice_request_id", requestId);
+  if (error) return { error: error.message };
 
   revalidatePath("/admin/invoices");
   revalidatePath("/rep", "layout");

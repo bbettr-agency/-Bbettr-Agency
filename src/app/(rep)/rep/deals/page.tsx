@@ -120,6 +120,7 @@ export default async function MyDealsPage({
                 <TH>Billing Type</TH>
                 <TH>Status</TH>
                 <TH>Invoice</TH>
+                <TH>Payment</TH>
                 <TH>Date</TH>
               </TR>
             </THead>
@@ -145,6 +146,23 @@ export default async function MyDealsPage({
                     {d.invoiceNumber ? (
                       <span className="font-medium text-ink-700">
                         #{d.invoiceNumber}
+                      </span>
+                    ) : (
+                      <span className="text-ink-400">—</span>
+                    )}
+                  </TD>
+                  <TD className="whitespace-nowrap text-xs">
+                    {d.client_location === "south_africa" ? (
+                      <span className="text-ink-400">EFT</span>
+                    ) : d.paymentStatus ? (
+                      <span
+                        className={
+                          d.paymentStatus === "paid"
+                            ? "font-medium text-emerald-700"
+                            : "text-ink-600"
+                        }
+                      >
+                        {d.paymentStatus === "paid" ? "Paid" : "Pending"}
                       </span>
                     ) : (
                       <span className="text-ink-400">—</span>

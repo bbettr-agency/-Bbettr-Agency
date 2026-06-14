@@ -2,7 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/database.types";
 
-const PUBLIC_ROUTES = ["/login", "/auth", "/forgot-password", "/reset-password"];
+const PUBLIC_ROUTES = [
+  "/login",
+  "/auth",
+  "/forgot-password",
+  "/reset-password",
+  // PayFast checkout hand-off + return/cancel pages + ITN (V2) are hit by the
+  // international payer, who is not a logged-in portal user.
+  "/pay",
+  "/api/payfast",
+];
 
 /**
  * Refreshes the Supabase session on every request and enforces route-level

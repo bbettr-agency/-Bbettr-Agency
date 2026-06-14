@@ -564,6 +564,39 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["quickbooks_connection"]["Row"]>;
         Relationships: [];
       };
+      payfast_payments: {
+        Row: {
+          id: string;
+          invoice_request_id: string;
+          deal_id: string | null;
+          m_payment_id: string;
+          amount: number;
+          item_name: string;
+          payment_url: string;
+          status: string;
+          pf_payment_id: string | null;
+          paid_at: string | null;
+          marked_paid_by: string | null;
+          raw_itn: Record<string, unknown> | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          invoice_request_id: string;
+          deal_id?: string | null;
+          m_payment_id: string;
+          amount: number;
+          item_name: string;
+          payment_url: string;
+          status?: string;
+          pf_payment_id?: string | null;
+          paid_at?: string | null;
+          marked_paid_by?: string | null;
+          raw_itn?: Record<string, unknown> | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["payfast_payments"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -601,3 +634,4 @@ export type InvoiceRequest = Database["public"]["Tables"]["invoice_requests"]["R
 export type Commission = Database["public"]["Tables"]["commissions"]["Row"];
 export type InternalNotification = Database["public"]["Tables"]["internal_notifications"]["Row"];
 export type QuickbooksConnection = Database["public"]["Tables"]["quickbooks_connection"]["Row"];
+export type PayfastPayment = Database["public"]["Tables"]["payfast_payments"]["Row"];
