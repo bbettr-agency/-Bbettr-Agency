@@ -578,6 +578,11 @@ export interface Database {
           paid_at: string | null;
           marked_paid_by: string | null;
           raw_itn: Record<string, unknown> | null;
+          pf_payment_status: string | null;
+          amount_gross: number | null;
+          itn_received_at: string | null;
+          itn_valid: boolean | null;
+          itn_error: string | null;
           created_at: string;
           updated_at: string;
         };
