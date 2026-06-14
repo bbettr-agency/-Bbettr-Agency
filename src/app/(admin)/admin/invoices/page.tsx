@@ -90,6 +90,9 @@ function RequestCard({
     email: string | null;
     package: string | null;
     client_location: import("@/lib/database.types").ClientLocation;
+    has_monthly_retainer: boolean | null;
+    monthly_retainer_name: string | null;
+    monthly_retainer_amount: number | null;
   } | null;
 
   // Approved but not yet invoiced in QuickBooks → offer a retry.
@@ -151,6 +154,17 @@ function RequestCard({
               </span>{" "}
               · {request.billing_type === "once_off" ? "Once-off" : "Monthly"}
             </p>
+            {deal?.has_monthly_retainer && deal.monthly_retainer_name && (
+              <p className="mt-0.5 text-xs text-ink-500">
+                + Monthly retainer: {deal.monthly_retainer_name}
+                {deal.monthly_retainer_amount != null && (
+                  <span className="font-medium text-ink-700">
+                    {" "}
+                    · {formatCurrency(deal.monthly_retainer_amount)}
+                  </span>
+                )}
+              </p>
+            )}
             <p className="mt-0.5 text-xs text-ink-400">
               {deal?.contact_name ?? deal?.email ?? "—"} ·{" "}
               {format(new Date(request.created_at), "d MMM yyyy")}

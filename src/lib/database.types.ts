@@ -409,6 +409,10 @@ export interface Database {
           package_key: string | null;
           custom_package_name: string | null;
           custom_package_description: string | null;
+          has_monthly_retainer: boolean;
+          monthly_retainer_name: string | null;
+          monthly_retainer_description: string | null;
+          monthly_retainer_amount: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -429,6 +433,10 @@ export interface Database {
           package_key?: string | null;
           custom_package_name?: string | null;
           custom_package_description?: string | null;
+          has_monthly_retainer?: boolean;
+          monthly_retainer_name?: string | null;
+          monthly_retainer_description?: string | null;
+          monthly_retainer_amount?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["deals"]["Row"]>;
         Relationships: [];

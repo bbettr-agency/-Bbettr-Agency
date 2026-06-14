@@ -171,27 +171,46 @@ export interface CreatedInvoice {
   raw?: unknown;
 }
 
+/** One invoice line: its product/service name, amount, and optional description. */
+export interface InvoiceLineInput {
+  itemName: string;
+  amount: number;
+  description?: string | null;
+}
+
 /**
- * Create an invoice for a customer. A single line item carries the full amount.
- * Returns the QBO invoice Id and its DocNumber (the human invoice number, the
- * value visible inside QuickBooks) plus the raw response. NOTE: DocNumber can be
- * absent in the create response (e.g. companies with "Custom transaction
- * numbers" disabled) — the Id is the authoritative success signal. The email is
- * sent separately via `sendInvoiceEmail`; setting BillEmail here only records
- * the address.
+ * Create an invoice for a customer with one or more line items. Each line's
+ * product/service is found-or-created by its exact name (so a once-off package
+ * and a monthly retainer become two distinct, correctly-named lines, never
+ * combined). QBO sums the lines for the invoice total. Returns the QBO invoice
+ * Id and DocNumber plus the raw response. The email is sent separately via
+ * `sendInvoiceEmail`; setting BillEmail here only records the address.
  */
 export async function createInvoice(
   conn: ActiveConnection,
   opts: {
     customerId: string;
-    amount: number;
-    itemName: string;
+    lines: InvoiceLineInput[];
     docNumber?: string | null;
-    description?: string | null;
     email?: string | null;
   }
 ): Promise<CreatedInvoice> {
-  const itemId = await findOrCreateServiceItemByName(conn, opts.itemName);
+  // Resolve each line's item sequentially (avoids creating a duplicate item if
+  // two lines somehow shared a name), then build the QBO Line array.
+  const qboLines = [];
+  for (const line of opts.lines) {
+    const itemId = await findOrCreateServiceItemByName(conn, line.itemName);
+    qboLines.push({
+      DetailType: "SalesItemLineDetail",
+      Amount: line.amount,
+      Description: line.description ?? undefined,
+      SalesItemLineDetail: {
+        ItemRef: { value: itemId },
+        Qty: 1,
+        UnitPrice: line.amount,
+      },
+    });
+  }
 
   const response = await qboFetch<{
     Invoice: { Id: string; DocNumber?: string };
@@ -202,18 +221,7 @@ export async function createInvoice(
       // Portal-assigned invoice number (requires "Custom transaction numbers"
       // ON in QBO). QBO echoes it back and prints it on the PDF/email.
       ...(opts.docNumber ? { DocNumber: opts.docNumber } : {}),
-      Line: [
-        {
-          DetailType: "SalesItemLineDetail",
-          Amount: opts.amount,
-          Description: opts.description ?? undefined,
-          SalesItemLineDetail: {
-            ItemRef: { value: itemId },
-            Qty: 1,
-            UnitPrice: opts.amount,
-          },
-        },
-      ],
+      Line: qboLines,
       ...(opts.email ? { BillEmail: { Address: opts.email } } : {}),
     }),
   });
