@@ -14,6 +14,7 @@ import {
   ClientLocationBadge,
 } from "@/components/ui/status-badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { PaymentLinkCell } from "@/components/rep/payment-link-cell";
 
 export const metadata: Metadata = { title: "My Deals" };
 
@@ -152,21 +153,12 @@ export default async function MyDealsPage({
                     )}
                   </TD>
                   <TD className="whitespace-nowrap text-xs">
-                    {d.client_location === "south_africa" ? (
-                      <span className="text-ink-400">EFT</span>
-                    ) : d.paymentStatus ? (
-                      <span
-                        className={
-                          d.paymentStatus === "paid"
-                            ? "font-medium text-emerald-700"
-                            : "text-ink-600"
-                        }
-                      >
-                        {d.paymentStatus === "paid" ? "Paid" : "Pending"}
-                      </span>
-                    ) : (
-                      <span className="text-ink-400">—</span>
-                    )}
+                    <PaymentLinkCell
+                      location={d.client_location}
+                      requestStatus={d.requestStatus}
+                      paymentStatus={d.paymentStatus}
+                      paymentUrl={d.paymentUrl}
+                    />
                   </TD>
                   <TD className="whitespace-nowrap text-xs text-ink-500">
                     {format(new Date(d.created_at), "d MMM yyyy")}
