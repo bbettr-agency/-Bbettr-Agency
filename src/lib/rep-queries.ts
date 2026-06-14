@@ -34,7 +34,7 @@ async function fetchRepData(repId: string) {
       // RLS lets a rep read PayFast payments for their own requests.
       supabase
         .from("payfast_payments")
-        .select("invoice_request_id, status"),
+        .select("invoice_request_id, status, payment_url"),
     ]);
   return {
     deals: deals ?? [],
@@ -49,15 +49,18 @@ export type DealView = Deal & {
   invoiceNumber: string | null;
   /** PayFast status for international deals (null for SA / no link yet). */
   paymentStatus: string | null;
+  /** Clean portal PayFast link (…/pay/<id>) for international deals; null otherwise. */
+  paymentUrl: string | null;
 };
 
 /** A rep's deals, each annotated with its invoice-request status + number. */
 export async function getRepDealViews(repId: string): Promise<DealView[]> {
   const { deals, requests, payments } = await fetchRepData(repId);
   const byDeal = new Map(requests.map((r) => [r.deal_id, r]));
-  const payByRequest = new Map(payments.map((p) => [p.invoice_request_id, p.status]));
+  const payByRequest = new Map(payments.map((p) => [p.invoice_request_id, p]));
   return deals.map((d) => {
     const req = byDeal.get(d.id);
+    const pay = req ? payByRequest.get(req.id) ?? null : null;
     return {
       ...d,
       requestStatus: (req?.status ?? "pending") as InvoiceRequestStatus,
@@ -65,7 +68,8 @@ export async function getRepDealViews(repId: string): Promise<DealView[]> {
       // be reserved before creation succeeds.
       invoiceNumber:
         req?.status === "invoiced" ? req?.quickbooks_invoice_number ?? null : null,
-      paymentStatus: req ? payByRequest.get(req.id) ?? null : null,
+      paymentStatus: pay?.status ?? null,
+      paymentUrl: pay?.payment_url ?? null,
     };
   });
 }
