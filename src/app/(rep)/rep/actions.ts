@@ -6,6 +6,11 @@ import { requireRep, isRepActive } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { notifyAdmins } from "@/lib/internal-notifications";
 import { sendInvoiceRequestEmail } from "@/lib/email/rep-notifications";
+import {
+  isValidPackageKey,
+  isCustomPackage,
+  resolvePackage,
+} from "@/lib/packages";
 import type { BillingType, ClientLocation } from "@/lib/database.types";
 
 export interface DealActionResult {
@@ -59,6 +64,22 @@ export async function createDealAction(
 
   const text = (k: string) => String(formData.get(k) ?? "").trim() || null;
 
+  // Structured service package — must be a known catalogue key. For the custom
+  // package the rep must supply a product/service name and description, which
+  // become the QuickBooks line item + description.
+  const packageKey = String(formData.get("package_key") ?? "").trim();
+  if (!isValidPackageKey(packageKey)) {
+    return { error: "Please choose a service package." };
+  }
+  const customName = text("custom_package_name");
+  const customDescription = text("custom_package_description");
+  if (isCustomPackage(packageKey) && (!customName || !customDescription)) {
+    return {
+      error: "Please enter a custom product/service name and description.",
+    };
+  }
+  const resolved = resolvePackage({ packageKey, customName, customDescription });
+
   const { data: deal, error } = await supabase
     .from("deals")
     .insert({
@@ -67,7 +88,12 @@ export async function createDealAction(
       contact_name: text("contact_name"),
       email: text("email"),
       phone: text("phone"),
-      package: text("package"),
+      package: resolved.label,
+      package_key: packageKey,
+      custom_package_name: isCustomPackage(packageKey) ? customName : null,
+      custom_package_description: isCustomPackage(packageKey)
+        ? customDescription
+        : null,
       price,
       billing_type: billing,
       client_location: location,
@@ -114,7 +140,7 @@ export async function createDealAction(
     contactName: text("contact_name"),
     email: text("email"),
     phone: text("phone"),
-    packageName: text("package"),
+    packageName: resolved.label,
     amount: price,
     billingType: billing,
     location,

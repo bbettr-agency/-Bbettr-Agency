@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { AlertCircle, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createDealAction } from "@/app/(rep)/rep/actions";
+import { SERVICE_PACKAGES, CUSTOM_PACKAGE_KEY } from "@/lib/packages";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select, FieldHelp } from "@/components/ui/input";
@@ -11,6 +12,8 @@ import { Input, Textarea, Label, Select, FieldHelp } from "@/components/ui/input
 export function NewDealForm() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [packageKey, setPackageKey] = useState("");
+  const isCustom = packageKey === CUSTOM_PACKAGE_KEY;
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -81,8 +84,28 @@ export function NewDealForm() {
           <h2 className="text-sm font-semibold text-ink-900">Package & price</h2>
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
-              <Label htmlFor="package">Package Sold</Label>
-              <Input id="package" name="package" placeholder="e.g. Website Pro" />
+              <Label htmlFor="package_key" required>
+                Service Package
+              </Label>
+              <Select
+                id="package_key"
+                name="package_key"
+                value={packageKey}
+                onChange={(e) => setPackageKey(e.target.value)}
+                required
+              >
+                <option value="" disabled>
+                  Select a package…
+                </option>
+                {SERVICE_PACKAGES.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+              <FieldHelp>
+                Determines the product/service and description on the invoice.
+              </FieldHelp>
             </div>
             <div>
               <Label htmlFor="price" required>
@@ -109,6 +132,34 @@ export function NewDealForm() {
                 by the team.
               </FieldHelp>
             </div>
+            {isCustom && (
+              <>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="custom_package_name" required>
+                    Custom Product / Service Name
+                  </Label>
+                  <Input
+                    id="custom_package_name"
+                    name="custom_package_name"
+                    placeholder="e.g. Bespoke Branding Retainer"
+                    required={isCustom}
+                  />
+                  <FieldHelp>Shown as the product/service on the invoice.</FieldHelp>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="custom_package_description" required>
+                    Custom Description
+                  </Label>
+                  <Textarea
+                    id="custom_package_description"
+                    name="custom_package_description"
+                    rows={2}
+                    required={isCustom}
+                    placeholder="What the client is being invoiced for."
+                  />
+                </div>
+              </>
+            )}
             <div className="sm:col-span-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" name="notes" rows={3} />

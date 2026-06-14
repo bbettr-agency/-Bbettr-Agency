@@ -406,6 +406,9 @@ export interface Database {
           status: DealStatus;
           client_id: string | null;
           quickbooks_customer_id: string | null;
+          package_key: string | null;
+          custom_package_name: string | null;
+          custom_package_description: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -423,6 +426,9 @@ export interface Database {
           status?: DealStatus;
           client_id?: string | null;
           quickbooks_customer_id?: string | null;
+          package_key?: string | null;
+          custom_package_name?: string | null;
+          custom_package_description?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["deals"]["Row"]>;
         Relationships: [];

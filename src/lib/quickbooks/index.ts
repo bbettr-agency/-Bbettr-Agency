@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolvePackage } from "@/lib/packages";
 import {
   getQboConfig,
   QBO_AUTHORIZE_URL,
@@ -95,7 +96,7 @@ export async function createInvoiceForRequest(
   const { data: req } = await admin
     .from("invoice_requests")
     .select(
-      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, quickbooks_customer_id)"
+      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, package_key, custom_package_name, custom_package_description, quickbooks_customer_id)"
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -135,9 +136,21 @@ export async function createInvoiceForRequest(
     business_name: string;
     email: string | null;
     package: string | null;
+    package_key: string | null;
+    custom_package_name: string | null;
+    custom_package_description: string | null;
     quickbooks_customer_id: string | null;
   } | null;
   if (!deal) return { ok: false, error: "Deal not found for this request." };
+
+  // Resolve the QBO product/service name + invoice description from the deal's
+  // structured package (falls back to the legacy free-text package on old deals).
+  const lineItem = resolvePackage({
+    packageKey: deal.package_key,
+    customName: deal.custom_package_name,
+    customDescription: deal.custom_package_description,
+    legacyPackage: deal.package,
+  });
 
   // Accumulating diagnostics persisted on every outcome (success or failure).
   const log: Record<string, unknown> = { attemptedAt };
@@ -190,9 +203,11 @@ export async function createInvoiceForRequest(
     const created = await createInvoice(conn, {
       customerId,
       amount: Number(req.amount),
-      description: deal.package,
+      itemName: lineItem.qboItemName,
+      description: lineItem.description,
       email: deal.email,
     });
+    log.lineItem = { item: lineItem.qboItemName, description: lineItem.description };
     log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
     log.invoiceCreateRaw = created.raw ?? null;
 
