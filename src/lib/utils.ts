@@ -50,7 +50,14 @@ export function formatBytes(bytes: number, decimals = 1) {
 }
 
 /** Build a deterministic storage path for a tenant's file. */
-export function buildStoragePath(clientId: string, fileName: string) {
+export function buildStoragePath(
+  clientId: string,
+  fileName: string,
+  category?: string
+) {
   const safe = fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-  return `${clientId}/${Date.now()}-${safe}`;
+  // client_id stays the FIRST segment so storage RLS (which keys on it) is
+  // unaffected; the optional category segment is purely organisational.
+  const prefix = category ? `${clientId}/${category}` : clientId;
+  return `${prefix}/${Date.now()}-${safe}`;
 }

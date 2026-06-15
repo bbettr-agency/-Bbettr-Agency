@@ -4,11 +4,16 @@ import { useState } from "react";
 import { UploadCloud, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { uploadClientFile } from "@/lib/upload";
-import type { FileCategory, FileRecord } from "@/lib/database.types";
+import type { AssetCategoryKey } from "@/lib/assets";
+import type { FileRecord } from "@/lib/database.types";
 
 interface FileDropzoneProps {
   clientId: string;
-  category?: FileCategory;
+  /** Target asset category (defaults to "documents", e.g. onboarding uploads). */
+  assetCategory?: AssetCategoryKey;
+  subcategory?: string | null;
+  /** Admin-only: stage a file hidden from the client. */
+  clientVisible?: boolean;
   accept?: string;
   multiple?: boolean;
   onUploaded?: (file: FileRecord) => void;
@@ -25,7 +30,9 @@ interface UploadResult {
 
 export function FileDropzone({
   clientId,
-  category,
+  assetCategory = "documents",
+  subcategory,
+  clientVisible,
   accept,
   multiple = true,
   onUploaded,
@@ -44,7 +51,11 @@ export function FileDropzone({
     for (const file of Array.from(files)) {
       const entryId = id++;
       try {
-        const record = await uploadClientFile(clientId, file, category);
+        const record = await uploadClientFile(clientId, file, {
+          assetCategory,
+          subcategory,
+          clientVisible,
+        });
         setResults((r) => [
           ...r,
           { id: entryId, name: file.name, status: "success" },

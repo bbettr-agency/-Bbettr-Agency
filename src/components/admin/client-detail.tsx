@@ -266,7 +266,7 @@ export function ClientDetail({
             <FileManager
               clientId={client.id}
               initialFiles={files}
-              readOnly
+              isAdmin
             />
           )}
         </>
