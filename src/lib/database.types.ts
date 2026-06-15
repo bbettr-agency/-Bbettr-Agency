@@ -80,6 +80,8 @@ export interface Database {
           status: ClientStatus;
           logo_url: string | null;
           notes: string | null;
+          estimated_launch_date: string | null;
+          success_manager_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -171,6 +173,7 @@ export interface Database {
           description: string | null;
           status: StageStatus;
           position: number;
+          target_date: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -180,6 +183,7 @@ export interface Database {
           description?: string | null;
           status?: StageStatus;
           position?: number;
+          target_date?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["project_stages"]["Row"]>;
         Relationships: [
@@ -602,6 +606,67 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["payfast_payments"]["Row"]>;
         Relationships: [];
       };
+      team_members: {
+        Row: {
+          id: string;
+          name: string;
+          role: string | null;
+          email: string | null;
+          whatsapp: string | null;
+          photo_url: string | null;
+          calendly_url: string | null;
+          is_default: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          name: string;
+          role?: string | null;
+          email?: string | null;
+          whatsapp?: string | null;
+          photo_url?: string | null;
+          calendly_url?: string | null;
+          is_default?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["team_members"]["Row"]>;
+        Relationships: [];
+      };
+      activity_events: {
+        Row: {
+          id: string;
+          client_id: string;
+          type: string;
+          title: string;
+          description: string | null;
+          visibility: string;
+          icon: string | null;
+          occurred_at: string;
+          source: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          client_id: string;
+          type: string;
+          title: string;
+          description?: string | null;
+          visibility?: string;
+          icon?: string | null;
+          occurred_at?: string;
+          source?: string;
+          created_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["activity_events"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "activity_events_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -640,3 +705,5 @@ export type Commission = Database["public"]["Tables"]["commissions"]["Row"];
 export type InternalNotification = Database["public"]["Tables"]["internal_notifications"]["Row"];
 export type QuickbooksConnection = Database["public"]["Tables"]["quickbooks_connection"]["Row"];
 export type PayfastPayment = Database["public"]["Tables"]["payfast_payments"]["Row"];
+export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
+export type ActivityEvent = Database["public"]["Tables"]["activity_events"]["Row"];
