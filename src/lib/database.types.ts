@@ -68,6 +68,8 @@ export type AssetCategory =
   | "deliverables"
   | "reports";
 
+export type ContractStatus = "not_sent" | "sent" | "signed";
+
 export type NotificationType =
   | "report_published"
   | "update_posted"
@@ -682,6 +684,43 @@ export interface Database {
           }
         ];
       };
+      contracts: {
+        Row: {
+          id: string;
+          client_id: string;
+          title: string;
+          status: ContractStatus;
+          contract_url: string | null;
+          signed_file_url: string | null;
+          file_id: string | null;
+          sent_at: string | null;
+          signed_at: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          title: string;
+          status?: ContractStatus;
+          contract_url?: string | null;
+          signed_file_url?: string | null;
+          file_id?: string | null;
+          sent_at?: string | null;
+          signed_at?: string | null;
+          created_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["contracts"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "contracts_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -722,3 +761,4 @@ export type QuickbooksConnection = Database["public"]["Tables"]["quickbooks_conn
 export type PayfastPayment = Database["public"]["Tables"]["payfast_payments"]["Row"];
 export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
 export type ActivityEvent = Database["public"]["Tables"]["activity_events"]["Row"];
+export type Contract = Database["public"]["Tables"]["contracts"]["Row"];
