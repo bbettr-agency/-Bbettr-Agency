@@ -10,6 +10,7 @@ import {
   getUpdates,
   getOnboarding,
   getOpenActionItems,
+  getActivityTimeline,
   computeProgress,
   isOnboardingComplete,
 } from "@/lib/queries";
@@ -18,6 +19,8 @@ import { WelcomeHero } from "@/components/client/welcome-hero";
 import { ProjectJourney } from "@/components/client/project-journey";
 import { NextStepCard } from "@/components/client/next-step-card";
 import { SuccessManagerCard } from "@/components/client/success-manager-card";
+import { PackageOverview } from "@/components/client/package-overview";
+import { ActivityTimeline } from "@/components/client/activity-timeline";
 import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
 import { resolveSuccessManager } from "@/lib/success-manager";
 import { computeReadiness } from "@/lib/readiness";
@@ -32,7 +35,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const profile = await requireClient();
-  const [client, services, stages, updates, onboarding, actionItems] =
+  const [client, services, stages, updates, onboarding, actionItems, activity] =
     await Promise.all([
       getClient(profile.client_id),
       getClientServices(profile.client_id),
@@ -40,6 +43,7 @@ export default async function DashboardPage() {
       getUpdates(profile.client_id, 3),
       getOnboarding(profile.client_id),
       getOpenActionItems(profile.client_id),
+      getActivityTimeline(profile.client_id),
     ]);
 
   const progress = computeProgress(stages);
@@ -164,6 +168,12 @@ export default async function DashboardPage() {
           <SuccessManagerCard manager={successManager} />
         </div>
       </div>
+
+      {/* Package deliverables + growth opportunities */}
+      <PackageOverview purchased={services.map((s) => s.service)} />
+
+      {/* Activity timeline */}
+      <ActivityTimeline events={activity} />
 
       {/* Latest updates */}
       <Card>
