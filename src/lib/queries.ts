@@ -206,6 +206,22 @@ export async function getFiles(clientId: string) {
   return data ?? [];
 }
 
+/**
+ * Client-facing activity timeline, newest first. RLS restricts a client session
+ * to its own client-visible events; we filter + order explicitly too.
+ */
+export async function getActivityTimeline(clientId: string, limit = 30) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("activity_events")
+    .select("id, type, title, description, icon, occurred_at")
+    .eq("client_id", clientId)
+    .eq("visibility", "client")
+    .order("occurred_at", { ascending: false })
+    .limit(limit);
+  return data ?? [];
+}
+
 export async function getOnboarding(clientId: string) {
   const supabase = await createClient();
   const { data } = await supabase
