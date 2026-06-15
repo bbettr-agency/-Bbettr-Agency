@@ -16,7 +16,10 @@ import {
 import { ActionRequiredBanner } from "@/components/client/action-required-banner";
 import { WelcomeHero } from "@/components/client/welcome-hero";
 import { ProjectJourney } from "@/components/client/project-journey";
+import { NextStepCard } from "@/components/client/next-step-card";
+import { SuccessManagerCard } from "@/components/client/success-manager-card";
 import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
+import { resolveSuccessManager } from "@/lib/success-manager";
 import { computeReadiness } from "@/lib/readiness";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,6 +46,25 @@ export default async function DashboardPage() {
   const journey = toClientJourney(stages);
   const currentStage = currentJourneyLabel(journey);
   const onboardingComplete = isOnboardingComplete(services);
+
+  // Success Manager: assigned → default → fallback (settings-backed).
+  const successManager = await resolveSuccessManager(
+    client?.success_manager_id ?? null
+  );
+
+  // Next Step: derive from the journey + the active stage's ETA (else launch date).
+  const activeStep = journey.find((j) => j.status === "in_progress") ?? null;
+  const allComplete =
+    journey.length > 0 && journey.every((j) => j.status === "completed");
+  const nextStepState = allComplete
+    ? "complete"
+    : activeStep
+      ? "in_progress"
+      : journey.some((j) => j.status === "pending")
+        ? "pending"
+        : "none";
+  const nextStepDate =
+    activeStep?.targetDate ?? client?.estimated_launch_date ?? null;
 
   // Asset readiness: show the client what we still need, until an admin has
   // confirmed the "Assets Received" stage.
@@ -131,44 +153,55 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent updates */}
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Megaphone className="h-4.5 w-4.5 text-brand-500" />
-              <CardTitle>Latest Updates</CardTitle>
-            </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/dashboard/updates">
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {updates.length > 0 ? (
-              updates.map((u) => (
-                <Link
-                  key={u.id}
-                  href="/dashboard/updates"
-                  className="block rounded-xl border border-ink-100 p-3.5 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
-                >
-                  <p className="text-xs text-ink-400">
-                    {format(new Date(u.published_at), "d MMM yyyy")}
-                  </p>
-                  <p className="mt-0.5 text-sm font-semibold text-ink-900">
-                    {u.title}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-xs text-ink-500">{u.body}</p>
-                </Link>
-              ))
-            ) : (
-              <p className="py-8 text-center text-sm text-ink-400">
-                No updates yet. Check back soon.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        {/* Right rail: what's next + who's looking after you */}
+        <div className="space-y-6">
+          <NextStepCard
+            stageLabel={currentStage}
+            state={nextStepState}
+            estimatedCompletion={nextStepDate}
+            actionItems={actionItems}
+          />
+          <SuccessManagerCard manager={successManager} />
+        </div>
       </div>
+
+      {/* Latest updates */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Megaphone className="h-4.5 w-4.5 text-brand-500" />
+            <CardTitle>Latest Updates</CardTitle>
+          </div>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/dashboard/updates">
+              View all <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {updates.length > 0 ? (
+            updates.map((u) => (
+              <Link
+                key={u.id}
+                href="/dashboard/updates"
+                className="block rounded-xl border border-ink-100 p-3.5 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+              >
+                <p className="text-xs text-ink-400">
+                  {format(new Date(u.published_at), "d MMM yyyy")}
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-ink-900">
+                  {u.title}
+                </p>
+                <p className="mt-1 line-clamp-2 text-xs text-ink-500">{u.body}</p>
+              </Link>
+            ))
+          ) : (
+            <p className="py-8 text-center text-sm text-ink-400 sm:col-span-2 lg:col-span-3">
+              No updates yet. Check back soon.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Onboarding nudge (incomplete) → completion message (complete, pre-launch) */}
       {!onboardingComplete ? (
