@@ -11,16 +11,16 @@ import {
   getOnboarding,
   getOpenActionItems,
   computeProgress,
-  currentPhase,
   isOnboardingComplete,
 } from "@/lib/queries";
 import { ActionRequiredBanner } from "@/components/client/action-required-banner";
+import { WelcomeHero } from "@/components/client/welcome-hero";
+import { ProjectJourney } from "@/components/client/project-journey";
+import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
 import { computeReadiness } from "@/lib/readiness";
-import { getService } from "@/lib/services";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ProgressTracker, ProgressBar } from "@/components/ui/progress-tracker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ReadinessChecklist } from "@/components/shared/readiness-checklist";
 import { PackageCheck, CheckCircle2 } from "lucide-react";
@@ -40,7 +40,8 @@ export default async function DashboardPage() {
     ]);
 
   const progress = computeProgress(stages);
-  const phase = currentPhase(stages);
+  const journey = toClientJourney(stages);
+  const currentStage = currentJourneyLabel(journey);
   const onboardingComplete = isOnboardingComplete(services);
 
   // Asset readiness: show the client what we still need, until an admin has
@@ -64,67 +65,12 @@ export default async function DashboardPage() {
       <ActionRequiredBanner items={actionItems} />
 
       {/* Welcome hero */}
-      <Card className="relative overflow-hidden border-0 bg-ink-900 text-white shadow-card-hover">
-        <div
-          className="relative p-7 sm:p-9"
-          style={{
-            backgroundImage:
-              "radial-gradient(70% 120% at 90% 0%, rgba(56,182,255,0.35), transparent 55%)",
-          }}
-        >
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-brand-300">
-                <Sparkles className="h-4 w-4" />
-                <span className="text-xs font-semibold uppercase tracking-wider">
-                  Welcome back
-                </span>
-              </div>
-              <h1 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
-                {profile.full_name ?? client?.name ?? "Welcome"}
-              </h1>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <span className="text-sm text-white/60">Current services:</span>
-                {services.length > 0 ? (
-                  services.map((s) => {
-                    const def = getService(s.service);
-                    return (
-                      <span
-                        key={s.id}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white"
-                      >
-                        <def.icon className="h-3.5 w-3.5" />
-                        {def.name}
-                      </span>
-                    );
-                  })
-                ) : (
-                  <span className="text-sm text-white/50">None yet</span>
-                )}
-              </div>
-            </div>
-
-            <div className="shrink-0 rounded-2xl bg-white/10 p-5 backdrop-blur-sm">
-              <p className="text-xs font-medium uppercase tracking-wide text-white/60">
-                Current phase
-              </p>
-              <div className="mt-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold text-white">
-                  <span className="h-1.5 w-1.5 rounded-full bg-brand-300" />
-                  {phase ? phase.label : "Getting started"}
-                </span>
-              </div>
-              <div className="mt-4 w-48">
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="text-white/60">Project progress</span>
-                  <span className="font-semibold">{progress}%</span>
-                </div>
-                <ProgressBar value={progress} className="bg-white/15" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
+      <WelcomeHero
+        clientName={profile.full_name ?? client?.name ?? "Welcome"}
+        completion={progress}
+        currentStage={currentStage}
+        estimatedLaunchDate={client?.estimated_launch_date ?? null}
+      />
 
       {/* Asset readiness checklist — what we still need from the client */}
       {showChecklist && (
@@ -164,7 +110,7 @@ export default async function DashboardPage() {
           <CardHeader className="flex-row items-center justify-between">
             <div className="flex items-center gap-2">
               <Route className="h-4.5 w-4.5 text-brand-500" />
-              <CardTitle>Progress Tracker</CardTitle>
+              <CardTitle>Project Journey</CardTitle>
             </div>
             <Button asChild variant="ghost" size="sm">
               <Link href="/dashboard/project">
@@ -174,7 +120,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             {stages.length > 0 ? (
-              <ProgressTracker stages={stages} />
+              <ProjectJourney stages={stages} />
             ) : (
               <EmptyState
                 icon={Route}
