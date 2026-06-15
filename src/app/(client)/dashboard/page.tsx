@@ -21,6 +21,7 @@ import { NextStepCard } from "@/components/client/next-step-card";
 import { SuccessManagerCard } from "@/components/client/success-manager-card";
 import { PackageOverview } from "@/components/client/package-overview";
 import { ActivityTimeline } from "@/components/client/activity-timeline";
+import { IntakePending } from "@/components/client/intake-pending";
 import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
 import { resolveSuccessManager } from "@/lib/success-manager";
 import { computeReadiness } from "@/lib/readiness";
@@ -45,6 +46,22 @@ export default async function DashboardPage() {
       getOpenActionItems(profile.client_id),
       getActivityTimeline(profile.client_id),
     ]);
+
+  // New intake clients see a calm holding panel until their onboarding opens.
+  // Legacy + existing clients (intake_status onboarding_started/submitted) get
+  // the full dashboard. Defensive content gate — onboarding access is unchanged.
+  if (
+    client?.onboarding_type === "new" &&
+    client.intake_status !== "onboarding_started" &&
+    client.intake_status !== "onboarding_submitted"
+  ) {
+    return (
+      <IntakePending
+        clientName={profile.full_name ?? client.name ?? "there"}
+        intakeStatus={client.intake_status}
+      />
+    );
+  }
 
   const progress = computeProgress(stages);
   const journey = toClientJourney(stages);
