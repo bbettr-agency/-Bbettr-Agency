@@ -3,11 +3,12 @@ import { SeenMarker } from "@/components/shared/seen-marker";
 import { Route, CheckCircle2, Clock, Circle } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import { getProjectStages, computeProgress } from "@/lib/queries";
+import { toClientJourney } from "@/lib/journey";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ProgressTracker, ProgressBar } from "@/components/ui/progress-tracker";
-import type { ProjectStage } from "@/lib/database.types";
+import { ProgressBar } from "@/components/ui/progress-tracker";
+import { ProjectJourney } from "@/components/client/project-journey";
 
 export const metadata: Metadata = { title: "Project Progress" };
 
@@ -16,10 +17,12 @@ export default async function ProjectPage() {
   const stages = await getProjectStages(profile.client_id);
   const progress = computeProgress(stages);
 
+  // Client-facing journey labels only — never the internal operational names.
+  const journey = toClientJourney(stages);
   const buckets = {
-    completed: stages.filter((s) => s.status === "completed"),
-    in_progress: stages.filter((s) => s.status === "in_progress"),
-    pending: stages.filter((s) => s.status === "pending"),
+    completed: journey.filter((s) => s.status === "completed").map((s) => s.label),
+    in_progress: journey.filter((s) => s.status === "in_progress").map((s) => s.label),
+    pending: journey.filter((s) => s.status === "pending").map((s) => s.label),
   };
 
   return (
@@ -58,7 +61,7 @@ export default async function ProjectPage() {
                 <CardTitle>Roadmap</CardTitle>
               </CardHeader>
               <CardContent>
-                <ProgressTracker stages={stages} />
+                <ProjectJourney stages={stages} />
               </CardContent>
             </Card>
 
@@ -67,19 +70,19 @@ export default async function ProjectPage() {
                 icon={CheckCircle2}
                 tone="text-emerald-500"
                 title="Completed Work"
-                stages={buckets.completed}
+                labels={buckets.completed}
               />
               <WorkColumn
                 icon={Clock}
                 tone="text-amber-500"
                 title="In Progress"
-                stages={buckets.in_progress}
+                labels={buckets.in_progress}
               />
               <WorkColumn
                 icon={Circle}
                 tone="text-ink-300"
                 title="Upcoming Work"
-                stages={buckets.pending}
+                labels={buckets.pending}
               />
             </div>
           </div>
@@ -93,12 +96,12 @@ function WorkColumn({
   icon: Icon,
   tone,
   title,
-  stages,
+  labels,
 }: {
   icon: typeof CheckCircle2;
   tone: string;
   title: string;
-  stages: ProjectStage[];
+  labels: string[];
 }) {
   return (
     <Card>
@@ -107,14 +110,14 @@ function WorkColumn({
           <Icon className={`h-4 w-4 ${tone}`} />
           <h3 className="text-sm font-semibold text-ink-900">{title}</h3>
           <span className="ml-auto text-xs font-medium text-ink-400">
-            {stages.length}
+            {labels.length}
           </span>
         </div>
-        {stages.length > 0 ? (
+        {labels.length > 0 ? (
           <ul className="space-y-2">
-            {stages.map((s) => (
-              <li key={s.id} className="text-sm text-ink-600">
-                {s.name}
+            {labels.map((label, i) => (
+              <li key={`${label}-${i}`} className="text-sm text-ink-600">
+                {label}
               </li>
             ))}
           </ul>
