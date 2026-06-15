@@ -59,6 +59,15 @@ export type FileCategory =
   | "document"
   | "report";
 
+export type AssetCategory =
+  | "contracts"
+  | "branding"
+  | "website_content"
+  | "media"
+  | "documents"
+  | "deliverables"
+  | "reports";
+
 export type NotificationType =
   | "report_published"
   | "update_posted"
@@ -278,6 +287,9 @@ export interface Database {
           name: string;
           path: string;
           category: FileCategory;
+          asset_category: AssetCategory;
+          subcategory: string | null;
+          client_visible: boolean;
           mime_type: string | null;
           size_bytes: number | null;
           uploaded_by: string | null;
@@ -288,6 +300,9 @@ export interface Database {
           name: string;
           path: string;
           category?: FileCategory;
+          asset_category?: AssetCategory;
+          subcategory?: string | null;
+          client_visible?: boolean;
           mime_type?: string | null;
           size_bytes?: number | null;
           uploaded_by?: string | null;

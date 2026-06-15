@@ -1,10 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
 import { buildStoragePath } from "@/lib/utils";
+import { inferAssetCategory, type AssetCategoryKey } from "@/lib/assets";
+import { recordFileUploadActivity } from "@/lib/file-actions";
 import type { FileCategory, FileRecord } from "@/lib/database.types";
 
 export const STORAGE_BUCKET = "client-files";
 
-/** Infer a sensible file category from a MIME type. */
+/** Infer the legacy file category from a MIME type (kept for back-compat). */
 export function inferCategory(mime: string): FileCategory {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
@@ -12,18 +14,30 @@ export function inferCategory(mime: string): FileCategory {
   return "document";
 }
 
+export interface UploadOptions {
+  assetCategory: AssetCategoryKey;
+  subcategory?: string | null;
+  /** Admins may stage hidden files; clients always upload visibly. */
+  clientVisible?: boolean;
+}
+
 /**
- * Upload a single file to the tenant's storage folder and record its metadata
- * in the `files` table. Runs in the browser under the user's RLS context, so a
- * client can only ever write into their own tenant folder.
+ * Upload a single file to the tenant's storage folder and record its metadata.
+ * Runs in the browser under the user's RLS context, so a client can only write
+ * into their own tenant folder AND only into client-allowed categories (enforced
+ * by the files RLS insert policy). The upload is recorded on the client's
+ * activity timeline (best-effort, server-side).
  */
 export async function uploadClientFile(
   clientId: string,
   file: File,
-  category?: FileCategory
+  options: UploadOptions
 ): Promise<FileRecord> {
   const supabase = createClient();
-  const path = buildStoragePath(clientId, file.name);
+  const assetCategory = options.assetCategory;
+  const subcategory =
+    options.subcategory ?? inferAssetCategory(file.type).subcategory;
+  const path = buildStoragePath(clientId, file.name, assetCategory);
 
   const { error: uploadError } = await supabase.storage
     .from(STORAGE_BUCKET)
@@ -40,7 +54,10 @@ export async function uploadClientFile(
       client_id: clientId,
       name: file.name,
       path,
-      category: category ?? inferCategory(file.type),
+      category: inferCategory(file.type), // legacy column, back-compat
+      asset_category: assetCategory,
+      subcategory,
+      client_visible: options.clientVisible ?? true,
       mime_type: file.type || null,
       size_bytes: file.size,
       uploaded_by: user?.id ?? null,
@@ -48,7 +65,16 @@ export async function uploadClientFile(
     .select("*")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Roll back the orphaned object so a rejected insert (e.g. a client trying an
+    // admin-only category) doesn't leave a stray file behind.
+    await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    throw new Error(error.message);
+  }
+
+  // Timeline event (best-effort; failure never blocks the upload).
+  void recordFileUploadActivity(clientId, file.name, assetCategory);
+
   return data;
 }
 
