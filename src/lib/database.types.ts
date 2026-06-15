@@ -70,6 +70,18 @@ export type AssetCategory =
 
 export type ContractStatus = "not_sent" | "sent" | "signed";
 
+export type OnboardingType = "legacy" | "new";
+
+export type IntakeStatus =
+  | "draft"
+  | "contract_sent"
+  | "contract_signed"
+  | "invoice_sent"
+  | "paid"
+  | "portal_access_sent"
+  | "onboarding_started"
+  | "onboarding_submitted";
+
 export type NotificationType =
   | "report_published"
   | "update_posted"
@@ -93,6 +105,11 @@ export interface Database {
           notes: string | null;
           estimated_launch_date: string | null;
           success_manager_id: string | null;
+          onboarding_type: OnboardingType;
+          intake_status: IntakeStatus;
+          portal_access_granted_at: string | null;
+          portal_access_granted_by: string | null;
+          welcome_email_sent_at: string | null;
           created_at: string;
           updated_at: string;
         };

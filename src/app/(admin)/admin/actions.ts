@@ -22,6 +22,7 @@ import type {
   ClientStatus,
   ServiceType,
   StageStatus,
+  IntakeStatus,
 } from "@/lib/database.types";
 
 export interface ActionResult {
@@ -70,6 +71,10 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
   const email = String(formData.get("contact_email") ?? "").trim();
   const phone = String(formData.get("contact_phone") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const onboardingType =
+    String(formData.get("onboarding_type") ?? "legacy") === "new"
+      ? "new"
+      : "legacy";
   const services = formData.getAll("services").map(String) as ServiceType[];
 
   if (!name || !email) {
@@ -90,6 +95,9 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
       contact_email: email,
       contact_phone: phone || null,
       status: "onboarding",
+      onboarding_type: onboardingType,
+      // Legacy = already operating (past the gate); New = start of intake.
+      intake_status: onboardingType === "new" ? "draft" : "onboarding_started",
     })
     .select("id")
     .single();
@@ -128,8 +136,9 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
   });
 
   // 4. Create the client's login (service role). The DB trigger creates the
-  //    matching profile from the user metadata.
-  if (password) {
+  //    matching profile from the user metadata. New (intake) clients are NOT
+  //    provisioned here — access is granted later via Grant Portal Access.
+  if (password && onboardingType === "legacy") {
     try {
       const admin = createAdminClient();
       const { error: authErr } = await admin.auth.admin.createUser({
@@ -204,6 +213,14 @@ export async function sendPortalEmailAction(
   const result = await getEmailService().send(kind, email);
   if (!result.ok) {
     return { error: friendlyEmailError(result.error) };
+  }
+  // Record welcome-email sends so the Intake panel can show the status.
+  if (kind === "welcome") {
+    await supabase
+      .from("clients")
+      .update({ welcome_email_sent_at: new Date().toISOString() })
+      .eq("id", clientId);
+    revalidatePath(`/admin/clients/${clientId}`);
   }
   return { ok: true };
 }
@@ -622,6 +639,33 @@ export async function deleteActivityEventAction(
   return { ok: true };
 }
 
+/**
+ * Advance a NEW client's intake_status to `target`, but only when it's currently
+ * one of `allowedFrom` (so we never move it backwards or skip ahead, and legacy
+ * clients are never touched). Best-effort; uses the caller's admin session.
+ */
+async function advanceIntake(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  clientId: string,
+  target: IntakeStatus,
+  allowedFrom: IntakeStatus[]
+): Promise<void> {
+  const { data: c } = await supabase
+    .from("clients")
+    .select("onboarding_type, intake_status")
+    .eq("id", clientId)
+    .single();
+  if (
+    c?.onboarding_type === "new" &&
+    allowedFrom.includes(c.intake_status as IntakeStatus)
+  ) {
+    await supabase
+      .from("clients")
+      .update({ intake_status: target })
+      .eq("id", clientId);
+  }
+}
+
 // ── Contracts (Phase B) ───────────────────────────────────────────────────
 
 /** Create a contract record for a client. */
@@ -667,6 +711,8 @@ export async function markContractSentAction(
     title: "Agreement sent for signature",
     visibility: "client",
   });
+  // Advance the intake pipeline for new clients (never moves legacy clients).
+  await advanceIntake(supabase, clientId, "contract_sent", ["draft"]);
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
@@ -694,6 +740,10 @@ export async function markContractSignedAction(
     title: "Contract signed",
     visibility: "client",
   });
+  await advanceIntake(supabase, clientId, "contract_signed", [
+    "draft",
+    "contract_sent",
+  ]);
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
@@ -729,6 +779,129 @@ export async function deleteContractAction(
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
+}
+
+// ── Client Intake (Phase C) ───────────────────────────────────────────────
+
+/** Manually set a client's intake status (admin command-center advance). */
+export async function setIntakeStatusAction(
+  clientId: string,
+  status: IntakeStatus
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({ intake_status: status })
+    .eq("id", clientId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/**
+ * Grant portal access to a client: provision the Supabase login with a fresh
+ * temporary password, send the welcome email, record who/when, advance intake to
+ * 'portal_access_sent', and log the activity. Returns the temp password once for
+ * the admin to copy. Idempotent guard: refuses if a login already exists (use
+ * Resend credentials instead).
+ */
+export async function provisionPortalAccessAction(
+  clientId: string
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: client } = await supabase
+    .from("clients")
+    .select("name, contact_name, contact_email")
+    .eq("id", clientId)
+    .single();
+  if (!client?.contact_email) {
+    return { error: "This client has no contact email to provision a login." };
+  }
+
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("client_id", clientId)
+    .limit(1)
+    .maybeSingle();
+  if (existing) {
+    return {
+      error:
+        "This client already has portal access. Use “Resend credentials” to re-send the welcome email.",
+    };
+  }
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return {
+      error: "Server is missing its service-role key, so access could not be provisioned.",
+    };
+  }
+
+  const password = generateTempPassword();
+  const { error: authErr } = await admin.auth.admin.createUser({
+    email: client.contact_email,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: client.contact_name || client.name,
+      role: "client",
+      client_id: clientId,
+    },
+  });
+  if (authErr) return { error: `Could not provision access: ${authErr.message}` };
+
+  // Welcome email (best-effort) — failure is non-fatal; the temp password is
+  // returned so the admin can share access manually.
+  let emailWarning: string | undefined;
+  try {
+    const res = await getEmailService().send("welcome", client.contact_email);
+    if (!res.ok) emailWarning = res.error;
+  } catch (e) {
+    emailWarning = e instanceof Error ? e.message : "Welcome email failed to send.";
+  }
+
+  const now = new Date().toISOString();
+  await supabase
+    .from("clients")
+    .update({
+      intake_status: "portal_access_sent",
+      portal_access_granted_at: now,
+      portal_access_granted_by: profile.id,
+      welcome_email_sent_at: emailWarning ? null : now,
+    })
+    .eq("id", clientId);
+
+  await logActivity({
+    clientId,
+    type: "portal_access_granted",
+    title: "Portal Access Granted",
+    visibility: "client",
+  });
+  if (!emailWarning) {
+    await logActivity({
+      clientId,
+      type: "welcome_email_sent",
+      title: "Welcome email sent",
+      visibility: "client",
+    });
+  }
+
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return {
+    ok: true,
+    password,
+    error: emailWarning
+      ? `Access granted, but the welcome email could not be sent: ${emailWarning}. Share the temporary password manually.`
+      : undefined,
+  };
 }
 
 const STORAGE_BUCKET = "client-files";

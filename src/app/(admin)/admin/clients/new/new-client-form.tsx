@@ -15,6 +15,7 @@ export function NewClientForm() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [onboardingType, setOnboardingType] = useState<"legacy" | "new">("legacy");
 
   function toggle(id: string) {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -46,6 +47,59 @@ export function NewClientForm() {
           <span>{error}</span>
         </div>
       )}
+
+      <input type="hidden" name="onboarding_type" value={onboardingType} />
+
+      <Card>
+        <CardContent className="space-y-4 p-6">
+          <h2 className="text-sm font-semibold text-ink-900">
+            Client Onboarding Type
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                {
+                  key: "legacy" as const,
+                  title: "Legacy Client",
+                  desc: "Already working with us — immediate portal access.",
+                },
+                {
+                  key: "new" as const,
+                  title: "New Client",
+                  desc: "Follows the full intake process; access granted after the intake milestones.",
+                },
+              ]
+            ).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setOnboardingType(opt.key)}
+                className={cn(
+                  "rounded-xl border p-4 text-left transition-colors",
+                  onboardingType === opt.key
+                    ? "border-brand-400 bg-brand-50/50 ring-1 ring-brand-200"
+                    : "border-ink-200 hover:border-brand-300"
+                )}
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+                  <span
+                    className={cn(
+                      "flex h-4 w-4 items-center justify-center rounded-full border",
+                      onboardingType === opt.key
+                        ? "border-brand-500 bg-brand-500 text-white"
+                        : "border-ink-300"
+                    )}
+                  >
+                    {onboardingType === opt.key && <Check className="h-3 w-3" />}
+                  </span>
+                  {opt.title}
+                </span>
+                <span className="mt-1 block text-xs text-ink-500">{opt.desc}</span>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-5 p-6">
@@ -152,19 +206,27 @@ export function NewClientForm() {
                 placeholder="client@company.com"
               />
             </div>
-            <div>
-              <Label htmlFor="password">Temporary Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="text"
-                placeholder="At least 8 characters"
-                minLength={8}
-              />
-              <FieldHelp>
-                Leave blank to create the client without a login for now.
-              </FieldHelp>
-            </div>
+            {onboardingType === "legacy" ? (
+              <div>
+                <Label htmlFor="password">Temporary Password</Label>
+                <Input
+                  id="password"
+                  name="password"
+                  type="text"
+                  placeholder="At least 8 characters"
+                  minLength={8}
+                />
+                <FieldHelp>
+                  Leave blank to create the client without a login for now.
+                </FieldHelp>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-3 text-xs text-ink-500">
+                Portal access for new clients is granted later from the{" "}
+                <strong>Intake</strong> panel, once the intake milestones are
+                complete (Grant Portal Access sends the welcome email).
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

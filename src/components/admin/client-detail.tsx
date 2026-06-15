@@ -14,6 +14,7 @@ import { StageManager } from "@/components/admin/stage-manager";
 import { ProjectSettingsManager } from "@/components/admin/project-settings-manager";
 import { ActivityManager } from "@/components/admin/activity-manager";
 import { ContractManager } from "@/components/admin/contract-manager";
+import { IntakePanel } from "@/components/admin/intake-panel";
 import type { ContractView } from "@/lib/queries";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
@@ -80,8 +81,19 @@ export function ClientDetail({
   const assetsReceived =
     stages.find((s) => s.name === "Assets Received")?.status === "completed";
 
+  // Highest contract status across the client's contracts, for the Intake panel.
+  const contractStatus: "none" | "not_sent" | "sent" | "signed" =
+    contracts.some((c) => c.status === "signed")
+      ? "signed"
+      : contracts.some((c) => c.status === "sent")
+        ? "sent"
+        : contracts.length > 0
+          ? "not_sent"
+          : "none";
+
   const tabs = [
     { id: "overview", label: "Overview" },
+    { id: "intake", label: "Intake" },
     { id: "onboarding", label: "Onboarding", count: onboarding.length },
     { id: "progress", label: "Progress", count: stages.length },
     { id: "contracts", label: "Contracts", count: contracts.length },
@@ -216,6 +228,24 @@ export function ClientDetail({
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {active === "intake" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Intake</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <IntakePanel
+                  clientId={client.id}
+                  onboardingType={client.onboarding_type}
+                  intakeStatus={client.intake_status}
+                  contractStatus={contractStatus}
+                  hasPortalAccess={portalAccess.hasLogin}
+                  welcomeEmailSent={Boolean(client.welcome_email_sent_at)}
+                />
+              </CardContent>
+            </Card>
           )}
 
           {active === "contracts" && (
