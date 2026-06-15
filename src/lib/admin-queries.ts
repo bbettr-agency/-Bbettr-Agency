@@ -6,6 +6,28 @@ import type {
   ProjectStage,
 } from "@/lib/database.types";
 
+/** All team members (Success Managers), default first. Admin-only. */
+export async function getTeamMembers() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("team_members")
+    .select("id, name, role, is_default")
+    .order("is_default", { ascending: false })
+    .order("name");
+  return data ?? [];
+}
+
+/** Full activity timeline for a client (incl. internal events). Admin view. */
+export async function getClientActivity(clientId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("activity_events")
+    .select("id, type, title, description, visibility, occurred_at, source")
+    .eq("client_id", clientId)
+    .order("occurred_at", { ascending: false });
+  return data ?? [];
+}
+
 export interface PortalAccess {
   email: string | null;
   hasLogin: boolean;

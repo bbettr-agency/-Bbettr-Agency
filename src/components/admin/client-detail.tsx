@@ -11,6 +11,8 @@ import {
 import { getService } from "@/lib/services";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { StageManager } from "@/components/admin/stage-manager";
+import { ProjectSettingsManager } from "@/components/admin/project-settings-manager";
+import { ActivityManager } from "@/components/admin/activity-manager";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
 import { computeReadiness } from "@/lib/readiness";
@@ -42,6 +44,16 @@ interface ClientDetailProps {
   onboarding: OnboardingSubmission[];
   portalUrl: string;
   portalAccess: PortalAccess;
+  teamMembers: { id: string; name: string; role: string | null; is_default: boolean }[];
+  activity: {
+    id: string;
+    type: string;
+    title: string;
+    description: string | null;
+    visibility: string;
+    occurred_at: string;
+    source: string;
+  }[];
 }
 
 export function ClientDetail({
@@ -54,6 +66,8 @@ export function ClientDetail({
   onboarding,
   portalUrl,
   portalAccess,
+  teamMembers,
+  activity,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -169,10 +183,31 @@ export function ClientDetail({
               />
               <Card>
                 <CardHeader>
+                  <CardTitle>Client Experience</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ProjectSettingsManager
+                    clientId={client.id}
+                    estimatedLaunchDate={client.estimated_launch_date}
+                    successManagerId={client.success_manager_id}
+                    teamMembers={teamMembers}
+                  />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
                   <CardTitle>Project Roadmap</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <StageManager clientId={client.id} stages={stages} />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Activity Timeline</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ActivityManager clientId={client.id} events={activity} />
                 </CardContent>
               </Card>
             </div>

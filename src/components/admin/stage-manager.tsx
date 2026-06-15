@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   setStageStatusAction,
   addStageAction,
+  setStageTargetDateAction,
 } from "@/app/(admin)/admin/actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,12 @@ export function StageManager({
     startTransition(async () => {
       await setStageStatusAction(stage.id, clientId, next);
       setBusyId(null);
+    });
+  }
+
+  function saveTarget(stage: ProjectStage, value: string) {
+    startTransition(async () => {
+      await setStageTargetDateAction(stage.id, clientId, value || null);
     });
   }
 
@@ -78,7 +85,14 @@ export function StageManager({
                   <p className="text-xs text-ink-400">{stage.description}</p>
                 )}
               </div>
-              <span className="text-xs font-medium capitalize text-ink-400">
+              <input
+                type="date"
+                defaultValue={stage.target_date ?? ""}
+                onChange={(e) => saveTarget(stage, e.target.value)}
+                title="Estimated completion date"
+                className="w-36 shrink-0 rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600 focus:border-brand-400 focus:outline-none"
+              />
+              <span className="w-20 shrink-0 text-right text-xs font-medium capitalize text-ink-400">
                 {stage.status.replace("_", " ")}
               </span>
             </li>

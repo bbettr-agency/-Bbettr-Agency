@@ -12,7 +12,11 @@ import {
   getFiles,
   getOnboarding,
 } from "@/lib/queries";
-import { getPortalAccess } from "@/lib/admin-queries";
+import {
+  getPortalAccess,
+  getTeamMembers,
+  getClientActivity,
+} from "@/lib/admin-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
@@ -35,16 +39,27 @@ export default async function ClientDetailPage({
   const client = await getClient(id);
   if (!client) notFound();
 
-  const [services, stages, updates, reports, files, onboarding, portalAccess] =
-    await Promise.all([
-      getClientServices(id),
-      getProjectStages(id),
-      getUpdates(id),
-      getReports(id),
-      getFiles(id),
-      getOnboarding(id),
-      getPortalAccess(id),
-    ]);
+  const [
+    services,
+    stages,
+    updates,
+    reports,
+    files,
+    onboarding,
+    portalAccess,
+    teamMembers,
+    activity,
+  ] = await Promise.all([
+    getClientServices(id),
+    getProjectStages(id),
+    getUpdates(id),
+    getReports(id),
+    getFiles(id),
+    getOnboarding(id),
+    getPortalAccess(id),
+    getTeamMembers(),
+    getClientActivity(id),
+  ]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -74,6 +89,8 @@ export default async function ClientDetailPage({
         onboarding={onboarding}
         portalUrl={PORTAL_URL}
         portalAccess={portalAccess}
+        teamMembers={teamMembers}
+        activity={activity}
       />
 
       <DangerZone clientId={client.id} clientName={client.name} />
