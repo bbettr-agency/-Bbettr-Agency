@@ -14,6 +14,8 @@ import {
 } from "@/lib/email/rep-notifications";
 import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
+import { logActivity } from "@/lib/activity";
+import { STAGE_TO_JOURNEY } from "@/lib/journey";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
@@ -117,6 +119,14 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
     }))
   );
 
+  // 3b. Seed the client-facing activity timeline (best-effort, never blocks).
+  await logActivity({
+    clientId: client.id,
+    type: "project_created",
+    title: "Project Created",
+    visibility: "client",
+  });
+
   // 4. Create the client's login (service role). The DB trigger creates the
   //    matching profile from the user metadata.
   if (password) {
@@ -139,6 +149,12 @@ export async function createClientAction(formData: FormData): Promise<ActionResu
           error: `Client created, but login could not be provisioned: ${authErr.message}`,
         };
       }
+      await logActivity({
+        clientId: client.id,
+        type: "portal_access_granted",
+        title: "Portal Access Granted",
+        visibility: "client",
+      });
     } catch (e) {
       return {
         ok: true,
@@ -448,6 +464,29 @@ export async function setStageStatusAction(
     });
   }
 
+  // Append a client-facing journey event on a forward transition (best-effort).
+  // Uses the client-facing journey label, never the internal stage name.
+  if (before && before.status !== status) {
+    const label = STAGE_TO_JOURNEY[before.name] ?? before.name;
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const isLaunch = label.toLowerCase() === "launch";
+    if (status === "in_progress") {
+      await logActivity({
+        clientId,
+        type: isLaunch ? "launch_scheduled" : `${slug}_started`,
+        title: isLaunch ? "Launch Scheduled" : `${label} started`,
+        visibility: "client",
+      });
+    } else if (status === "completed") {
+      await logActivity({
+        clientId,
+        type: isLaunch ? "website_launched" : `${slug}_complete`,
+        title: isLaunch ? "Website Launched" : `${label} complete`,
+        visibility: "client",
+      });
+    }
+  }
+
   revalidateClient(clientId);
   return { ok: true };
 }
@@ -475,6 +514,111 @@ export async function addStageAction(formData: FormData): Promise<ActionResult> 
   });
   if (error) return { error: error.message };
   revalidateClient(clientId);
+  return { ok: true };
+}
+
+// ── Client Experience admin controls ──────────────────────────────────────
+
+/** Set (or clear) a client's estimated launch date. */
+export async function setClientLaunchDateAction(
+  clientId: string,
+  date: string | null
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({ estimated_launch_date: date || null })
+    .eq("id", clientId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Assign a Success Manager to a client (empty → fall back to the default). */
+export async function assignSuccessManagerAction(
+  clientId: string,
+  teamMemberId: string | null
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({ success_manager_id: teamMemberId || null })
+    .eq("id", clientId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Set (or clear) the estimated completion date for a single project stage. */
+export async function setStageTargetDateAction(
+  stageId: string,
+  clientId: string,
+  date: string | null
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("project_stages")
+    .update({ target_date: date || null })
+    .eq("id", stageId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Manually add a timeline event for a client. */
+export async function addActivityEventAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const clientId = String(formData.get("client_id") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  if (!clientId || !title) return { error: "Event title is required." };
+
+  const type = String(formData.get("type") ?? "").trim() || "milestone";
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const visibility =
+    String(formData.get("visibility") ?? "client") === "internal"
+      ? "internal"
+      : "client";
+  const occurredRaw = String(formData.get("occurred_at") ?? "").trim();
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("activity_events").insert({
+    client_id: clientId,
+    type,
+    title,
+    description,
+    visibility,
+    occurred_at: occurredRaw ? new Date(occurredRaw).toISOString() : undefined,
+    source: "manual",
+    created_by: profile.id,
+  });
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Delete a timeline event. */
+export async function deleteActivityEventAction(
+  eventId: string,
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("activity_events")
+    .delete()
+    .eq("id", eventId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
 }
 
