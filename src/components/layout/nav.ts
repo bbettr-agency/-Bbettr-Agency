@@ -13,6 +13,7 @@ import {
   Headset,
   Wallet,
   Plug,
+  FileSignature,
 } from "lucide-react";
 
 export interface NavItem {
@@ -29,6 +30,7 @@ export const CLIENT_NAV: NavItem[] = [
   { label: "Updates", href: "/dashboard/updates", icon: Megaphone },
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
   { label: "Files", href: "/dashboard/files", icon: FolderOpen },
+  { label: "Contracts", href: "/dashboard/contracts", icon: FileSignature },
 ];
 
 /** Admin operating-system navigation. */

@@ -222,6 +222,59 @@ export async function getActivityTimeline(clientId: string, limit = 30) {
   return data ?? [];
 }
 
+export interface ContractView {
+  id: string;
+  title: string;
+  status: string;
+  contract_url: string | null;
+  signed_file_url: string | null;
+  sent_at: string | null;
+  signed_at: string | null;
+  created_at: string;
+  /** Linked signed file in the Files system, for download (if any). */
+  signedFile: { name: string; path: string } | null;
+}
+
+/**
+ * A client's contracts, newest first, each with its linked signed file (if any)
+ * resolved for download. Works under both admin and client RLS.
+ */
+export async function getClientContracts(clientId: string): Promise<ContractView[]> {
+  const supabase = await createClient();
+  const { data: contracts } = await supabase
+    .from("contracts")
+    .select(
+      "id, title, status, contract_url, signed_file_url, file_id, sent_at, signed_at, created_at"
+    )
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (!contracts || contracts.length === 0) return [];
+
+  const fileIds = contracts
+    .map((c) => c.file_id)
+    .filter((id): id is string => Boolean(id));
+  const fileMap = new Map<string, { name: string; path: string }>();
+  if (fileIds.length > 0) {
+    const { data: files } = await supabase
+      .from("files")
+      .select("id, name, path")
+      .in("id", fileIds);
+    for (const f of files ?? []) fileMap.set(f.id, { name: f.name, path: f.path });
+  }
+
+  return contracts.map((c) => ({
+    id: c.id,
+    title: c.title,
+    status: c.status,
+    contract_url: c.contract_url,
+    signed_file_url: c.signed_file_url,
+    sent_at: c.sent_at,
+    signed_at: c.signed_at,
+    created_at: c.created_at,
+    signedFile: c.file_id ? fileMap.get(c.file_id) ?? null : null,
+  }));
+}
+
 export async function getOnboarding(clientId: string) {
   const supabase = await createClient();
   const { data } = await supabase

@@ -622,6 +622,115 @@ export async function deleteActivityEventAction(
   return { ok: true };
 }
 
+// ── Contracts (Phase B) ───────────────────────────────────────────────────
+
+/** Create a contract record for a client. */
+export async function addContractAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const clientId = String(formData.get("client_id") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  if (!clientId || !title) return { error: "Contract title is required." };
+  const contractUrl = String(formData.get("contract_url") ?? "").trim() || null;
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("contracts").insert({
+    client_id: clientId,
+    title,
+    contract_url: contractUrl,
+    status: "not_sent",
+    created_by: profile.id,
+  });
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Mark a contract as sent for signature. */
+export async function markContractSentAction(
+  contractId: string,
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("contracts")
+    .update({ status: "sent", sent_at: new Date().toISOString() })
+    .eq("id", contractId);
+  if (error) return { error: error.message };
+
+  await logActivity({
+    clientId,
+    type: "contract_sent",
+    title: "Agreement sent for signature",
+    visibility: "client",
+  });
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/**
+ * Mark a contract as signed. Records the timestamp and a client-visible activity
+ * event. Phase B only — this does NOT advance intake or auto-invoice.
+ */
+export async function markContractSignedAction(
+  contractId: string,
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("contracts")
+    .update({ status: "signed", signed_at: new Date().toISOString() })
+    .eq("id", contractId);
+  if (error) return { error: error.message };
+
+  await logActivity({
+    clientId,
+    type: "contract_signed",
+    title: "Contract signed",
+    visibility: "client",
+  });
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Link an uploaded signed file (Files → contracts category) to a contract. */
+export async function attachContractFileAction(
+  contractId: string,
+  clientId: string,
+  fileId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("contracts")
+    .update({ file_id: fileId })
+    .eq("id", contractId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Delete a contract record (does not delete any linked file). */
+export async function deleteContractAction(
+  contractId: string,
+  clientId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("contracts").delete().eq("id", contractId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
 const STORAGE_BUCKET = "client-files";
 
 /**

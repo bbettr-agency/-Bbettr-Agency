@@ -11,6 +11,7 @@ import {
   getReports,
   getFiles,
   getOnboarding,
+  getClientContracts,
 } from "@/lib/queries";
 import {
   getPortalAccess,
@@ -49,6 +50,7 @@ export default async function ClientDetailPage({
     portalAccess,
     teamMembers,
     activity,
+    contracts,
   ] = await Promise.all([
     getClientServices(id),
     getProjectStages(id),
@@ -59,6 +61,7 @@ export default async function ClientDetailPage({
     getPortalAccess(id),
     getTeamMembers(),
     getClientActivity(id),
+    getClientContracts(id),
   ]);
 
   return (
@@ -91,6 +94,7 @@ export default async function ClientDetailPage({
         portalAccess={portalAccess}
         teamMembers={teamMembers}
         activity={activity}
+        contracts={contracts}
       />
 
       <DangerZone clientId={client.id} clientName={client.name} />

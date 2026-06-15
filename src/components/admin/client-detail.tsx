@@ -13,6 +13,8 @@ import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { StageManager } from "@/components/admin/stage-manager";
 import { ProjectSettingsManager } from "@/components/admin/project-settings-manager";
 import { ActivityManager } from "@/components/admin/activity-manager";
+import { ContractManager } from "@/components/admin/contract-manager";
+import type { ContractView } from "@/lib/queries";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
 import { computeReadiness } from "@/lib/readiness";
@@ -54,6 +56,7 @@ interface ClientDetailProps {
     occurred_at: string;
     source: string;
   }[];
+  contracts: ContractView[];
 }
 
 export function ClientDetail({
@@ -68,6 +71,7 @@ export function ClientDetail({
   portalAccess,
   teamMembers,
   activity,
+  contracts,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -80,6 +84,7 @@ export function ClientDetail({
     { id: "overview", label: "Overview" },
     { id: "onboarding", label: "Onboarding", count: onboarding.length },
     { id: "progress", label: "Progress", count: stages.length },
+    { id: "contracts", label: "Contracts", count: contracts.length },
     { id: "updates", label: "Updates", count: updates.length },
     { id: "reports", label: "Reports", count: reports.length },
     { id: "files", label: "Files", count: files.length },
@@ -211,6 +216,17 @@ export function ClientDetail({
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {active === "contracts" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Contracts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ContractManager clientId={client.id} contracts={contracts} />
+              </CardContent>
+            </Card>
           )}
 
           {active === "updates" && (
