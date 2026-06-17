@@ -80,10 +80,16 @@ export function PortalAccessCard({
     startTransition(async () => {
       const res = await sendPortalEmailAction(clientId, kind);
       setBusy(null);
+      // welcome / resend mint a fresh temp password and return it once — show it
+      // so the admin keeps a copy even after it's been emailed.
+      if (res.password) setTempPassword(res.password);
       setFeedback(
         res.error
           ? { ok: false, msg: res.error }
-          : { ok: true, msg: `${label} sent to ${access.email}.` }
+          : {
+              ok: true,
+              msg: `${label} sent to ${access.email} with login credentials.`,
+            }
       );
     });
   }
@@ -282,12 +288,14 @@ export function PortalAccessCard({
             a new temporary password to copy &amp; share (does not email it).
           </li>
           <li>
-            <strong className="text-ink-500">Send welcome email</strong> — emails
-            the client a secure link to access their portal.
+            <strong className="text-ink-500">Send welcome email</strong> —
+            generates a fresh temporary password and emails the client their
+            portal URL, login email &amp; password (shown here once too).
           </li>
           <li>
             <strong className="text-ink-500">Resend credentials</strong> —
-            re-sends that access link.
+            same as above: a new temporary password is generated and emailed
+            (the previous one stops working).
           </li>
         </ul>
 
