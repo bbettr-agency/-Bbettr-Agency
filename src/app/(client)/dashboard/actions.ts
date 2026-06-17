@@ -3,7 +3,24 @@
 import { revalidatePath } from "next/cache";
 import { requireClient } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { NOTIFY_SECTIONS, type NotifySection } from "@/lib/queries";
+
+/**
+ * D1: when a NEW client first reaches the portal at `portal_access_sent`, open
+ * their onboarding (→ onboarding_started). Best-effort + guarded; a no-op for
+ * legacy clients and anyone already past this step.
+ */
+export async function advanceIntakeOnLoginAction() {
+  const profile = await requireClient();
+  await advanceIntakeStatus(
+    profile.client_id,
+    "onboarding_started",
+    ["portal_access_sent"],
+    { type: "onboarding_started", title: "Onboarding opened" }
+  );
+  revalidatePath("/dashboard", "layout");
+}
 
 /**
  * Record that the client has just viewed a portal section, clearing its

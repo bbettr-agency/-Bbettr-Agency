@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireClient } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { SERVICES } from "@/lib/services";
 import type { ServiceType } from "@/lib/database.types";
 
@@ -127,6 +128,12 @@ export async function saveOnboarding(
       .update({ status: "in_progress" })
       .eq("id", clientId)
       .eq("status", "onboarding");
+
+    // D1: advance the intake pipeline for new clients (best-effort, new-only).
+    await advanceIntakeStatus(clientId, "onboarding_submitted", ["onboarding_started"], {
+      type: "onboarding_submitted",
+      title: "Onboarding submitted",
+    });
   }
 
   // Refresh every surface that reflects this change (client + admin).
