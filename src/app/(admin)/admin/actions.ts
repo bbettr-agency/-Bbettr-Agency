@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
+import { sendClientWelcomeEmail } from "@/lib/email/client-notifications";
 import { notify } from "@/lib/notifications";
 import { notifyInternal, notifyAdmins } from "@/lib/internal-notifications";
 import {
@@ -193,8 +194,15 @@ function friendlyEmailError(raw?: string): string {
 }
 
 /**
- * Send a portal email to a client (welcome / resend credentials / password
- * reset). Routed through the swappable email service (Supabase in V1).
+ * Send a portal email to a client.
+ *
+ * - welcome / resend_credentials → a branded email containing FULL login
+ *   credentials (portal URL, login email, temporary password). Original
+ *   passwords can't be retrieved (Supabase stores only the hash), so we mint a
+ *   FRESH temporary password, set it on the auth user, then email it — never an
+ *   empty or stale one. The password is also returned once for the admin UI.
+ * - password_reset → Supabase's self-serve reset email (the client chooses their
+ *   own password, so there's nothing for us to surface).
  */
 export async function sendPortalEmailAction(
   clientId: string,
@@ -204,17 +212,68 @@ export async function sendPortalEmailAction(
   const supabase = await createClient();
   const { data: client } = await supabase
     .from("clients")
-    .select("contact_email")
+    .select("contact_email, contact_name, name")
     .eq("id", clientId)
     .single();
 
   const email = client?.contact_email;
   if (!email) return { error: "This client has no email address on file." };
 
-  const result = await getEmailService().send(kind, email);
-  if (!result.ok) {
-    return { error: friendlyEmailError(result.error) };
+  // Self-serve reset stays on Supabase's own reset email.
+  if (kind === "password_reset") {
+    const result = await getEmailService().send(kind, email);
+    return result.ok ? { ok: true } : { error: friendlyEmailError(result.error) };
   }
+
+  // welcome | resend_credentials → mint a fresh temp password + email it.
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return {
+      error:
+        "Server is missing its service-role key, so credentials could not be sent.",
+    };
+  }
+
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("client_id", clientId)
+    .limit(1);
+  const userId = profiles?.[0]?.id;
+  if (!userId) {
+    return {
+      error:
+        "This client has no portal login yet. Use “Grant Portal Access” first.",
+    };
+  }
+
+  const password = generateTempPassword();
+  const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
+    password,
+  });
+  if (pwErr) return { error: pwErr.message };
+
+  const res = await sendClientWelcomeEmail({
+    to: email,
+    name: client?.contact_name || client?.name || null,
+    loginEmail: email,
+    password,
+  });
+
+  if (!res.ok) {
+    // Password was reset but the email failed — hand the password to the admin
+    // to share manually rather than leaving them stuck.
+    return {
+      ok: true,
+      password,
+      error: `${friendlyEmailError(
+        res.error
+      )} The temporary password is shown so you can share it manually.`,
+    };
+  }
+
   // Record welcome-email sends so the Intake panel can show the status.
   if (kind === "welcome") {
     await supabase
@@ -223,7 +282,7 @@ export async function sendPortalEmailAction(
       .eq("id", clientId);
     revalidatePath(`/admin/clients/${clientId}`);
   }
-  return { ok: true };
+  return { ok: true, password };
 }
 
 /**
@@ -836,12 +895,18 @@ export async function provisionPortalAccessAction(
   });
   if (authErr) return { error: `Could not provision access: ${authErr.message}` };
 
-  // Welcome email (best-effort) — failure is non-fatal; the temp password is
-  // returned so the admin can share access manually.
+  // Welcome email with full login credentials (best-effort) — failure is
+  // non-fatal; the same temp password is returned so the admin can share access
+  // manually. The password is never stored, only emailed once + shown once.
   let emailWarning: string | undefined;
   try {
-    const res = await getEmailService().send("welcome", client.contact_email);
-    if (!res.ok) emailWarning = res.error;
+    const res = await sendClientWelcomeEmail({
+      to: client.contact_email,
+      name: client.contact_name || client.name,
+      loginEmail: client.contact_email,
+      password,
+    });
+    if (!res.ok) emailWarning = friendlyEmailError(res.error);
   } catch (e) {
     emailWarning = e instanceof Error ? e.message : "Welcome email failed to send.";
   }
