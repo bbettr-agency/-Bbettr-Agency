@@ -17,7 +17,7 @@ export async function advanceIntakeStatus(
   clientId: string,
   target: IntakeStatus,
   allowedFrom: IntakeStatus[],
-  activity?: { type: string; title: string }
+  activity?: { type: string; title: string; visibility?: "client" | "internal" }
 ): Promise<void> {
   try {
     const admin = createAdminClient();
@@ -40,7 +40,7 @@ export async function advanceIntakeStatus(
         clientId,
         type: activity.type,
         title: activity.title,
-        visibility: "client",
+        visibility: activity.visibility ?? "client",
       });
     }
   } catch {

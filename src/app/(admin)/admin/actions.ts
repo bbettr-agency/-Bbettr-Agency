@@ -954,6 +954,108 @@ export async function provisionPortalAccessAction(
   };
 }
 
+// ── Deal ↔ Client linkage (Phase D2) ───────────────────────────────────────
+
+/**
+ * Manually link an existing (rep-created) deal to a client. No auto-matching —
+ * the admin explicitly chooses the deal. Enforces one deal per client at the app
+ * layer with a clear message; the DB partial-unique index is the final guard.
+ *
+ * Catch-up sync: if the deal has already been invoiced or paid (so the DB
+ * observers fired before the link existed), advance the client's intake_status
+ * to match — forward-only and new-clients-only via advanceIntakeStatus. Audit
+ * events are internal-only.
+ */
+export async function linkDealToClientAction(
+  clientId: string,
+  dealId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  // Reject if this client is already linked to a different deal.
+  const { data: existing } = await supabase
+    .from("deals")
+    .select("id")
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (existing && existing.id !== dealId) {
+    return {
+      error:
+        "This client is already linked to a deal. Unlink it first to link a different one.",
+    };
+  }
+
+  // The chosen deal must exist and be unlinked (or already this client's).
+  const { data: deal } = await supabase
+    .from("deals")
+    .select("id, client_id")
+    .eq("id", dealId)
+    .maybeSingle();
+  if (!deal) return { error: "That deal could not be found." };
+  if (deal.client_id && deal.client_id !== clientId) {
+    return { error: "That deal is already linked to another client." };
+  }
+
+  const { error } = await supabase
+    .from("deals")
+    .update({ client_id: clientId })
+    .eq("id", dealId);
+  if (error) return { error: error.message };
+
+  // Catch-up: reflect an already invoiced/paid deal in the intake pipeline.
+  const { data: req } = await supabase
+    .from("invoice_requests")
+    .select("id, status")
+    .eq("deal_id", dealId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (req) {
+    const { data: pay } = await supabase
+      .from("payfast_payments")
+      .select("status")
+      .eq("invoice_request_id", req.id)
+      .maybeSingle();
+
+    if (pay?.status === "paid") {
+      await advanceIntakeStatus(
+        clientId,
+        "paid",
+        ["draft", "contract_sent", "contract_signed", "invoice_sent"],
+        { type: "invoice_paid", title: "Payment received", visibility: "internal" }
+      );
+    } else if (req.status === "invoiced") {
+      await advanceIntakeStatus(
+        clientId,
+        "invoice_sent",
+        ["draft", "contract_sent", "contract_signed"],
+        { type: "invoice_sent", title: "Invoice sent", visibility: "internal" }
+      );
+    }
+  }
+
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/** Unlink any deal currently linked to this client. */
+export async function unlinkDealAction(clientId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("deals")
+    .update({ client_id: null })
+    .eq("client_id", clientId);
+  if (error) return { error: error.message };
+
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
 const STORAGE_BUCKET = "client-files";
 
 /**

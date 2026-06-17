@@ -4,6 +4,7 @@ import type {
   Client,
   ClientService,
   ProjectStage,
+  DealStatus,
 } from "@/lib/database.types";
 
 /** All team members (Success Managers), default first. Admin-only. */
@@ -214,6 +215,100 @@ export async function getInvoiceRequests() {
   return requests.map((r) => ({
     ...r,
     payfast: byRequest.get(r.id) ?? null,
+  }));
+}
+
+// ── Deal ↔ Client linkage (Phase D2) ───────────────────────────────────────
+
+export interface DealLink {
+  deal: {
+    id: string;
+    business_name: string;
+    package: string | null;
+    price: number | null;
+    status: DealStatus;
+  };
+  /** Latest invoice_request status for the deal, or null if none raised. */
+  invoiceStatus: string | null;
+  /** PayFast payment status (international only), or null. */
+  paymentStatus: string | null;
+}
+
+/** The deal linked to a client (one per client), with invoice + payment status. */
+export async function getClientDealLink(
+  clientId: string
+): Promise<DealLink | null> {
+  const supabase = await createClient();
+  const { data: deal } = await supabase
+    .from("deals")
+    .select("id, business_name, package, price, status")
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (!deal) return null;
+
+  const { data: req } = await supabase
+    .from("invoice_requests")
+    .select("id, status")
+    .eq("deal_id", deal.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let paymentStatus: string | null = null;
+  if (req) {
+    const { data: pay } = await supabase
+      .from("payfast_payments")
+      .select("status")
+      .eq("invoice_request_id", req.id)
+      .maybeSingle();
+    paymentStatus = pay?.status ?? null;
+  }
+
+  return {
+    deal: {
+      id: deal.id,
+      business_name: deal.business_name,
+      package: deal.package,
+      price: deal.price,
+      status: deal.status,
+    },
+    invoiceStatus: req?.status ?? null,
+    paymentStatus,
+  };
+}
+
+export interface LinkableDeal {
+  id: string;
+  business_name: string;
+  package: string | null;
+  price: number | null;
+  repName: string | null;
+}
+
+/** Unlinked deals (client_id IS NULL) the admin can attach to a client. */
+export async function getLinkableDeals(): Promise<LinkableDeal[]> {
+  const supabase = await createClient();
+  const { data: deals } = await supabase
+    .from("deals")
+    .select("id, business_name, package, price, rep_id")
+    .is("client_id", null)
+    .order("created_at", { ascending: false });
+  const list = deals ?? [];
+  if (list.length === 0) return [];
+
+  const repIds = [...new Set(list.map((d) => d.rep_id))];
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .in("id", repIds);
+  const nameById = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
+
+  return list.map((d) => ({
+    id: d.id,
+    business_name: d.business_name,
+    package: d.package,
+    price: d.price,
+    repName: nameById.get(d.rep_id) ?? null,
   }));
 }
 

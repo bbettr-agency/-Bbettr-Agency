@@ -26,7 +26,7 @@ import { ReportCard } from "@/components/reports/report-card";
 import { FileManager } from "@/components/files/file-manager";
 import { PortalAccessCard } from "@/components/admin/portal-access-card";
 import { ClipboardList } from "lucide-react";
-import type { PortalAccess } from "@/lib/admin-queries";
+import type { PortalAccess, DealLink, LinkableDeal } from "@/lib/admin-queries";
 import type {
   Client,
   ClientService,
@@ -58,6 +58,8 @@ interface ClientDetailProps {
     source: string;
   }[];
   contracts: ContractView[];
+  dealLink: DealLink | null;
+  linkableDeals: LinkableDeal[];
 }
 
 export function ClientDetail({
@@ -73,6 +75,8 @@ export function ClientDetail({
   teamMembers,
   activity,
   contracts,
+  dealLink,
+  linkableDeals,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -243,6 +247,8 @@ export function ClientDetail({
                   contractStatus={contractStatus}
                   hasPortalAccess={portalAccess.hasLogin}
                   welcomeEmailSent={Boolean(client.welcome_email_sent_at)}
+                  dealLink={dealLink}
+                  linkableDeals={linkableDeals}
                 />
               </CardContent>
             </Card>

@@ -2,15 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, KeyRound, Copy, ArrowRight, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Check, KeyRound, Copy, ArrowRight, Loader2, Link2, Unlink } from "lucide-react";
+import { cn, formatCurrency } from "@/lib/utils";
 import {
   setIntakeStatusAction,
   provisionPortalAccessAction,
+  linkDealToClientAction,
+  unlinkDealAction,
 } from "@/app/(admin)/admin/actions";
 import { INTAKE_STEPS, intakeIndex } from "@/lib/intake";
 import { Button } from "@/components/ui/button";
 import type { IntakeStatus } from "@/lib/database.types";
+import type { DealLink, LinkableDeal } from "@/lib/admin-queries";
 
 interface IntakePanelProps {
   clientId: string;
@@ -19,6 +22,8 @@ interface IntakePanelProps {
   contractStatus: "none" | "not_sent" | "sent" | "signed";
   hasPortalAccess: boolean;
   welcomeEmailSent: boolean;
+  dealLink: DealLink | null;
+  linkableDeals: LinkableDeal[];
 }
 
 const CONTRACT_LABEL: Record<string, string> = {
@@ -35,12 +40,37 @@ export function IntakePanel({
   contractStatus,
   hasPortalAccess,
   welcomeEmailSent,
+  dealLink,
+  linkableDeals,
 }: IntakePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [selectedDeal, setSelectedDeal] = useState("");
+
+  function linkDeal() {
+    if (!selectedDeal) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await linkDealToClientAction(clientId, selectedDeal);
+      if (res.error) setError(res.error);
+      else {
+        setSelectedDeal("");
+        router.refresh();
+      }
+    });
+  }
+
+  function unlinkDeal() {
+    setError(null);
+    startTransition(async () => {
+      const res = await unlinkDealAction(clientId);
+      if (res.error) setError(res.error);
+      else router.refresh();
+    });
+  }
 
   const currentIdx = intakeIndex(intakeStatus);
   const nextStep = INTAKE_STEPS[currentIdx + 1];
@@ -107,6 +137,84 @@ export function IntakePanel({
           </div>
         </div>
       )}
+
+      {/* Linked deal (Phase D2) */}
+      <div className="rounded-xl border border-ink-100 p-3">
+        <div className="mb-2 flex items-center gap-1.5 text-ink-500">
+          <Link2 className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium uppercase tracking-wide">
+            Linked Deal
+          </span>
+        </div>
+
+        {dealLink ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-sm font-semibold text-ink-900">
+                {dealLink.deal.business_name}
+              </span>
+              {dealLink.deal.package && (
+                <span className="text-sm text-ink-500">{dealLink.deal.package}</span>
+              )}
+              {dealLink.deal.price != null && (
+                <span className="text-sm text-ink-500">
+                  {formatCurrency(dealLink.deal.price)}
+                </span>
+              )}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <StatusChip label="Deal" value={dealLink.deal.status} />
+              <StatusChip
+                label="Invoice"
+                value={dealLink.invoiceStatus ?? "—"}
+                tone={dealLink.invoiceStatus === "invoiced" ? "good" : "muted"}
+              />
+              <StatusChip
+                label="Payment"
+                value={dealLink.paymentStatus ?? "—"}
+                tone={dealLink.paymentStatus === "paid" ? "good" : "muted"}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={pending}
+              onClick={unlinkDeal}
+            >
+              <Unlink className="h-4 w-4" /> Unlink deal
+            </Button>
+          </div>
+        ) : linkableDeals.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedDeal}
+              onChange={(e) => setSelectedDeal(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-ink-200 bg-white px-2.5 py-1.5 text-sm text-ink-900"
+            >
+              <option value="">Select a deal to link…</option>
+              {linkableDeals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.business_name}
+                  {d.repName ? ` · ${d.repName}` : ""}
+                  {d.price != null ? ` · ${formatCurrency(d.price)}` : ""}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              loading={pending}
+              disabled={!selectedDeal}
+              onClick={linkDeal}
+            >
+              <Link2 className="h-4 w-4" /> Link
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm text-ink-400">
+            No deal linked. No unlinked deals are available to attach.
+          </p>
+        )}
+      </div>
 
       {/* Pipeline progression */}
       <ol className="relative space-y-1">
