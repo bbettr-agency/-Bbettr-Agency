@@ -15,6 +15,7 @@ import {
 import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { logActivity } from "@/lib/activity";
+import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { STAGE_TO_JOURNEY } from "@/lib/journey";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
@@ -640,31 +641,9 @@ export async function deleteActivityEventAction(
 }
 
 /**
- * Advance a NEW client's intake_status to `target`, but only when it's currently
- * one of `allowedFrom` (so we never move it backwards or skip ahead, and legacy
- * clients are never touched). Best-effort; uses the caller's admin session.
+ * Advance a NEW client's intake status when a contract is sent/signed. Delegates
+ * to the shared, service-role helper (guarded to new clients + forward-only).
  */
-async function advanceIntake(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  clientId: string,
-  target: IntakeStatus,
-  allowedFrom: IntakeStatus[]
-): Promise<void> {
-  const { data: c } = await supabase
-    .from("clients")
-    .select("onboarding_type, intake_status")
-    .eq("id", clientId)
-    .single();
-  if (
-    c?.onboarding_type === "new" &&
-    allowedFrom.includes(c.intake_status as IntakeStatus)
-  ) {
-    await supabase
-      .from("clients")
-      .update({ intake_status: target })
-      .eq("id", clientId);
-  }
-}
 
 // ── Contracts (Phase B) ───────────────────────────────────────────────────
 
@@ -712,7 +691,7 @@ export async function markContractSentAction(
     visibility: "client",
   });
   // Advance the intake pipeline for new clients (never moves legacy clients).
-  await advanceIntake(supabase, clientId, "contract_sent", ["draft"]);
+  await advanceIntakeStatus(clientId, "contract_sent", ["draft"]);
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
@@ -740,7 +719,7 @@ export async function markContractSignedAction(
     title: "Contract signed",
     visibility: "client",
   });
-  await advanceIntake(supabase, clientId, "contract_signed", [
+  await advanceIntakeStatus(clientId, "contract_signed", [
     "draft",
     "contract_sent",
   ]);
@@ -892,6 +871,12 @@ export async function provisionPortalAccessAction(
       visibility: "client",
     });
   }
+
+  // D1: portal access immediately opens onboarding for new clients.
+  await advanceIntakeStatus(clientId, "onboarding_started", ["portal_access_sent"], {
+    type: "onboarding_started",
+    title: "Onboarding opened",
+  });
 
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);

@@ -11,6 +11,7 @@ import { AppShell, type NavBadges } from "@/components/layout/app-shell";
 import { getPortalSettings } from "@/lib/settings";
 import { MaintenanceScreen } from "@/components/client/maintenance-screen";
 import { NotificationBell } from "@/components/client/notification-bell";
+import { IntakeLoginAdvance } from "@/components/client/intake-login-advance";
 
 export default async function ClientLayout({
   children,
@@ -34,7 +35,7 @@ export default async function ClientLayout({
     await Promise.all([
       supabase
         .from("clients")
-        .select("name")
+        .select("name, onboarding_type, intake_status")
         .eq("id", profile.client_id)
         .single(),
       supabase
@@ -55,6 +56,12 @@ export default async function ClientLayout({
     badges["/dashboard/onboarding"] = "check";
   }
 
+  // D1: a new client arriving at portal_access_sent has their onboarding opened
+  // on first load (→ onboarding_started). Mounted only when actually needed.
+  const needsIntakeAdvance =
+    client?.onboarding_type === "new" &&
+    client?.intake_status === "portal_access_sent";
+
   return (
     <AppShell
       roleLabel="Client"
@@ -72,6 +79,7 @@ export default async function ClientLayout({
         avatarUrl: profile.avatar_url,
       }}
     >
+      {needsIntakeAdvance && <IntakeLoginAdvance />}
       {children}
     </AppShell>
   );
