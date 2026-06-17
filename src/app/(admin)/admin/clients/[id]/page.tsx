@@ -19,6 +19,7 @@ import {
   getClientActivity,
   getClientDealLink,
   getLinkableDeals,
+  getClientBilling,
 } from "@/lib/admin-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -55,6 +56,7 @@ export default async function ClientDetailPage({
     contracts,
     dealLink,
     linkableDeals,
+    billing,
   ] = await Promise.all([
     getClientServices(id),
     getProjectStages(id),
@@ -68,6 +70,7 @@ export default async function ClientDetailPage({
     getClientContracts(id),
     getClientDealLink(id),
     getLinkableDeals(),
+    getClientBilling(id),
   ]);
 
   return (
@@ -103,6 +106,7 @@ export default async function ClientDetailPage({
         contracts={contracts}
         dealLink={dealLink}
         linkableDeals={linkableDeals}
+        billing={billing}
       />
 
       <DangerZone clientId={client.id} clientName={client.name} />

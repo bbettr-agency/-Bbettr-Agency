@@ -8,6 +8,27 @@ import type {
   ClientLocation,
 } from "@/lib/database.types";
 
+const invoiceStatusMap: Record<
+  "draft" | "sent" | "paid" | "void" | "overdue",
+  { label: string; tone: "neutral" | "info" | "success" | "danger" }
+> = {
+  draft: { label: "Draft", tone: "neutral" },
+  sent: { label: "Sent", tone: "info" },
+  overdue: { label: "Overdue", tone: "danger" },
+  paid: { label: "Paid", tone: "success" },
+  void: { label: "Void", tone: "neutral" },
+};
+
+/** Badge for a client invoice's derived status (overdue is computed, not stored). */
+export function InvoiceStatusBadge({
+  status,
+}: {
+  status: "draft" | "sent" | "paid" | "void" | "overdue";
+}) {
+  const cfg = invoiceStatusMap[status];
+  return <Badge tone={cfg.tone}>{cfg.label}</Badge>;
+}
+
 const clientLocationMap: Record<
   ClientLocation,
   { label: string; tone: "brand" | "info" }

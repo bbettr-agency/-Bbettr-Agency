@@ -15,6 +15,7 @@ import { ProjectSettingsManager } from "@/components/admin/project-settings-mana
 import { ActivityManager } from "@/components/admin/activity-manager";
 import { ContractManager } from "@/components/admin/contract-manager";
 import { IntakePanel } from "@/components/admin/intake-panel";
+import { BillingPanel } from "@/components/admin/billing-panel";
 import type { ContractView } from "@/lib/queries";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
@@ -26,7 +27,12 @@ import { ReportCard } from "@/components/reports/report-card";
 import { FileManager } from "@/components/files/file-manager";
 import { PortalAccessCard } from "@/components/admin/portal-access-card";
 import { ClipboardList } from "lucide-react";
-import type { PortalAccess, DealLink, LinkableDeal } from "@/lib/admin-queries";
+import type {
+  PortalAccess,
+  DealLink,
+  LinkableDeal,
+  ClientBilling,
+} from "@/lib/admin-queries";
 import type {
   Client,
   ClientService,
@@ -60,6 +66,7 @@ interface ClientDetailProps {
   contracts: ContractView[];
   dealLink: DealLink | null;
   linkableDeals: LinkableDeal[];
+  billing: ClientBilling;
 }
 
 export function ClientDetail({
@@ -77,6 +84,7 @@ export function ClientDetail({
   contracts,
   dealLink,
   linkableDeals,
+  billing,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -104,6 +112,7 @@ export function ClientDetail({
     { id: "updates", label: "Updates", count: updates.length },
     { id: "reports", label: "Reports", count: reports.length },
     { id: "files", label: "Files", count: files.length },
+    { id: "billing", label: "Billing", count: billing.invoices.length },
   ];
 
   return (
@@ -320,6 +329,17 @@ export function ClientDetail({
               initialFiles={files}
               isAdmin
             />
+          )}
+
+          {active === "billing" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Billing</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BillingPanel clientId={client.id} billing={billing} />
+              </CardContent>
+            </Card>
           )}
         </>
       )}

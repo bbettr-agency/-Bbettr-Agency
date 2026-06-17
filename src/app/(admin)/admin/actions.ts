@@ -21,11 +21,18 @@ import { STAGE_TO_JOURNEY } from "@/lib/journey";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import type {
+  Database,
   ClientStatus,
   ServiceType,
   StageStatus,
   IntakeStatus,
+  InvoiceStatus,
+  InvoiceKind,
+  PaymentMethod,
 } from "@/lib/database.types";
+
+type ClientInvoiceUpdate = Database["public"]["Tables"]["client_invoices"]["Update"];
+type ClientRetainerUpdate = Database["public"]["Tables"]["client_retainers"]["Update"];
 
 export interface ActionResult {
   ok?: boolean;
@@ -1517,5 +1524,409 @@ export async function rejectInvoiceRequestAction(
   revalidatePath("/admin/invoices");
   // Refresh the rep's layout so their notification bell's unread badge updates.
   revalidatePath("/rep", "layout");
+  return { ok: true };
+}
+
+// ── Client Billing (Phase E1) ───────────────────────────────────────────────
+// Manual, admin-only billing under the client record. Writes use the admin
+// session under the is_admin() RLS policies. No QuickBooks/PayFast write, no
+// recurring engine, no commission/intake side effects.
+
+export interface NewInvoiceInput {
+  title: string;
+  description?: string | null;
+  amount: number;
+  kind?: InvoiceKind;
+  /** Initial state: a draft, or sent immediately. Paid is only set via payments. */
+  send?: boolean;
+  issuedAt?: string | null;
+  dueAt?: string | null;
+}
+
+/** Create a manual invoice for a client. Reserves the next INV- number. */
+export async function createClientInvoiceAction(
+  clientId: string,
+  input: NewInvoiceInput
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const title = input.title?.trim();
+  const amount = Number(input.amount);
+  if (!title) return { error: "An invoice title is required." };
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { error: "Enter a valid invoice amount." };
+  }
+
+  const { data: numberValue, error: numberError } = await supabase.rpc(
+    "next_client_invoice_number"
+  );
+  if (numberError || !numberValue) {
+    return {
+      error: `Could not assign an invoice number: ${numberError?.message ?? "no value"}`,
+    };
+  }
+
+  const { error } = await supabase.from("client_invoices").insert({
+    client_id: clientId,
+    invoice_number: numberValue as string,
+    title,
+    description: input.description?.trim() || null,
+    amount,
+    kind: input.kind ?? "one_off",
+    status: input.send ? "sent" : "draft",
+    issued_at: input.send ? input.issuedAt ?? new Date().toISOString() : input.issuedAt ?? null,
+    due_at: input.dueAt ?? null,
+    source: "admin",
+    created_by: profile.id,
+  });
+  if (error) return { error: error.message };
+
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+export interface UpdateInvoiceInput {
+  title?: string;
+  description?: string | null;
+  amount?: number;
+  kind?: InvoiceKind;
+  issuedAt?: string | null;
+  dueAt?: string | null;
+}
+
+/** Edit a draft/sent invoice. Paid or void invoices are locked. */
+export async function updateClientInvoiceAction(
+  invoiceId: string,
+  input: UpdateInvoiceInput
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, status")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { error: "Invoice not found." };
+  if (invoice.status === "paid" || invoice.status === "void") {
+    return { error: "Paid or void invoices can't be edited." };
+  }
+
+  const patch: ClientInvoiceUpdate = {};
+  if (input.title !== undefined) {
+    const t = input.title.trim();
+    if (!t) return { error: "An invoice title is required." };
+    patch.title = t;
+  }
+  if (input.description !== undefined) patch.description = input.description?.trim() || null;
+  if (input.amount !== undefined) {
+    const a = Number(input.amount);
+    if (!Number.isFinite(a) || a < 0) return { error: "Enter a valid invoice amount." };
+    patch.amount = a;
+  }
+  if (input.kind !== undefined) patch.kind = input.kind;
+  if (input.issuedAt !== undefined) patch.issued_at = input.issuedAt;
+  if (input.dueAt !== undefined) patch.due_at = input.dueAt;
+
+  const { error } = await supabase
+    .from("client_invoices")
+    .update(patch)
+    .eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  revalidateClient(invoice.client_id);
+  return { ok: true };
+}
+
+/** Move an invoice between draft/sent/void. Paid is driven by payments only. */
+export async function setInvoiceStatusAction(
+  invoiceId: string,
+  status: Extract<InvoiceStatus, "draft" | "sent" | "void">
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, status")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { error: "Invoice not found." };
+  if (invoice.status === "paid") {
+    return { error: "A paid invoice can't change status. Remove its payments first." };
+  }
+
+  const patch: ClientInvoiceUpdate = { status };
+  if (status === "sent" && invoice.status === "draft") {
+    patch.issued_at = new Date().toISOString();
+  }
+  const { error } = await supabase
+    .from("client_invoices")
+    .update(patch)
+    .eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  revalidateClient(invoice.client_id);
+  return { ok: true };
+}
+
+/** Delete a draft invoice with no payments. */
+export async function deleteClientInvoiceAction(
+  invoiceId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, status")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { error: "Invoice not found." };
+  if (invoice.status !== "draft") {
+    return { error: "Only draft invoices can be deleted. Void it instead." };
+  }
+  const { count } = await supabase
+    .from("client_payments")
+    .select("id", { count: "exact", head: true })
+    .eq("invoice_id", invoiceId);
+  if ((count ?? 0) > 0) {
+    return { error: "This invoice has payments and can't be deleted." };
+  }
+
+  const { error } = await supabase
+    .from("client_invoices")
+    .delete()
+    .eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  revalidateClient(invoice.client_id);
+  return { ok: true };
+}
+
+/**
+ * Recompute an invoice's paid state from its recorded payments: paid (with
+ * paid_at) once payments cover the amount, otherwise reverted to sent. Never
+ * touches draft/void invoices.
+ */
+async function syncInvoicePaidState(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string
+): Promise<void> {
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, amount, status, paid_at")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice || invoice.status === "draft" || invoice.status === "void") return;
+
+  const { data: pays } = await supabase
+    .from("client_payments")
+    .select("amount")
+    .eq("invoice_id", invoiceId);
+  const totalPaid = (pays ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
+  const covered = totalPaid >= Number(invoice.amount);
+
+  if (covered && invoice.status !== "paid") {
+    await supabase
+      .from("client_invoices")
+      .update({ status: "paid", paid_at: invoice.paid_at ?? new Date().toISOString() })
+      .eq("id", invoiceId);
+  } else if (!covered && invoice.status === "paid") {
+    await supabase
+      .from("client_invoices")
+      .update({ status: "sent", paid_at: null })
+      .eq("id", invoiceId);
+  }
+}
+
+export interface NewPaymentInput {
+  /** Optional: attach to an invoice (sets it paid once covered). */
+  invoiceId?: string | null;
+  amount: number;
+  method?: PaymentMethod;
+  reference?: string | null;
+  receivedAt?: string | null;
+  notes?: string | null;
+}
+
+/** Record a payment received from a client (manual). */
+export async function recordPaymentAction(
+  clientId: string,
+  input: NewPaymentInput
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "Enter a valid payment amount." };
+  }
+
+  const { error } = await supabase.from("client_payments").insert({
+    client_id: clientId,
+    invoice_id: input.invoiceId ?? null,
+    amount,
+    method: input.method ?? "manual",
+    reference: input.reference?.trim() || null,
+    received_at: input.receivedAt ?? new Date().toISOString(),
+    recorded_by: profile.id,
+    notes: input.notes?.trim() || null,
+  });
+  if (error) return { error: error.message };
+
+  if (input.invoiceId) await syncInvoicePaidState(supabase, input.invoiceId);
+
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+/** Remove a payment (e.g. entered in error); reverts its invoice if needed. */
+export async function deleteClientPaymentAction(
+  paymentId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: payment } = await supabase
+    .from("client_payments")
+    .select("id, client_id, invoice_id")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (!payment) return { error: "Payment not found." };
+
+  const { error } = await supabase
+    .from("client_payments")
+    .delete()
+    .eq("id", paymentId);
+  if (error) return { error: error.message };
+
+  if (payment.invoice_id) await syncInvoicePaidState(supabase, payment.invoice_id);
+
+  revalidateClient(payment.client_id);
+  return { ok: true };
+}
+
+export interface RetainerInput {
+  name: string;
+  amount: number;
+  startedAt?: string | null;
+  notes?: string | null;
+}
+
+/** Add a record-only retainer to a client. */
+export async function addRetainerAction(
+  clientId: string,
+  input: RetainerInput
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const name = input.name?.trim();
+  const amount = Number(input.amount);
+  if (!name) return { error: "A retainer name is required." };
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { error: "Enter a valid retainer amount." };
+  }
+
+  const { error } = await supabase.from("client_retainers").insert({
+    client_id: clientId,
+    name,
+    amount,
+    started_at: input.startedAt ?? null,
+    notes: input.notes?.trim() || null,
+  });
+  if (error) return { error: error.message };
+
+  revalidateClient(clientId);
+  return { ok: true };
+}
+
+/** Edit a retainer's details. */
+export async function updateRetainerAction(
+  retainerId: string,
+  input: Partial<RetainerInput>
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: retainer } = await supabase
+    .from("client_retainers")
+    .select("id, client_id")
+    .eq("id", retainerId)
+    .maybeSingle();
+  if (!retainer) return { error: "Retainer not found." };
+
+  const patch: ClientRetainerUpdate = {};
+  if (input.name !== undefined) {
+    const n = input.name.trim();
+    if (!n) return { error: "A retainer name is required." };
+    patch.name = n;
+  }
+  if (input.amount !== undefined) {
+    const a = Number(input.amount);
+    if (!Number.isFinite(a) || a < 0) return { error: "Enter a valid retainer amount." };
+    patch.amount = a;
+  }
+  if (input.startedAt !== undefined) patch.started_at = input.startedAt;
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
+
+  const { error } = await supabase
+    .from("client_retainers")
+    .update(patch)
+    .eq("id", retainerId);
+  if (error) return { error: error.message };
+
+  revalidateClient(retainer.client_id);
+  return { ok: true };
+}
+
+/** Activate/deactivate a retainer (record-only; no billing side effects). */
+export async function setRetainerActiveAction(
+  retainerId: string,
+  active: boolean
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: retainer } = await supabase
+    .from("client_retainers")
+    .select("id, client_id")
+    .eq("id", retainerId)
+    .maybeSingle();
+  if (!retainer) return { error: "Retainer not found." };
+
+  const { error } = await supabase
+    .from("client_retainers")
+    .update({ active })
+    .eq("id", retainerId);
+  if (error) return { error: error.message };
+
+  revalidateClient(retainer.client_id);
+  return { ok: true };
+}
+
+/** Delete a retainer. */
+export async function deleteRetainerAction(
+  retainerId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: retainer } = await supabase
+    .from("client_retainers")
+    .select("id, client_id")
+    .eq("id", retainerId)
+    .maybeSingle();
+  if (!retainer) return { error: "Retainer not found." };
+
+  const { error } = await supabase
+    .from("client_retainers")
+    .delete()
+    .eq("id", retainerId);
+  if (error) return { error: error.message };
+
+  revalidateClient(retainer.client_id);
   return { ok: true };
 }

@@ -5,6 +5,10 @@ import type {
   ClientService,
   ProjectStage,
   DealStatus,
+  ClientInvoice,
+  ClientPayment,
+  ClientRetainer,
+  InvoiceStatus,
 } from "@/lib/database.types";
 
 /** All team members (Success Managers), default first. Admin-only. */
@@ -420,5 +424,111 @@ export async function getRepDetail(repId: string): Promise<RepDetail | null> {
       requestStatus: (statusByDeal.get(d.id) ?? "pending") as
         import("@/lib/database.types").InvoiceRequestStatus,
     })),
+  };
+}
+
+// ── Client Billing (Phase E1) ───────────────────────────────────────────────
+
+/** An invoice plus derived payment state (overdue is computed, never stored). */
+export interface BillingInvoice extends ClientInvoice {
+  amountPaid: number;
+  balance: number;
+  derivedStatus: InvoiceStatus | "overdue";
+}
+
+export interface BillingPayment extends ClientPayment {
+  invoiceNumber: string | null;
+}
+
+export type BillingRetainer = ClientRetainer;
+
+export interface ClientBilling {
+  invoices: BillingInvoice[];
+  payments: BillingPayment[];
+  retainers: BillingRetainer[];
+  kpis: {
+    outstandingTotal: number;
+    paidLifetime: number;
+    overdueCount: number;
+    activeRetainers: number;
+  };
+}
+
+/**
+ * Full billing picture for one client: invoices (with derived paid/overdue
+ * state), payment history, retainers, and the dashboard KPIs. Admin-only.
+ *
+ * "Overdue" is derived here (status='sent' AND past due) so no scheduled job is
+ * needed. "Paid lifetime" is the sum of recorded payments (money actually
+ * received), independent of invoice status.
+ */
+export async function getClientBilling(clientId: string): Promise<ClientBilling> {
+  const supabase = await createClient();
+
+  const [{ data: invoiceRows }, { data: paymentRows }, { data: retainerRows }] =
+    await Promise.all([
+      supabase
+        .from("client_invoices")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("client_payments")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("received_at", { ascending: false }),
+      supabase
+        .from("client_retainers")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+    ]);
+
+  const invoiceList = invoiceRows ?? [];
+  const paymentList = paymentRows ?? [];
+  const retainerList = retainerRows ?? [];
+  const now = Date.now();
+
+  // Sum payments per invoice for balance + paid detection.
+  const paidByInvoice = new Map<string, number>();
+  for (const p of paymentList) {
+    if (!p.invoice_id) continue;
+    paidByInvoice.set(
+      p.invoice_id,
+      (paidByInvoice.get(p.invoice_id) ?? 0) + Number(p.amount)
+    );
+  }
+
+  const invoices: BillingInvoice[] = invoiceList.map((inv) => {
+    const amountPaid = paidByInvoice.get(inv.id) ?? 0;
+    const balance = Number(inv.amount) - amountPaid;
+    const isOverdue =
+      inv.status === "sent" && inv.due_at != null && new Date(inv.due_at).getTime() < now;
+    return {
+      ...inv,
+      amountPaid,
+      balance,
+      derivedStatus: isOverdue ? "overdue" : inv.status,
+    };
+  });
+
+  const numberById = new Map(invoiceList.map((i) => [i.id, i.invoice_number]));
+  const payments: BillingPayment[] = paymentList.map((p) => ({
+    ...p,
+    invoiceNumber: p.invoice_id ? numberById.get(p.invoice_id) ?? null : null,
+  }));
+
+  const outstandingTotal = invoices
+    .filter((i) => i.status === "sent")
+    .reduce((sum, i) => sum + i.balance, 0);
+  const paidLifetime = paymentList.reduce((sum, p) => sum + Number(p.amount), 0);
+  const overdueCount = invoices.filter((i) => i.derivedStatus === "overdue").length;
+  const activeRetainers = retainerList.filter((r) => r.active).length;
+
+  return {
+    invoices,
+    payments,
+    retainers: retainerList,
+    kpis: { outstandingTotal, paidLifetime, overdueCount, activeRetainers },
   };
 }

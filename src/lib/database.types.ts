@@ -72,6 +72,11 @@ export type ContractStatus = "not_sent" | "sent" | "signed";
 
 export type OnboardingType = "legacy" | "new";
 
+export type InvoiceStatus = "draft" | "sent" | "paid" | "void";
+export type InvoiceKind = "one_off" | "retainer" | "custom";
+export type InvoiceSource = "admin" | "rep_deal" | "quickbooks";
+export type PaymentMethod = "eft" | "payfast" | "quickbooks" | "cash" | "manual";
+
 export type IntakeStatus =
   | "draft"
   | "contract_sent"
@@ -738,6 +743,102 @@ export interface Database {
           }
         ];
       };
+      client_invoices: {
+        Row: {
+          id: string;
+          client_id: string;
+          invoice_number: string;
+          title: string;
+          description: string | null;
+          amount: number;
+          currency: string;
+          kind: InvoiceKind;
+          status: InvoiceStatus;
+          issued_at: string | null;
+          due_at: string | null;
+          paid_at: string | null;
+          quickbooks_invoice_id: string | null;
+          quickbooks_invoice_number: string | null;
+          invoice_request_id: string | null;
+          source: InvoiceSource;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          invoice_number: string;
+          title: string;
+          description?: string | null;
+          amount: number;
+          currency?: string;
+          kind?: InvoiceKind;
+          status?: InvoiceStatus;
+          issued_at?: string | null;
+          due_at?: string | null;
+          paid_at?: string | null;
+          quickbooks_invoice_id?: string | null;
+          quickbooks_invoice_number?: string | null;
+          invoice_request_id?: string | null;
+          source?: InvoiceSource;
+          created_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_invoices"]["Row"]>;
+        Relationships: [];
+      };
+      client_payments: {
+        Row: {
+          id: string;
+          client_id: string;
+          invoice_id: string | null;
+          amount: number;
+          method: PaymentMethod;
+          reference: string | null;
+          payfast_payment_id: string | null;
+          received_at: string;
+          recorded_by: string | null;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          client_id: string;
+          invoice_id?: string | null;
+          amount: number;
+          method?: PaymentMethod;
+          reference?: string | null;
+          payfast_payment_id?: string | null;
+          received_at?: string;
+          recorded_by?: string | null;
+          notes?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_payments"]["Row"]>;
+        Relationships: [];
+      };
+      client_retainers: {
+        Row: {
+          id: string;
+          client_id: string;
+          name: string;
+          amount: number;
+          cadence: string;
+          active: boolean;
+          started_at: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          name: string;
+          amount: number;
+          cadence?: string;
+          active?: boolean;
+          started_at?: string | null;
+          notes?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_retainers"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -750,6 +851,10 @@ export interface Database {
         Returns: string;
       };
       next_qbo_invoice_docnumber: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      next_client_invoice_number: {
         Args: Record<string, never>;
         Returns: string;
       };
@@ -779,3 +884,6 @@ export type PayfastPayment = Database["public"]["Tables"]["payfast_payments"]["R
 export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
 export type ActivityEvent = Database["public"]["Tables"]["activity_events"]["Row"];
 export type Contract = Database["public"]["Tables"]["contracts"]["Row"];
+export type ClientInvoice = Database["public"]["Tables"]["client_invoices"]["Row"];
+export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
+export type ClientRetainer = Database["public"]["Tables"]["client_retainers"]["Row"];
