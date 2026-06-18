@@ -10,6 +10,7 @@ export type UserRole = "admin" | "client" | "rep";
 
 export type BillingType = "once_off" | "monthly";
 export type ClientLocation = "south_africa" | "international";
+export type Currency = "ZAR" | "USD";
 export type DealStatus =
   | "new"
   | "invoice_requested"
@@ -445,6 +446,7 @@ export interface Database {
           price: number | null;
           billing_type: BillingType;
           client_location: ClientLocation;
+          currency: Currency;
           notes: string | null;
           status: DealStatus;
           client_id: string | null;
@@ -469,6 +471,7 @@ export interface Database {
           price?: number | null;
           billing_type?: BillingType;
           client_location?: ClientLocation;
+          currency?: Currency;
           notes?: string | null;
           status?: DealStatus;
           client_id?: string | null;

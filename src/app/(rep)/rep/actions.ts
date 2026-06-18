@@ -8,10 +8,11 @@ import { notifyAdmins } from "@/lib/internal-notifications";
 import { sendInvoiceRequestEmail } from "@/lib/email/rep-notifications";
 import {
   isValidPackageKey,
-  isCustomPackage,
+  getPackage,
   resolvePackage,
+  WEBSITE_SEO_RETAINER,
 } from "@/lib/packages";
-import type { BillingType, ClientLocation } from "@/lib/database.types";
+import type { ClientLocation, Currency } from "@/lib/database.types";
 
 export interface DealActionResult {
   error?: string;
@@ -51,10 +52,16 @@ export async function createDealAction(
     return { error: "Price must be greater than zero." };
   }
 
-  const billing = String(formData.get("billing_type") ?? "once_off") as BillingType;
+  // Currency is the rep's explicit Pricing Type choice (Local = ZAR,
+  // International = USD) — NOT derived from client location. It carries through
+  // to the QuickBooks invoice.
+  const currency: Currency =
+    String(formData.get("pricing_type") ?? "local") === "international"
+      ? "USD"
+      : "ZAR";
 
-  // Client location must be one of the two controlled values. It's stored now
-  // and used later to route payments (SA = EFT, International = payment link).
+  // Client location must be one of the two controlled values. It only routes the
+  // payment method later (SA = EFT, International = payment link) — never currency.
   const location = String(
     formData.get("client_location") ?? ""
   ) as ClientLocation;
@@ -64,40 +71,30 @@ export async function createDealAction(
 
   const text = (k: string) => String(formData.get(k) ?? "").trim() || null;
 
-  // Structured service package — must be a known catalogue key. For the custom
-  // package the rep must supply a product/service name and description, which
-  // become the QuickBooks line item + description.
+  // Structured service package — must be one of the approved catalogue services.
+  // The name + description (and billing type) come from the catalogue, so reps
+  // never type them and the invoice stays consistent.
   const packageKey = String(formData.get("package_key") ?? "").trim();
-  if (!isValidPackageKey(packageKey)) {
-    return { error: "Please choose a service package." };
+  const pkg = getPackage(packageKey);
+  if (!isValidPackageKey(packageKey) || !pkg) {
+    return { error: "Please choose a service." };
   }
-  const customName = text("custom_package_name");
-  const customDescription = text("custom_package_description");
-  if (isCustomPackage(packageKey) && (!customName || !customDescription)) {
-    return {
-      error: "Please enter a custom product/service name and description.",
-    };
-  }
-  const resolved = resolvePackage({ packageKey, customName, customDescription });
+  const billing = pkg.billing;
+  const resolved = resolvePackage({ packageKey });
 
-  // Optional monthly retainer. When enabled, all three fields are required and
-  // the amount must be > 0. It becomes a second invoice line (not commissioned).
+  // Optional monthly retainer — the single approved Website Maintenance & SEO
+  // Retainer. Its name + description are applied server-side (the rep enters only
+  // the amount); it becomes a separate invoice line and is NOT commissioned.
   const hasRetainer =
     String(formData.get("has_monthly_retainer") ?? "") === "on";
-  const retainerName = text("monthly_retainer_name");
-  const retainerDescription = text("monthly_retainer_description");
+  const retainerName = hasRetainer ? WEBSITE_SEO_RETAINER.name : null;
+  const retainerDescription = hasRetainer ? WEBSITE_SEO_RETAINER.description : null;
   const retainerRaw = formData.get("monthly_retainer_amount");
   const retainerAmount =
     retainerRaw !== null && String(retainerRaw) !== ""
       ? Number(retainerRaw)
       : null;
   if (hasRetainer) {
-    if (!retainerName || !retainerDescription) {
-      return {
-        error:
-          "Please enter the monthly retainer product/service and description.",
-      };
-    }
     if (
       retainerAmount === null ||
       !Number.isFinite(retainerAmount) ||
@@ -117,17 +114,16 @@ export async function createDealAction(
       phone: text("phone"),
       package: resolved.label,
       package_key: packageKey,
-      custom_package_name: isCustomPackage(packageKey) ? customName : null,
-      custom_package_description: isCustomPackage(packageKey)
-        ? customDescription
-        : null,
+      custom_package_name: null,
+      custom_package_description: null,
       has_monthly_retainer: hasRetainer,
-      monthly_retainer_name: hasRetainer ? retainerName : null,
-      monthly_retainer_description: hasRetainer ? retainerDescription : null,
+      monthly_retainer_name: retainerName,
+      monthly_retainer_description: retainerDescription,
       monthly_retainer_amount: hasRetainer ? retainerAmount : null,
       price,
       billing_type: billing,
       client_location: location,
+      currency,
       notes: text("notes"),
       status: "invoice_requested",
     })

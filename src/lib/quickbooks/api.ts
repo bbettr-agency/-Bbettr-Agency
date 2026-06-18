@@ -70,7 +70,7 @@ export interface CustomerResult {
  */
 export async function findOrCreateCustomer(
   conn: ActiveConnection,
-  opts: { displayName: string; email?: string | null }
+  opts: { displayName: string; email?: string | null; currency?: "ZAR" | "USD" }
 ): Promise<CustomerResult> {
   const query = `select Id from Customer where DisplayName = '${ql(
     opts.displayName
@@ -87,6 +87,9 @@ export async function findOrCreateCustomer(
     body: JSON.stringify({
       DisplayName: opts.displayName,
       ...(opts.email ? { PrimaryEmailAddr: { Address: opts.email } } : {}),
+      // A QBO customer's currency is fixed at creation. USD needs Multicurrency
+      // enabled; ZAR (home) needs no CurrencyRef. Only set for new USD customers.
+      ...(opts.currency === "USD" ? { CurrencyRef: { value: "USD" } } : {}),
     }),
   });
   if (!created.Customer?.Id) {
@@ -193,6 +196,8 @@ export async function createInvoice(
     lines: InvoiceLineInput[];
     docNumber?: string | null;
     email?: string | null;
+    /** ZAR (home currency, no CurrencyRef) or USD (requires QBO Multicurrency). */
+    currency?: "ZAR" | "USD";
   }
 ): Promise<CreatedInvoice> {
   // Resolve each line's item sequentially (avoids creating a duplicate item if
@@ -223,6 +228,9 @@ export async function createInvoice(
       ...(opts.docNumber ? { DocNumber: opts.docNumber } : {}),
       Line: qboLines,
       ...(opts.email ? { BillEmail: { Address: opts.email } } : {}),
+      // Home currency (ZAR) needs no CurrencyRef. USD is set explicitly and must
+      // match the customer's currency; requires QBO Multicurrency to be enabled.
+      ...(opts.currency === "USD" ? { CurrencyRef: { value: "USD" } } : {}),
     }),
   });
 

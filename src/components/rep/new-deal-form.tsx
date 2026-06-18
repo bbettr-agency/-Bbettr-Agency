@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { AlertCircle, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createDealAction } from "@/app/(rep)/rep/actions";
-import { SERVICE_PACKAGES, CUSTOM_PACKAGE_KEY } from "@/lib/packages";
+import { SERVICE_PACKAGES, WEBSITE_SEO_RETAINER } from "@/lib/packages";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select, FieldHelp } from "@/components/ui/input";
@@ -13,8 +13,16 @@ export function NewDealForm() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [packageKey, setPackageKey] = useState("");
-  const isCustom = packageKey === CUSTOM_PACKAGE_KEY;
+  const [pricingType, setPricingType] = useState<"local" | "international">("local");
   const [hasRetainer, setHasRetainer] = useState(false);
+
+  const selectedPackage = SERVICE_PACKAGES.find((p) => p.key === packageKey);
+  const currency = pricingType === "international" ? "USD" : "ZAR";
+  const billingLabel = selectedPackage
+    ? selectedPackage.billing === "monthly"
+      ? "Monthly"
+      : "Once-off"
+    : "—";
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,8 +72,9 @@ export function NewDealForm() {
                 <option value="international">International</option>
               </Select>
               <FieldHelp>
-                South African clients are invoiced for EFT; international clients
-                will later receive an online payment link.
+                Affects payment routing only — South African clients are invoiced
+                for EFT; international clients receive an online payment link.
+                (Currency is set by Pricing Type below.)
               </FieldHelp>
             </div>
             <div>
@@ -82,11 +91,11 @@ export function NewDealForm() {
 
       <Card>
         <CardContent className="space-y-5 p-6">
-          <h2 className="text-sm font-semibold text-ink-900">Package & price</h2>
+          <h2 className="text-sm font-semibold text-ink-900">Service & price</h2>
           <div className="grid gap-5 sm:grid-cols-2">
-            <div>
+            <div className="sm:col-span-2">
               <Label htmlFor="package_key" required>
-                Service Package
+                Service
               </Label>
               <Select
                 id="package_key"
@@ -96,7 +105,7 @@ export function NewDealForm() {
                 required
               >
                 <option value="" disabled>
-                  Select a package…
+                  Select a service…
                 </option>
                 {SERVICE_PACKAGES.map((p) => (
                   <option key={p.key} value={p.key}>
@@ -104,13 +113,46 @@ export function NewDealForm() {
                   </option>
                 ))}
               </Select>
+              {selectedPackage && (
+                <div className="mt-2 rounded-xl border border-ink-100 bg-ink-50/50 p-3">
+                  <p className="text-xs font-medium text-ink-500">
+                    Invoice description · {billingLabel}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-700">
+                    {selectedPackage.description}
+                  </p>
+                </div>
+              )}
               <FieldHelp>
-                Determines the product/service and description on the invoice.
+                The service name and description are applied to the invoice
+                automatically — no need to type them.
               </FieldHelp>
             </div>
-            <div>
+
+            <div className="sm:col-span-2">
+              <Label htmlFor="pricing_type" required>
+                Pricing Type
+              </Label>
+              <Select
+                id="pricing_type"
+                name="pricing_type"
+                value={pricingType}
+                onChange={(e) =>
+                  setPricingType(e.target.value as "local" | "international")
+                }
+                required
+              >
+                <option value="local">Local Price (ZAR)</option>
+                <option value="international">International Price (USD)</option>
+              </Select>
+              <FieldHelp>
+                Sets the invoice currency. Local = ZAR, International = USD.
+              </FieldHelp>
+            </div>
+
+            <div className="sm:col-span-2">
               <Label htmlFor="price" required>
-                Price (ZAR)
+                Price ({currency})
               </Label>
               <Input
                 id="price"
@@ -121,46 +163,9 @@ export function NewDealForm() {
                 required
                 placeholder="0"
               />
+              <FieldHelp>Enter the amount in {currency}. No default pricing.</FieldHelp>
             </div>
-            <div className="sm:col-span-2">
-              <Label htmlFor="billing_type">Billing</Label>
-              <Select id="billing_type" name="billing_type" defaultValue="once_off">
-                <option value="once_off">Once-off</option>
-                <option value="monthly">Monthly</option>
-              </Select>
-              <FieldHelp>
-                Monthly deals raise a first invoice; recurring billing is set up
-                by the team.
-              </FieldHelp>
-            </div>
-            {isCustom && (
-              <>
-                <div className="sm:col-span-2">
-                  <Label htmlFor="custom_package_name" required>
-                    Custom Product / Service Name
-                  </Label>
-                  <Input
-                    id="custom_package_name"
-                    name="custom_package_name"
-                    placeholder="e.g. Bespoke Branding Retainer"
-                    required={isCustom}
-                  />
-                  <FieldHelp>Shown as the product/service on the invoice.</FieldHelp>
-                </div>
-                <div className="sm:col-span-2">
-                  <Label htmlFor="custom_package_description" required>
-                    Custom Description
-                  </Label>
-                  <Textarea
-                    id="custom_package_description"
-                    name="custom_package_description"
-                    rows={2}
-                    required={isCustom}
-                    placeholder="What the client is being invoiced for."
-                  />
-                </div>
-              </>
-            )}
+
             <div className="sm:col-span-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/40 p-4">
               <label className="flex cursor-pointer items-start gap-3">
                 <input
@@ -176,8 +181,7 @@ export function NewDealForm() {
                     <span className="font-normal text-ink-400">(optional)</span>
                   </span>
                   <span className="mt-0.5 block text-xs text-ink-500">
-                    Adds a second invoice line for an ongoing monthly service
-                    (e.g. hosting, maintenance, support) on top of the package.
+                    Adds a separate monthly invoice line on top of the service above.
                   </span>
                 </span>
               </label>
@@ -185,31 +189,27 @@ export function NewDealForm() {
               {hasRetainer && (
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <Label htmlFor="monthly_retainer_name" required>
-                      Monthly Retainer Product / Service
+                    <Label htmlFor="retainer_key" required>
+                      Monthly Retainer
                     </Label>
-                    <Input
-                      id="monthly_retainer_name"
-                      name="monthly_retainer_name"
-                      placeholder="e.g. Monthly Website Retainer"
-                      required={hasRetainer}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Label htmlFor="monthly_retainer_description" required>
-                      Monthly Retainer Description
-                    </Label>
-                    <Textarea
-                      id="monthly_retainer_description"
-                      name="monthly_retainer_description"
-                      rows={2}
-                      required={hasRetainer}
-                      placeholder="e.g. Monthly website hosting, maintenance, support and basic updates."
-                    />
+                    <Select
+                      id="retainer_key"
+                      name="retainer_key"
+                      defaultValue={WEBSITE_SEO_RETAINER.key}
+                    >
+                      <option value={WEBSITE_SEO_RETAINER.key}>
+                        {WEBSITE_SEO_RETAINER.name}
+                      </option>
+                    </Select>
+                    <div className="mt-2 rounded-xl border border-ink-100 bg-white p-3">
+                      <p className="text-sm text-ink-700">
+                        {WEBSITE_SEO_RETAINER.description}
+                      </p>
+                    </div>
                   </div>
                   <div>
                     <Label htmlFor="monthly_retainer_amount" required>
-                      Monthly Retainer Amount (ZAR)
+                      Monthly Retainer Amount ({currency})
                     </Label>
                     <Input
                       id="monthly_retainer_amount"
@@ -224,6 +224,7 @@ export function NewDealForm() {
                 </div>
               )}
             </div>
+
             <div className="sm:col-span-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" name="notes" rows={3} />

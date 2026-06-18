@@ -26,68 +26,47 @@ export interface ServicePackage {
 
 export const SERVICE_PACKAGES: ServicePackage[] = [
   {
-    key: "new_website",
-    label: "New Website",
-    description: "Design and build of a new website.",
-    billing: "once_off",
-  },
-  {
-    key: "website_redesign_dev",
-    label: "Website Redesign + Development",
-    description: "Redesign and development of an existing website.",
-    billing: "once_off",
-  },
-  {
-    key: "website_redesign_dev_seo",
-    label: "Website Redesign + Development + SEO",
-    description:
-      "Website redesign, development and search engine optimisation (SEO).",
-    billing: "once_off",
-  },
-  {
-    key: "onceoff_website",
-    label: "Once-off Website Package",
-    description: "Once-off website package.",
-    billing: "once_off",
-  },
-  {
     key: "onceoff_premium_website",
     label: "Once-off Premium Website Package",
-    description: "Once-off premium website package.",
+    description:
+      "Custom website redesign and development focused on improving user experience, lead generation, mobile responsiveness, search engine visibility, and overall business credibility. Includes design, development, optimization, testing, and deployment.",
     billing: "once_off",
-  },
-  {
-    key: "monthly_website_retainer",
-    label: "Monthly Website Retainer",
-    description: "Monthly website maintenance and support retainer.",
-    billing: "monthly",
   },
   {
     key: "google_ads",
     label: "Google Ads Management",
-    description: "Monthly Google Ads campaign management and optimisation.",
+    description:
+      "Professional Google Ads campaign management focused on increasing qualified leads, enquiries, and sales. Includes campaign setup, keyword research, audience targeting, ad creation, conversion tracking, performance monitoring, ongoing optimization, and monthly reporting to maximize return on ad spend.",
     billing: "monthly",
   },
   {
     key: "meta_ads",
     label: "Meta Ads Management",
     description:
-      "Monthly Meta (Facebook & Instagram) Ads campaign management and optimisation.",
+      "Professional Facebook and Instagram advertising management focused on generating qualified leads, enquiries, and sales. Includes campaign setup, audience targeting, creative strategy, ad management, conversion tracking, performance optimization, and ongoing campaign improvements to maximize results and return on investment.",
     billing: "monthly",
   },
   {
     key: "crm_automation",
-    label: "CRM / Automation Setup",
-    description: "CRM and marketing automation setup.",
-    billing: "once_off",
-  },
-  {
-    key: CUSTOM_PACKAGE_KEY,
-    label: "Custom Package",
-    description: "",
+    label: "CRM & Automation Setup",
+    description:
+      "Custom CRM and business automation setup designed to streamline lead management, follow-ups, appointment scheduling, customer communication, and sales processes. Includes workflow creation, automation configuration, pipeline setup, notifications, and system optimization to improve efficiency and conversion rates.",
     billing: "once_off",
   },
 ];
+
+/**
+ * The single approved monthly retainer add-on. Selected via the "Add Monthly
+ * Retainer?" toggle on the New Deal form; its name + description are applied
+ * server-side (the rep enters only the amount) and it becomes a separate
+ * invoice line. Not commissioned.
+ */
+export const WEBSITE_SEO_RETAINER = {
+  key: "website_seo_retainer",
+  name: "Website Maintenance & SEO Retainer",
+  description:
+    "Monthly website maintenance and SEO growth service including website updates, technical optimization, performance monitoring, content improvements, search engine optimization, and ongoing enhancements designed to increase visibility, rankings, and lead generation over time.",
+} as const;
 
 const BY_KEY = new Map(SERVICE_PACKAGES.map((p) => [p.key, p]));
 

@@ -98,7 +98,7 @@ export async function createInvoiceForRequest(
   const { data: req } = await admin
     .from("invoice_requests")
     .select(
-      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, package_key, custom_package_name, custom_package_description, has_monthly_retainer, monthly_retainer_name, monthly_retainer_description, monthly_retainer_amount, quickbooks_customer_id)"
+      "id, deal_id, amount, quickbooks_invoice_id, quickbooks_invoice_number, deals(business_name, email, package, package_key, custom_package_name, custom_package_description, has_monthly_retainer, monthly_retainer_name, monthly_retainer_description, monthly_retainer_amount, currency, quickbooks_customer_id)"
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -145,6 +145,7 @@ export async function createInvoiceForRequest(
     monthly_retainer_name: string | null;
     monthly_retainer_description: string | null;
     monthly_retainer_amount: number | null;
+    currency: "ZAR" | "USD" | null;
     quickbooks_customer_id: string | null;
   } | null;
   if (!deal) return { ok: false, error: "Deal not found for this request." };
@@ -157,6 +158,12 @@ export async function createInvoiceForRequest(
     customDescription: deal.custom_package_description,
     legacyPackage: deal.package,
   });
+
+  // Invoice currency = the deal's currency (rep's Pricing Type choice). ZAR is
+  // the QBO company home currency (no CurrencyRef needed); USD requires QBO
+  // Multicurrency to be enabled with USD active, else QBO rejects it and this
+  // request is recorded as failed for retry (approval/commission unaffected).
+  const currency: "ZAR" | "USD" = deal.currency === "USD" ? "USD" : "ZAR";
 
   // Build the invoice lines: the once-off package line, plus — only when the
   // deal has a valid monthly retainer — a second line for it. The retainer is
@@ -221,6 +228,7 @@ export async function createInvoiceForRequest(
       const c = await findOrCreateCustomer(conn, {
         displayName: deal.business_name,
         email: deal.email,
+        currency,
       });
       customerId = c.id;
       log.customer = { action: c.created ? "created" : "found", id: c.id };
@@ -261,6 +269,7 @@ export async function createInvoiceForRequest(
         lines: invoiceLines,
         docNumber: reservedDocNumber,
         email: deal.email,
+        currency,
       });
       log.invoiceCreate = { id: created.id, docNumber: created.docNumber };
       log.invoiceCreateRaw = created.raw ?? null;
