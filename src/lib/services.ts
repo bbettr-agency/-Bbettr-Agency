@@ -10,9 +10,25 @@ export type FieldType =
   | "url"
   | "number"
   | "color"
+  | "select" // single choice (dropdown)
+  | "boolean" // Yes/No toggle
   | "multitext" // repeatable list of strings (e.g. competitors)
   | "checkbox-group" // pick many from options
+  | "group-list" // repeatable structured entries (uses subFields)
+  | "note" // informational message (optionally conditional)
   | "file"; // file upload field
+
+/**
+ * Conditional visibility for a field or section. The field/section shows only
+ * when the referenced field's value satisfies the condition:
+ *  - `equals`   → value === equals (booleans are stored as "Yes"/"No")
+ *  - `includes` → value is an array containing `includes` (e.g. checkbox-group)
+ */
+export interface VisibleWhen {
+  field: string;
+  equals?: string;
+  includes?: string;
+}
 
 export interface OnboardingField {
   name: string;
@@ -23,12 +39,22 @@ export interface OnboardingField {
   required?: boolean;
   options?: string[];
   accept?: string; // for file fields
+  /** Sub-fields for a `group-list` entry. */
+  subFields?: OnboardingField[];
+  /** Conditional visibility. */
+  visibleWhen?: VisibleWhen;
+  /** Message body for a `note` field. */
+  note?: string;
 }
 
 export interface OnboardingSection {
   title: string;
   description?: string;
   fields: OnboardingField[];
+  /** Conditional visibility for the whole section. */
+  visibleWhen?: VisibleWhen;
+  /** Final review/submit step — rendered as a summary, not input fields. */
+  review?: boolean;
 }
 
 export interface ServiceDefinition {
@@ -41,10 +67,50 @@ export interface ServiceDefinition {
   sections: OnboardingSection[];
 }
 
+const CTA_OPTIONS = [
+  "Call Us",
+  "WhatsApp Us",
+  "Book Appointment",
+  "Request Quote",
+  "Buy Online",
+  "Visit Store",
+  "Send Enquiry",
+];
+
+const RESPONSE_TIME_OPTIONS = [
+  "Under 5 Minutes",
+  "Under 30 Minutes",
+  "Same Day",
+  "Next Day",
+];
+
+const LEAD_DESTINATION_OPTIONS = [
+  "WhatsApp",
+  "Phone",
+  "Website Form",
+  "CRM",
+  "Email",
+];
+
+const AGE_RANGE_OPTIONS = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+", "All ages"];
+const GENDER_OPTIONS = ["All", "Mostly women", "Mostly men"];
+
+const REVIEW_SECTION: OnboardingSection = {
+  title: "Final Review",
+  description: "Review your answers, then submit. You can reopen any section to edit.",
+  review: true,
+  fields: [],
+};
+
 /**
  * The catalog of services Bbettr Agency offers, each with its own dynamic
  * onboarding definition. The onboarding flow renders only the services a
  * client has purchased — driving the "dynamic onboarding" requirement.
+ *
+ * Field `name`s are stable keys persisted in onboarding_submissions.data — never
+ * rename an existing key (older drafts would lose that value). New/replacement
+ * fields use new keys; superseded keys (e.g. brand_colours, ad_objectives,
+ * google_ads_access) are simply no longer rendered but remain in stored JSON.
  */
 export const SERVICES: Record<ServiceType, ServiceDefinition> = {
   website: {
@@ -55,28 +121,51 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
     accent: "from-brand-500 to-brand-700",
     sections: [
       {
-        title: "Business Details",
+        title: "Business Information",
         description: "Tell us about your brand so we can represent it perfectly.",
         fields: [
           { name: "business_name", label: "Business Name", type: "text", required: true },
           {
+            name: "business_description",
+            label: "Business Description",
+            type: "textarea",
+            required: true,
+            placeholder: "Who are you? What do you do? Why should customers choose you?",
+          },
+          {
             name: "services",
             label: "Services You Offer",
             type: "textarea",
-            placeholder: "List the products/services your business provides…",
             required: true,
+            placeholder: "List the products/services your business provides…",
           },
+          {
+            name: "unique_selling_points",
+            label: "Unique Selling Points",
+            type: "textarea",
+            placeholder: "What makes your business different?",
+          },
+          {
+            name: "primary_cta",
+            label: "Primary Call To Action",
+            type: "select",
+            required: true,
+            options: CTA_OPTIONS,
+            help: "The main action you want visitors to take.",
+          },
+          { name: "existing_website_url", label: "Existing Website URL", type: "url" },
+          {
+            name: "google_business_profile_url",
+            label: "Google Business Profile URL",
+            type: "url",
+          },
+          { name: "physical_address", label: "Physical Address", type: "textarea" },
+          { name: "operating_hours", label: "Operating Hours", type: "textarea" },
           {
             name: "target_locations",
             label: "Target Locations",
             type: "multitext",
-            help: "Add each city, region or country you want to target.",
-          },
-          {
-            name: "competitors",
-            label: "Competitors",
-            type: "multitext",
-            help: "Websites of competitors you admire or want to outrank.",
+            help: "Cities, regions or countries you serve.",
           },
         ],
       },
@@ -85,132 +174,135 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
         description: "Your visual identity and the assets we'll work with.",
         fields: [
           {
-            name: "brand_colours",
-            label: "Primary Brand Colour",
-            type: "color",
-            help: "Pick your main brand colour. Add more in the notes if needed.",
+            name: "preferred_brand_colours",
+            label: "Preferred Brand Colours",
+            type: "multitext",
+            placeholder: "e.g. #38B6FF, navy, white",
+            help: "Add each colour (hex or name).",
           },
           {
-            name: "logo",
-            label: "Logo Upload",
+            name: "brand_guidelines",
+            label: "Brand Guidelines Upload",
             type: "file",
-            accept: "image/*,.pdf,.ai,.svg",
-            help: "Upload your logo (vector preferred).",
+            accept: "image/*,.pdf,.ai,.svg,.zip",
           },
-          {
-            name: "images",
-            label: "Image Uploads",
-            type: "file",
-            accept: "image/*",
-            help: "Photos of your team, products, premises, etc.",
-          },
+          { name: "logo", label: "Logo Upload", type: "file", accept: "image/*,.pdf,.ai,.svg", help: "Vector preferred." },
+          { name: "images", label: "Image Uploads", type: "file", accept: "image/*", help: "Photos of your team, products, premises, etc." },
         ],
       },
       {
-        title: "Contact & Social",
+        title: "Website Content",
+        description: "What goes on the site.",
         fields: [
-          { name: "whatsapp_number", label: "WhatsApp Number", type: "tel" },
-          { name: "contact_email", label: "Contact Email", type: "email" },
-          { name: "contact_phone", label: "Contact Phone", type: "tel" },
-          {
-            name: "social_links",
-            label: "Social Links",
-            type: "multitext",
-            help: "Facebook, Instagram, LinkedIn, TikTok, etc.",
-          },
-        ],
-      },
-      {
-        title: "Website Requirements",
-        fields: [
-          {
-            name: "example_websites",
-            label: "Example Websites You Like",
-            type: "multitext",
-          },
           {
             name: "required_pages",
             label: "Required Pages",
             type: "checkbox-group",
             options: [
-              "Home",
-              "About",
-              "Services",
-              "Portfolio / Gallery",
-              "Pricing",
-              "Blog",
-              "Contact",
-              "Booking",
-              "Shop / E-commerce",
+              "Home", "About", "Services", "Portfolio / Gallery", "Pricing",
+              "Blog", "Contact", "Booking", "Shop / E-commerce",
             ],
           },
+          {
+            name: "team_members",
+            label: "Team Information",
+            type: "group-list",
+            help: "Add each team member you'd like featured.",
+            subFields: [
+              { name: "name", label: "Team Member Name", type: "text" },
+              { name: "position", label: "Position", type: "text" },
+              { name: "photo", label: "Photo Upload", type: "file", accept: "image/*" },
+            ],
+          },
+          {
+            name: "testimonials",
+            label: "Testimonials / Reviews",
+            type: "textarea",
+            placeholder: "Paste reviews or testimonials you'd like featured.",
+          },
+          { name: "review_uploads", label: "Review Uploads", type: "file", accept: "image/*,.pdf" },
+          // E-commerce — only shown when a Shop / E-commerce page is selected.
+          {
+            name: "payment_methods",
+            label: "Payment Methods",
+            type: "checkbox-group",
+            options: ["PayFast", "Paystack", "Yoco", "EFT", "Other"],
+            visibleWhen: { field: "required_pages", includes: "Shop / E-commerce" },
+          },
+          {
+            name: "shipping_areas",
+            label: "Shipping Areas",
+            type: "multitext",
+            visibleWhen: { field: "required_pages", includes: "Shop / E-commerce" },
+          },
+          {
+            name: "number_of_products",
+            label: "Number Of Products",
+            type: "number",
+            visibleWhen: { field: "required_pages", includes: "Shop / E-commerce" },
+          },
+          {
+            name: "product_csv",
+            label: "Product CSV Upload",
+            type: "file",
+            accept: ".csv",
+            visibleWhen: { field: "required_pages", includes: "Shop / E-commerce" },
+          },
+        ],
+      },
+      {
+        title: "Design Preferences",
+        description: "Look, feel and inspiration.",
+        fields: [
+          { name: "example_websites", label: "Example Websites You Like", type: "multitext" },
           {
             name: "website_goals",
             label: "Website Goals",
             type: "textarea",
+            required: true,
             placeholder: "What does success look like for this website?",
-            required: true,
           },
         ],
       },
+      {
+        title: "SEO & Marketing",
+        description: "Search visibility, marketing assets and legal readiness.",
+        fields: [
+          { name: "seo_services_to_rank", label: "Services You Want To Rank For", type: "multitext" },
+          { name: "seo_locations_to_rank", label: "Locations You Want To Rank For", type: "multitext" },
+          { name: "seo_competitors_to_outrank", label: "Competitors You Want To Outrank", type: "multitext" },
+          { name: "facebook_page_url", label: "Facebook Page URL", type: "url" },
+          { name: "instagram_profile_url", label: "Instagram Profile URL", type: "url" },
+          { name: "google_ads_account_id", label: "Google Ads Account ID", type: "text" },
+          { name: "currently_running_ads", label: "Currently Running Ads?", type: "boolean" },
+          {
+            name: "legal_documents",
+            label: "Legal Documents You Already Have",
+            type: "checkbox-group",
+            options: ["Privacy Policy", "POPIA Policy", "Terms & Conditions", "Disclaimer"],
+          },
+          {
+            name: "legal_help_note",
+            label: "",
+            type: "note",
+            note: "Don't have all of these? No problem — we can assist in generating these documents for you.",
+          },
+        ],
+      },
+      {
+        title: "Contact Information",
+        description: "How clients and we reach you.",
+        fields: [
+          { name: "contact_email", label: "Contact Email", type: "email", required: true },
+          { name: "contact_phone", label: "Contact Phone", type: "tel", required: true },
+          { name: "whatsapp_number", label: "WhatsApp Number", type: "tel" },
+          { name: "social_links", label: "Social Links", type: "multitext", help: "Facebook, Instagram, LinkedIn, TikTok, etc." },
+        ],
+      },
+      REVIEW_SECTION,
     ],
   },
-  google_ads: {
-    id: "google_ads",
-    name: "Google Ads",
-    tagline: "High-intent traffic that converts.",
-    icon: Search,
-    accent: "from-emerald-500 to-emerald-700",
-    sections: [
-      {
-        title: "Access & Tracking",
-        description: "We'll need access to run and measure your campaigns.",
-        fields: [
-          {
-            name: "google_ads_access",
-            label: "Google Ads Access",
-            type: "text",
-            placeholder: "Google Ads account ID or email granted access",
-            help: "Grant Bbettr Agency manager access to your Google Ads account.",
-          },
-          { name: "analytics_access", label: "Google Analytics Access", type: "text" },
-          { name: "gtm_access", label: "Google Tag Manager Access", type: "text" },
-        ],
-      },
-      {
-        title: "Campaign Setup",
-        fields: [
-          {
-            name: "budget",
-            label: "Monthly Budget",
-            type: "number",
-            placeholder: "e.g. 15000",
-            required: true,
-          },
-          {
-            name: "services_to_promote",
-            label: "Services To Promote",
-            type: "textarea",
-            required: true,
-          },
-          { name: "competitors", label: "Competitors", type: "multitext" },
-          { name: "locations", label: "Target Locations", type: "multitext" },
-        ],
-      },
-      {
-        title: "Goals",
-        fields: [
-          { name: "campaign_goals", label: "Campaign Goals", type: "textarea" },
-          {
-            name: "conversion_goals",
-            label: "Conversion Goals",
-            type: "textarea",
-            placeholder: "Form fills, calls, purchases, bookings…",
-          },
-        ],
-      },
-    ],
-  },
+
   meta_ads: {
     id: "meta_ads",
     name: "Meta Ads",
@@ -219,58 +311,253 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
     accent: "from-indigo-500 to-purple-600",
     sections: [
       {
-        title: "Accounts & Access",
+        title: "Business Information",
+        fields: [
+          { name: "business_description", label: "Business Description", type: "textarea", required: true },
+          { name: "unique_selling_points", label: "Unique Selling Points", type: "textarea" },
+          { name: "website_url", label: "Website URL", type: "url" },
+        ],
+      },
+      {
+        title: "Meta Account Access",
         fields: [
           { name: "facebook_page", label: "Facebook Page", type: "url" },
           { name: "instagram_account", label: "Instagram Account", type: "text" },
-          {
-            name: "meta_business_manager",
-            label: "Meta Business Manager Access",
-            type: "text",
-            help: "Business Manager ID or the email we should be added to.",
-          },
+          { name: "meta_business_manager", label: "Meta Business Manager Access", type: "text", help: "Business Manager ID or the email to add us to." },
+          { name: "meta_business_manager_id", label: "Meta Business Manager ID", type: "text" },
+          { name: "ad_account_id", label: "Ad Account ID", type: "text" },
+          { name: "pixel_id", label: "Pixel / Dataset ID", type: "text" },
+          { name: "pixel_installed", label: "Pixel Installed?", type: "boolean" },
         ],
       },
       {
-        title: "Campaign Strategy",
+        title: "Offer & Services",
         fields: [
-          { name: "budget", label: "Monthly Budget", type: "number", required: true },
+          { name: "product_service_to_advertise", label: "Product/Service To Advertise", type: "textarea", required: true },
+          { name: "offer_description", label: "Offer Description", type: "textarea" },
+          { name: "current_promotions", label: "Current Promotions", type: "textarea" },
+          { name: "pricing_information", label: "Pricing Information", type: "textarea" },
+          { name: "guarantees", label: "Guarantees", type: "textarea" },
+        ],
+      },
+      {
+        title: "Target Audience",
+        fields: [
+          { name: "ideal_customer_description", label: "Ideal Customer Description", type: "textarea", required: true },
+          { name: "age_range", label: "Age Range", type: "select", options: AGE_RANGE_OPTIONS },
+          { name: "gender", label: "Gender", type: "select", options: GENDER_OPTIONS },
+          { name: "target_locations", label: "Target Locations", type: "multitext" },
+          { name: "customer_types", label: "Customer Types / Industries", type: "multitext" },
+        ],
+      },
+      {
+        title: "Lead Handling",
+        fields: [
+          { name: "lead_destination", label: "Lead Destination", type: "select", required: true, options: LEAD_DESTINATION_OPTIONS },
+          { name: "responsible_contact_person", label: "Responsible Contact Person", type: "text", required: true },
+          { name: "best_contact_number", label: "Best Contact Number", type: "tel" },
+          { name: "best_contact_email", label: "Best Contact Email", type: "email" },
+          { name: "average_response_time", label: "Average Response Time", type: "select", options: RESPONSE_TIME_OPTIONS },
+        ],
+      },
+      {
+        title: "Sales Process",
+        fields: [
+          { name: "after_lead_process", label: "What Happens After A Lead Is Generated?", type: "textarea" },
+          { name: "sales_team_exists", label: "Sales Team Exists?", type: "boolean" },
+          { name: "crm_in_use", label: "CRM In Use?", type: "boolean" },
+          { name: "crm_name", label: "CRM Name", type: "text", visibleWhen: { field: "crm_in_use", equals: "Yes" } },
+        ],
+      },
+      {
+        title: "Competitors",
+        fields: [
+          { name: "competitor_websites", label: "Competitor Websites", type: "multitext" },
+          { name: "competitor_facebook_pages", label: "Competitor Facebook Pages", type: "multitext" },
+          { name: "competitor_instagram_pages", label: "Competitor Instagram Pages", type: "multitext" },
+        ],
+      },
+      {
+        title: "Creative Assets",
+        fields: [
+          { name: "creative_uploads", label: "Creative Uploads", type: "file", accept: "image/*,video/*", help: "Photos or video clips we can use for ads." },
           {
-            name: "ad_objectives",
-            label: "Ad Objectives",
+            name: "preferred_creative_type",
+            label: "Preferred Creative Type",
             type: "checkbox-group",
-            options: [
-              "Awareness",
-              "Traffic",
-              "Engagement",
-              "Leads",
-              "App Promotion",
-              "Sales",
-            ],
+            options: ["Images", "Videos", "Testimonials", "Before & After", "Educational", "Promotional"],
           },
-          { name: "target_audience", label: "Target Audience", type: "textarea" },
-          {
-            name: "existing_campaigns",
-            label: "Existing Campaigns",
-            type: "textarea",
-            placeholder: "Describe any campaigns currently running or paused.",
-          },
+          { name: "ads_you_like", label: "Ads You Like (URLs)", type: "multitext" },
+          { name: "brand_guidelines", label: "Brand Guidelines Upload", type: "file", accept: "image/*,.pdf,.zip" },
         ],
       },
       {
-        title: "Creative",
+        title: "Campaign Goals",
         fields: [
           {
-            name: "creative_uploads",
-            label: "Creative Uploads",
-            type: "file",
-            accept: "image/*,video/*",
-            help: "Photos or video clips we can use for ads.",
+            name: "primary_campaign_goal",
+            label: "Primary Campaign Goal",
+            type: "select",
+            required: true,
+            options: ["Generate Leads", "WhatsApp Messages", "Phone Calls", "Website Enquiries", "Bookings", "Online Sales"],
           },
+          { name: "budget", label: "Monthly Budget", type: "number", required: true },
+          { name: "existing_campaigns", label: "Existing Campaigns", type: "textarea", placeholder: "Describe any campaigns currently running or paused." },
         ],
       },
+      {
+        title: "Tracking & Reporting",
+        fields: [
+          { name: "ga_installed", label: "Google Analytics Installed?", type: "boolean" },
+          { name: "gtm_installed", label: "Google Tag Manager Installed?", type: "boolean" },
+          { name: "conversion_tracking_installed", label: "Conversion Tracking Installed?", type: "boolean" },
+        ],
+      },
+      {
+        title: "Previous Campaign Performance",
+        fields: [
+          { name: "ran_meta_ads", label: "Run Meta Ads Before?", type: "boolean" },
+          { name: "previous_avg_spend", label: "Average Monthly Spend", type: "number", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "best_campaign", label: "Best Performing Campaign", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "worst_campaign", label: "Worst Performing Campaign", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "what_worked", label: "What Worked?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "what_didnt_work", label: "What Did Not Work?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+        ],
+      },
+      REVIEW_SECTION,
     ],
   },
+
+  google_ads: {
+    id: "google_ads",
+    name: "Google Ads",
+    tagline: "High-intent traffic that converts.",
+    icon: Search,
+    accent: "from-emerald-500 to-emerald-700",
+    sections: [
+      {
+        title: "Business Information",
+        fields: [
+          { name: "business_description", label: "Business Description", type: "textarea", required: true },
+          { name: "unique_selling_points", label: "Unique Selling Points", type: "textarea" },
+          { name: "website_url", label: "Website URL", type: "url" },
+        ],
+      },
+      {
+        title: "Google Account Access",
+        description: "Grant Bbettr Agency manager access so we can run and measure campaigns.",
+        fields: [
+          { name: "google_ads_customer_id", label: "Google Ads Customer ID", type: "text", placeholder: "e.g. 123-456-7890" },
+          { name: "google_ads_access_email", label: "Access Email", type: "email" },
+          { name: "analytics_access", label: "Google Analytics Access", type: "text" },
+          { name: "gtm_access", label: "Google Tag Manager Access", type: "text" },
+        ],
+      },
+      {
+        title: "Offer & Services",
+        fields: [
+          { name: "services_to_promote", label: "Services/Products To Advertise", type: "textarea", required: true },
+          { name: "offer_description", label: "Offer Description", type: "textarea" },
+          { name: "promotions", label: "Promotions", type: "textarea" },
+          { name: "pricing_information", label: "Pricing Information", type: "textarea" },
+          { name: "guarantees", label: "Guarantees", type: "textarea" },
+        ],
+      },
+      {
+        title: "Services & Landing Pages",
+        fields: [
+          { name: "landing_page_url", label: "Landing Page URL", type: "url" },
+          { name: "pages_to_send_traffic", label: "Pages To Send Traffic To", type: "multitext" },
+          { name: "need_landing_page", label: "Need Landing Page Built?", type: "boolean" },
+        ],
+      },
+      {
+        title: "Keywords & Search Intent",
+        fields: [
+          { name: "keywords", label: "Keywords Customers Search For", type: "multitext", help: "Phrases your customers type into Google." },
+          { name: "highest_priority_services", label: "Highest Priority Services", type: "textarea" },
+          { name: "services_not_to_advertise", label: "Services Not To Advertise", type: "textarea" },
+        ],
+      },
+      {
+        title: "Target Customer",
+        fields: [
+          { name: "ideal_customer_description", label: "Ideal Customer Description", type: "textarea" },
+          { name: "residential_business_both", label: "Residential / Business / Both", type: "select", options: ["Residential", "Business", "Both"] },
+          { name: "industries_to_target", label: "Industries To Target", type: "multitext" },
+          { name: "age_range", label: "Age Range", type: "select", options: AGE_RANGE_OPTIONS },
+        ],
+      },
+      {
+        title: "Target Locations",
+        fields: [
+          { name: "locations", label: "Target Locations", type: "multitext", required: true },
+        ],
+      },
+      {
+        title: "Competitors",
+        fields: [
+          { name: "competitor_websites", label: "Competitor Websites", type: "multitext" },
+          { name: "competitors_to_outrank", label: "Competitors To Outrank", type: "multitext" },
+          { name: "competitor_ad_examples", label: "Competitor Ad Examples", type: "multitext" },
+        ],
+      },
+      {
+        title: "Conversion Tracking",
+        fields: [
+          { name: "ga_installed", label: "Google Analytics Installed?", type: "boolean" },
+          { name: "gtm_installed", label: "Google Tag Manager Installed?", type: "boolean" },
+          { name: "conversion_tracking_installed", label: "Conversion Tracking Installed?", type: "boolean" },
+          { name: "call_tracking_installed", label: "Call Tracking Installed?", type: "boolean" },
+          { name: "form_tracking_installed", label: "Form Tracking Installed?", type: "boolean" },
+        ],
+      },
+      {
+        title: "Previous Google Ads History",
+        fields: [
+          { name: "ran_google_ads", label: "Run Google Ads Before?", type: "boolean" },
+          { name: "previous_monthly_spend", label: "Monthly Spend", type: "number", visibleWhen: { field: "ran_google_ads", equals: "Yes" } },
+          { name: "what_worked", label: "What Worked?", type: "textarea", visibleWhen: { field: "ran_google_ads", equals: "Yes" } },
+          { name: "what_didnt_work", label: "What Didn't Work?", type: "textarea", visibleWhen: { field: "ran_google_ads", equals: "Yes" } },
+          { name: "why_stopped", label: "Why Did You Stop?", type: "textarea", visibleWhen: { field: "ran_google_ads", equals: "Yes" } },
+        ],
+      },
+      {
+        title: "Campaign Goals",
+        fields: [
+          { name: "campaign_goals", label: "Campaign Goals", type: "textarea", required: true },
+          { name: "conversion_goals", label: "Conversion Goals", type: "textarea", required: true, placeholder: "Form fills, calls, purchases, bookings…" },
+          { name: "budget", label: "Monthly Budget", type: "number", required: true, placeholder: "e.g. 15000" },
+          { name: "lead_destination", label: "Lead Destination", type: "select", required: true, options: ["Phone Calls", "WhatsApp", "Website Form", "CRM", "Email"] },
+          { name: "responsible_contact_person", label: "Responsible Contact Person", type: "text" },
+          { name: "best_contact_number", label: "Best Contact Number", type: "tel" },
+          { name: "best_contact_email", label: "Best Contact Email", type: "email" },
+          { name: "average_response_time", label: "Average Response Time", type: "select", options: RESPONSE_TIME_OPTIONS },
+        ],
+      },
+      {
+        title: "Assets",
+        fields: [
+          { name: "logo", label: "Logo Upload", type: "file", accept: "image/*,.pdf,.ai,.svg" },
+          { name: "images", label: "Image Uploads", type: "file", accept: "image/*" },
+          { name: "brand_guidelines", label: "Brand Guidelines", type: "file", accept: "image/*,.pdf,.zip" },
+          { name: "certifications", label: "Certifications / Accreditations", type: "file", accept: "image/*,.pdf" },
+        ],
+      },
+      {
+        title: "Business Operations",
+        fields: [
+          { name: "operating_hours", label: "Operating Hours", type: "textarea" },
+          { name: "service_areas", label: "Service Areas", type: "multitext" },
+          { name: "physical_address", label: "Physical Address", type: "textarea" },
+          { name: "google_business_profile_url", label: "Google Business Profile URL", type: "url" },
+          { name: "review_information", label: "Review Information", type: "textarea" },
+        ],
+      },
+      REVIEW_SECTION,
+    ],
+  },
+
   seo: {
     id: "seo",
     name: "SEO",
@@ -289,19 +576,9 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
       {
         title: "Keywords & Goals",
         fields: [
-          {
-            name: "keywords",
-            label: "Target Keywords",
-            type: "multitext",
-            help: "Phrases you want to rank for.",
-          },
+          { name: "keywords", label: "Target Keywords", type: "multitext", help: "Phrases you want to rank for." },
           { name: "seo_goals", label: "SEO Goals", type: "textarea" },
-          {
-            name: "search_console_access",
-            label: "Search Console Access",
-            type: "text",
-            help: "Email to grant Google Search Console access.",
-          },
+          { name: "search_console_access", label: "Search Console Access", type: "text", help: "Email to grant Google Search Console access." },
         ],
       },
     ],
