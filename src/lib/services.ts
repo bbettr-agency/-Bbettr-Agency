@@ -290,6 +290,18 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
         ],
       },
       {
+        title: "Technical Access",
+        description:
+          "Access we need to build and launch your site. Not sure about any of these? Choose “Not sure” and our team will sort it out with you — none of these are required to continue.",
+        fields: [
+          { name: "domain_exists", label: "Do You Already Have a Domain?", type: "boolean" },
+          { name: "domain_provider", label: "Domain Provider", type: "text", placeholder: "e.g. GoDaddy, Afrihost, Xneelo" },
+          { name: "domain_access", label: "Domain Login / Access", type: "text" },
+          { name: "hosting_provider", label: "Hosting Provider", type: "text" },
+          { name: "hosting_access", label: "Hosting Login / Access", type: "text" },
+        ],
+      },
+      {
         title: "Contact Information",
         description: "How clients and we reach you.",
         fields: [
@@ -584,6 +596,81 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
     ],
   },
 };
+
+/**
+ * Plain-language help for technical fields, keyed by field `name` (shared across
+ * services where the concept is identical, e.g. `ga_installed`). A field's
+ * presence here is what marks it "technical" in the onboarding renderer, which
+ * then offers a "Not sure" option, this contextual help, a "Need help?" panel
+ * and a "Schedule setup call" shortcut. We never assume the client knows the
+ * jargon — every entry explains the concept in everyday terms.
+ */
+export const TECHNICAL_FIELD_HELP: Record<string, string> = {
+  // Website — domain & hosting
+  domain_exists:
+    "Your domain is your web address, like yourbusiness.co.za. If you're not sure whether you have one, that's completely fine — we'll check for you.",
+  domain_provider:
+    "This is the company you bought your web address from (e.g. GoDaddy, Afrihost or Xneelo). Not sure? Choose “Not sure” and we'll find it for you.",
+  domain_access:
+    "To connect your web address to your new site we need access to where it's managed. You can share login details securely or add us as a user — or pick “Not sure” and we'll guide you step by step.",
+  hosting_provider:
+    "Hosting is where your website's files live online. If you already have a website, you have hosting somewhere. Not sure? We'll help you find it.",
+  hosting_access:
+    "Access to your hosting lets us publish your new site. Share it securely or add us as a user — or choose “Not sure” and we'll walk you through it.",
+
+  // Website — marketing
+  google_ads_account_id:
+    "Your Google Ads account ID (if you've run Google Ads before). Don't have one or can't find it? Choose “Not sure”.",
+  currently_running_ads:
+    "Are any paid ads (Google, Facebook, Instagram) running for your business right now? It's okay if you're not certain.",
+
+  // Meta — accounts & tracking
+  meta_business_manager:
+    "Meta Business Manager is the central account that holds your Facebook Page, Instagram and ad account. If you don't have one or aren't sure, we set these up for clients all the time.",
+  meta_business_manager_id:
+    "This is a long number found in Business Settings → Business Info on Meta. Can't find it? Choose “Not sure”.",
+  ad_account_id:
+    "Your Meta ad account is what's billed for ads and holds your campaigns. Not sure if you have one? We'll create it.",
+  pixel_id:
+    "The Meta Pixel is a small piece of code on your website that measures ad results. If you don't have one, we'll create and install it for you.",
+  pixel_installed:
+    "This asks whether ad-tracking code is already on your website. If you don't know, choose “Not sure” — we'll check and handle it.",
+
+  // CRM
+  crm_in_use:
+    "A CRM is software that stores your leads and customers (e.g. HubSpot, Pipedrive — even a spreadsheet counts). Not sure? No problem.",
+
+  // Google — access
+  google_ads_customer_id:
+    "Your Google Ads Customer ID is the 10-digit number at the top of your Google Ads account (e.g. 123-456-7890). Don't have an account yet? Choose “Not sure”.",
+  google_ads_access_email:
+    "The email address we should request manager access for. If you're unsure, choose “Not sure” and we'll guide you.",
+  analytics_access:
+    "Google Analytics measures who visits your website and what they do. Share the email to grant access, or choose “Not sure” and we'll set it up.",
+  gtm_access:
+    "Google Tag Manager is a tool that installs tracking codes without changing your website's code. Not sure? We'll handle it.",
+
+  // Shared tracking toggles (Meta + Google)
+  ga_installed:
+    "This asks whether Google Analytics is already set up on your website. If you don't know, choose “Not sure”.",
+  gtm_installed:
+    "This asks whether Google Tag Manager is already installed. Unsure? Choose “Not sure” and we'll check.",
+  conversion_tracking_installed:
+    "Conversion tracking measures valuable actions like form fills, calls or sales. Not sure if it's set up? We'll verify and configure it.",
+  call_tracking_installed:
+    "Call tracking measures phone calls generated by your ads. If you're not sure, choose “Not sure”.",
+  form_tracking_installed:
+    "Form tracking measures enquiries submitted through your website forms. Unsure? We'll take care of it.",
+};
+
+/** The on-screen options offered when a client books an onboarding session. */
+export const ONBOARDING_CALL_PLATFORMS = [
+  "Google Meet",
+  "Zoom",
+  "WhatsApp Call",
+  "TeamViewer",
+  "AnyDesk",
+];
 
 export const SERVICE_LIST = Object.values(SERVICES);
 

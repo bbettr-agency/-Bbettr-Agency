@@ -12,22 +12,55 @@ import {
   Circle,
   CircleDashed,
   Info,
+  HelpCircle,
+  CalendarClock,
+  PencilLine,
+  LifeBuoy,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, FieldHelp } from "@/components/ui/input";
 import { FileDropzone } from "@/components/shared/file-dropzone";
 import { saveOnboarding, type OnboardingState } from "@/app/(client)/dashboard/onboarding/actions";
-import type {
-  ServiceDefinition,
-  OnboardingField,
-  OnboardingSection,
-  VisibleWhen,
+import {
+  TECHNICAL_FIELD_HELP,
+  ONBOARDING_CALL_PLATFORMS,
+  type ServiceDefinition,
+  type OnboardingField,
+  type OnboardingSection,
+  type VisibleWhen,
 } from "@/lib/services";
 import type { FileRecord } from "@/lib/database.types";
 
 type FormValues = Record<string, unknown>;
 type SectionStatus = "not_started" | "in_progress" | "completed";
+type OnboardingMode = "self" | "schedule";
+
+interface BookingData {
+  platform?: string;
+  date?: string;
+  time?: string;
+  contact_method?: string;
+  contact_details?: string;
+  notes?: string;
+}
+
+/** Reserved keys stored alongside field answers in onboarding_submissions.data. */
+const MODE_KEY = "__mode";
+const BOOKING_KEY = "__booking";
+
+/** Sentinel stored when a client marks a technical field "Not sure". */
+const NOT_SURE = "Not sure — please assist";
+
+const REASSURANCE =
+  "Don't worry if you're unsure about some questions. Complete what you can and our team will assist with the rest.";
+
+const CONTACT_METHODS = ["Phone Call", "WhatsApp", "Email"];
+
+const CALENDLY_URL = process.env.NEXT_PUBLIC_CALENDLY_URL;
+
+const isTechnical = (name: string) => name in TECHNICAL_FIELD_HELP;
 
 interface OnboardingFormProps {
   clientId: string;
@@ -124,6 +157,25 @@ export function OnboardingForm({
   const setField = (name: string, value: unknown) =>
     setValues((v) => ({ ...v, [name]: value }));
 
+  // ── Onboarding mode (self-serve vs. book a session) ──
+  const mode: OnboardingMode = values[MODE_KEY] === "schedule" ? "schedule" : "self";
+  const booking = (values[BOOKING_KEY] as BookingData) ?? {};
+  const setMode = (m: OnboardingMode) => setField(MODE_KEY, m);
+  const setBooking = (patch: Partial<BookingData>) =>
+    setField(BOOKING_KEY, { ...booking, ...patch });
+
+  const topRef = useRef<HTMLDivElement>(null);
+  /** A "Schedule setup call" shortcut on a field jumps to booking, pre-noting it. */
+  const scheduleHelpFor = (label: string) => {
+    const note = `I'd like help with: ${label}`;
+    setValues((v) => {
+      const b = (v[BOOKING_KEY] as BookingData) ?? {};
+      const notes = b.notes ? `${b.notes}\n${note}` : note;
+      return { ...v, [MODE_KEY]: "schedule", [BOOKING_KEY]: { ...b, notes } };
+    });
+    setTimeout(() => topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
   // ── Progress (required-field based) ──
   const { requiredTotal, requiredFilled } = useMemo(() => {
     let total = 0;
@@ -219,13 +271,14 @@ export function OnboardingForm({
       );
       return;
     }
+    const payload = { ...values, [MODE_KEY]: "self" };
     startTransition(async () => {
-      const res = await saveOnboarding(service.id, values, true);
+      const res = await saveOnboarding(service.id, payload, true);
       if (res.error) {
         setFeedback(res.error);
         return;
       }
-      lastSaved.current = JSON.stringify(values);
+      lastSaved.current = JSON.stringify(payload);
       setFeedback(
         res.allComplete
           ? "All onboarding complete — taking you to your dashboard…"
@@ -247,8 +300,52 @@ export function OnboardingForm({
     });
   }
 
+  function submitBooking() {
+    setFeedback(null);
+    if (!booking.platform || !booking.date || !booking.contact_method || !booking.contact_details) {
+      setFeedback("Please choose a platform, a preferred date and how we should reach you.");
+      return;
+    }
+    const payload = { ...values, [MODE_KEY]: "schedule" };
+    startTransition(async () => {
+      const res = await saveOnboarding(service.id, payload, true);
+      if (res.error) {
+        setFeedback(res.error);
+        return;
+      }
+      lastSaved.current = JSON.stringify(payload);
+      setFeedback("Session requested — our team will confirm your booking shortly.");
+      if (onSubmitted) {
+        const result = res;
+        setTimeout(() => onSubmitted(result), 900);
+      }
+    });
+  }
+
   return (
-    <div className="space-y-4">
+    <div ref={topRef} className="space-y-4">
+      {/* Persistent reassurance — completion over perfection. */}
+      {!readOnly && (
+        <div className="flex items-start gap-3 rounded-2xl border border-brand-100 bg-brand-50/70 p-4">
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
+          <p className="text-sm text-ink-700">{REASSURANCE}</p>
+        </div>
+      )}
+
+      <ModeSelector mode={mode} onChange={setMode} readOnly={readOnly} />
+
+      {mode === "schedule" ? (
+        <Scheduler
+          booking={booking}
+          onChange={setBooking}
+          onSubmit={submitBooking}
+          onBackToSelf={() => setMode("self")}
+          pending={pending}
+          feedback={feedback}
+          readOnly={readOnly}
+        />
+      ) : (
+        <>
       {/* Progress header */}
       <div className="rounded-2xl border border-ink-100 bg-white p-4">
         <div className="flex items-center justify-between text-sm">
@@ -335,6 +432,7 @@ export function OnboardingForm({
                               value={values[field.name]}
                               onChange={(v) => setField(field.name, v)}
                               readOnly={readOnly}
+                              onScheduleHelp={scheduleHelpFor}
                             />
                           </div>
                         ))
@@ -372,6 +470,256 @@ export function OnboardingForm({
           </div>
         </div>
       )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Mode selection & scheduling ──────────────────────────────────────────────
+
+function ModeSelector({
+  mode,
+  onChange,
+  readOnly,
+}: {
+  mode: OnboardingMode;
+  onChange: (m: OnboardingMode) => void;
+  readOnly: boolean;
+}) {
+  const options: { id: OnboardingMode; title: string; desc: string; Icon: typeof PencilLine }[] = [
+    {
+      id: "self",
+      title: "Complete onboarding myself",
+      desc: "Fill in the form at your own pace. Save and come back anytime.",
+      Icon: PencilLine,
+    },
+    {
+      id: "schedule",
+      title: "Schedule a session with the Bbettr team",
+      desc: "Book a quick call and we'll complete it together — perfect if you're short on time or unsure.",
+      Icon: CalendarClock,
+    },
+  ];
+
+  if (readOnly) {
+    const active = options.find((o) => o.id === mode)!;
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white p-4">
+        <active.Icon className="h-5 w-5 text-brand-500" />
+        <span className="text-sm text-ink-700">
+          Onboarding method: <span className="font-semibold">{active.title}</span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="mb-2 text-sm font-semibold text-ink-900">
+        How would you like to complete this onboarding?
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {options.map((o) => {
+          const selected = mode === o.id;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange(o.id)}
+              className={cn(
+                "flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors",
+                selected
+                  ? "border-brand-500 bg-brand-50 ring-2 ring-brand-100"
+                  : "border-ink-200 bg-white hover:border-ink-300"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                  selected ? "bg-brand-500 text-white" : "bg-ink-100 text-ink-500"
+                )}
+              >
+                <o.Icon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-ink-900">{o.title}</span>
+                <span className="mt-0.5 block text-xs text-ink-500">{o.desc}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Scheduler({
+  booking,
+  onChange,
+  onSubmit,
+  onBackToSelf,
+  pending,
+  feedback,
+  readOnly,
+}: {
+  booking: BookingData;
+  onChange: (patch: Partial<BookingData>) => void;
+  onSubmit: () => void;
+  onBackToSelf: () => void;
+  pending: boolean;
+  feedback: string | null;
+  readOnly: boolean;
+}) {
+  if (readOnly) {
+    return (
+      <div className="space-y-3 rounded-2xl border border-ink-100 bg-white p-5">
+        <h3 className="text-sm font-semibold text-ink-900">Onboarding session request</h3>
+        <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <SummaryRow label="Platform" value={booking.platform} />
+          <SummaryRow label="Preferred date" value={booking.date} />
+          <SummaryRow label="Preferred time" value={booking.time} />
+          <SummaryRow label="Contact method" value={booking.contact_method} />
+          <SummaryRow label="Contact details" value={booking.contact_details} />
+        </dl>
+        {booking.notes && (
+          <p className="whitespace-pre-line rounded-xl bg-ink-50 p-3 text-sm text-ink-600">
+            {booking.notes}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5 rounded-2xl border border-ink-100 bg-white p-5">
+      <div className="flex items-start gap-3">
+        <LifeBuoy className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
+        <p className="text-sm text-ink-600">
+          Tell us how and when to reach you. We&apos;ll confirm a time and
+          complete the onboarding with you — no technical knowledge needed.
+        </p>
+      </div>
+
+      {CALENDLY_URL && (
+        <a
+          href={CALENDLY_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100"
+        >
+          <CalendarClock className="h-4 w-4" /> Book instantly via Calendly
+        </a>
+      )}
+
+      <div>
+        <Label required>Preferred platform</Label>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {ONBOARDING_CALL_PLATFORMS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onChange({ platform: booking.platform === p ? "" : p })}
+              className={cn(
+                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+                booking.platform === p
+                  ? "border-brand-500 bg-brand-50 text-brand-700"
+                  : "border-ink-200 bg-white text-ink-600 hover:border-ink-300"
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label required>Preferred date</Label>
+          <Input
+            type="date"
+            value={booking.date ?? ""}
+            onChange={(e) => onChange({ date: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>Preferred time</Label>
+          <Input
+            type="time"
+            value={booking.time ?? ""}
+            onChange={(e) => onChange({ time: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label required>How should we reach you?</Label>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {CONTACT_METHODS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onChange({ contact_method: booking.contact_method === m ? "" : m })}
+                className={cn(
+                  "rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+                  booking.contact_method === m
+                    ? "border-brand-500 bg-brand-50 text-brand-700"
+                    : "border-ink-200 bg-white text-ink-600 hover:border-ink-300"
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <Label required>Contact details</Label>
+          <Input
+            placeholder="Phone number or email"
+            value={booking.contact_details ?? ""}
+            onChange={(e) => onChange({ contact_details: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div>
+        <Label>Anything you&apos;d like help with?</Label>
+        <Textarea
+          placeholder="Optional — e.g. setting up Google Ads access, connecting my domain…"
+          value={booking.notes ?? ""}
+          onChange={(e) => onChange({ notes: e.target.value })}
+        />
+      </div>
+
+      <div className="flex flex-col-reverse gap-3 border-t border-ink-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          onClick={onBackToSelf}
+          className="text-sm font-medium text-ink-500 hover:text-ink-700"
+        >
+          ← I&apos;ll complete it myself instead
+        </button>
+        <div className="flex items-center gap-3">
+          {feedback && (
+            <span className="flex items-center gap-1.5 text-sm text-ink-600">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" /> {feedback}
+            </span>
+          )}
+          <Button loading={pending} onClick={onSubmit}>
+            <CalendarClock className="h-4 w-4" /> Request session
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value?: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-ink-400">{label}</dt>
+      <dd className="text-ink-800">{value || "—"}</dd>
     </div>
   );
 }
@@ -480,14 +828,17 @@ function FieldRenderer({
   value,
   onChange,
   readOnly,
+  onScheduleHelp,
 }: {
   clientId: string;
   field: OnboardingField;
   value: unknown;
   onChange: (v: unknown) => void;
   readOnly: boolean;
+  onScheduleHelp?: (label: string) => void;
 }) {
   const id = `f-${field.name}`;
+  const tech = isTechnical(field.name);
 
   if (field.type === "note") {
     return (
@@ -515,35 +866,41 @@ function FieldRenderer({
   }
 
   if (field.type === "select") {
+    const notSure = tech && value === NOT_SURE;
     return (
       <div>
         <FieldLabel field={field} />
         <select
           id={id}
-          value={(value as string) ?? ""}
-          disabled={readOnly}
+          value={notSure ? "" : (value as string) ?? ""}
+          disabled={readOnly || notSure}
           onChange={(e) => onChange(e.target.value)}
           className="flex h-11 w-full rounded-xl border border-ink-200 bg-white px-3 text-sm text-ink-900 shadow-sm focus-visible:outline-none focus-visible:border-brand-400 focus-visible:ring-4 focus-visible:ring-brand-100 disabled:opacity-50"
         >
-          <option value="">Select…</option>
+          <option value="">{notSure ? "Marked “Not sure”" : "Select…"}</option>
           {field.options?.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
             </option>
           ))}
         </select>
-        {field.help && <FieldHelp>{field.help}</FieldHelp>}
+        {tech ? (
+          <TechAssist field={field} value={value} onChange={onChange} onScheduleHelp={onScheduleHelp} showNotSure />
+        ) : (
+          field.help && <FieldHelp>{field.help}</FieldHelp>
+        )}
       </div>
     );
   }
 
   if (field.type === "boolean") {
     const current = value as string | undefined;
+    const opts = tech ? ["Yes", "No", "Not sure"] : ["Yes", "No"];
     return (
       <div>
         <FieldLabel field={field} />
         <div className="flex gap-2">
-          {["Yes", "No"].map((opt) => (
+          {opts.map((opt) => (
             <button
               key={opt}
               type="button"
@@ -552,7 +909,9 @@ function FieldRenderer({
               className={cn(
                 "h-11 flex-1 rounded-xl border text-sm font-medium transition-colors",
                 current === opt
-                  ? "border-brand-500 bg-brand-50 text-brand-700"
+                  ? opt === "Not sure"
+                    ? "border-amber-400 bg-amber-50 text-amber-700"
+                    : "border-brand-500 bg-brand-50 text-brand-700"
                   : "border-ink-200 bg-white text-ink-600 hover:border-ink-300"
               )}
             >
@@ -560,7 +919,11 @@ function FieldRenderer({
             </button>
           ))}
         </div>
-        {field.help && <FieldHelp>{field.help}</FieldHelp>}
+        {tech ? (
+          <TechAssist field={field} onScheduleHelp={onScheduleHelp} />
+        ) : (
+          field.help && <FieldHelp>{field.help}</FieldHelp>
+        )}
       </div>
     );
   }
@@ -687,18 +1050,95 @@ function FieldRenderer({
   }
 
   // text / email / tel / url / number
+  const notSure = tech && value === NOT_SURE;
   return (
     <div>
       <FieldLabel field={field} />
       <Input
         id={id}
         type={field.type === "number" ? "number" : field.type}
-        placeholder={field.placeholder}
-        value={(value as string) ?? ""}
-        disabled={readOnly}
+        placeholder={notSure ? "Marked “Not sure” — we'll assist" : field.placeholder}
+        value={notSure ? "" : (value as string) ?? ""}
+        disabled={readOnly || notSure}
         onChange={(e) => onChange(e.target.value)}
       />
-      {field.help && <FieldHelp>{field.help}</FieldHelp>}
+      {tech ? (
+        <TechAssist field={field} value={value} onChange={onChange} onScheduleHelp={onScheduleHelp} showNotSure />
+      ) : (
+        field.help && <FieldHelp>{field.help}</FieldHelp>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Help affordances shown under every technical field: plain-language context,
+ * an optional "I'm not sure" escape hatch, a "Need help?" panel and a one-tap
+ * "Schedule setup call" shortcut. We never make the client feel tested.
+ */
+function TechAssist({
+  field,
+  value,
+  onChange,
+  onScheduleHelp,
+  showNotSure = false,
+}: {
+  field: OnboardingField;
+  value?: unknown;
+  onChange?: (v: unknown) => void;
+  onScheduleHelp?: (label: string) => void;
+  showNotSure?: boolean;
+}) {
+  const [openHelp, setOpenHelp] = useState(false);
+  const help = TECHNICAL_FIELD_HELP[field.name];
+  const notSure = value === NOT_SURE;
+  return (
+    <div className="mt-1.5 space-y-2">
+      {help && <FieldHelp>{help}</FieldHelp>}
+      <div className="flex flex-wrap items-center gap-2">
+        {showNotSure && onChange && (
+          <button
+            type="button"
+            onClick={() => onChange(notSure ? "" : NOT_SURE)}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              notSure
+                ? "border-amber-400 bg-amber-50 text-amber-700"
+                : "border-ink-200 text-ink-500 hover:border-ink-300"
+            )}
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            {notSure ? "Marked “Not sure”" : "I'm not sure"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpenHelp((o) => !o)}
+          className="inline-flex items-center gap-1 rounded-full border border-ink-200 px-3 py-1 text-xs font-medium text-ink-500 hover:border-ink-300"
+        >
+          <Info className="h-3.5 w-3.5" /> Need help?
+        </button>
+      </div>
+      {openHelp && (
+        <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-3 text-xs text-ink-600">
+          <p>
+            Not sure where to find this? No problem — choose “I&apos;m not sure”
+            and our team will handle it, or book a quick setup call and we&apos;ll
+            do it together.
+          </p>
+          {onScheduleHelp && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => onScheduleHelp(field.label)}
+            >
+              <CalendarClock className="h-4 w-4" /> Schedule setup call
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
