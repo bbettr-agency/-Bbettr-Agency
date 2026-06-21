@@ -5,6 +5,7 @@ import { requireClient } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
+import { sendOnboardingAssistanceEmail } from "@/lib/email/client-notifications";
 import { SERVICES } from "@/lib/services";
 import type { ServiceType } from "@/lib/database.types";
 
@@ -47,7 +48,7 @@ export async function saveOnboarding(
   const status = submit ? "submitted" : "in_progress";
 
   // 1. The submission itself is the client's own data → write under their RLS.
-  const { error: submissionError } = await supabase
+  const { data: submissionRow, error: submissionError } = await supabase
     .from("onboarding_submissions")
     .upsert(
       {
@@ -58,7 +59,9 @@ export async function saveOnboarding(
         submitted_at: submit ? new Date().toISOString() : null,
       },
       { onConflict: "client_id,service" }
-    );
+    )
+    .select("id")
+    .single();
 
   if (submissionError) {
     return { error: "Could not save your onboarding. Please try again." };
@@ -133,6 +136,33 @@ export async function saveOnboarding(
     await advanceIntakeStatus(clientId, "onboarding_submitted", ["onboarding_started"], {
       type: "onboarding_submitted",
       title: "Onboarding submitted",
+    });
+  }
+
+  // Assisted onboarding: a booking request was submitted → notify the agency.
+  // Best-effort; the email helper never throws, so it can't break submission.
+  if (data["__mode"] === "schedule") {
+    const booking = (data["__booking"] ?? {}) as {
+      date?: string;
+      time?: string;
+      notes?: string;
+    };
+    const { data: client } = await admin
+      .from("clients")
+      .select("name, contact_name, contact_email, contact_phone")
+      .eq("id", clientId)
+      .single();
+
+    await sendOnboardingAssistanceEmail({
+      businessName: client?.name ?? "Unknown business",
+      contactName: client?.contact_name ?? null,
+      serviceName: SERVICES[service].name,
+      preferredDate: booking.date ?? null,
+      preferredTime: booking.time ?? null,
+      email: client?.contact_email ?? null,
+      phone: client?.contact_phone ?? null,
+      notes: booking.notes ?? null,
+      submissionId: submissionRow?.id ?? "—",
     });
   }
 

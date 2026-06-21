@@ -595,10 +595,15 @@ function Scheduler({
     <div className="space-y-5 rounded-2xl border border-ink-100 bg-white p-5">
       <div className="flex items-start gap-3">
         <LifeBuoy className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
-        <p className="text-sm text-ink-600">
-          Tell us how and when to reach you. We&apos;ll confirm a time and
-          complete the onboarding with you — no technical knowledge needed.
-        </p>
+        <div>
+          <h3 className="text-sm font-semibold text-ink-900">
+            Need help completing your onboarding?
+          </h3>
+          <p className="mt-0.5 text-sm text-ink-600">
+            Book a Google Meet session with our team and we&apos;ll complete the
+            onboarding together.
+          </p>
+        </div>
       </div>
 
       {CALENDLY_URL && (

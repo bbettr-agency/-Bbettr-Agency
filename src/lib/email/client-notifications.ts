@@ -47,3 +47,47 @@ export async function sendClientWelcomeEmail(opts: {
     html,
   });
 }
+
+/** Agency inbox that receives onboarding assistance requests. */
+const AGENCY_INBOX = "info@bbettragency.com";
+
+/**
+ * Notify the agency inbox that a client booked an assisted onboarding session
+ * (Google Meet). Best-effort: returns { ok:false } (never throws) when
+ * RESEND_API_KEY is absent, so a missing key can't break onboarding submission.
+ */
+export async function sendOnboardingAssistanceEmail(opts: {
+  businessName: string;
+  contactName: string | null;
+  serviceName: string;
+  preferredDate?: string | null;
+  preferredTime?: string | null;
+  email: string | null;
+  phone: string | null;
+  notes?: string | null;
+  submissionId: string;
+}): Promise<SendResult> {
+  const html = renderEmail({
+    preheader: `New onboarding assistance request from ${opts.businessName}`,
+    heading: "New onboarding assistance request",
+    paragraphs: [
+      `${opts.businessName} requested help completing their onboarding.`,
+      `Business Name: ${opts.businessName}`,
+      `Contact Name: ${opts.contactName || "—"}`,
+      `Service Type: ${opts.serviceName}`,
+      `Preferred Date: ${opts.preferredDate || "—"}`,
+      `Preferred Time: ${opts.preferredTime || "—"}`,
+      `Email: ${opts.email || "—"}`,
+      `Phone: ${opts.phone || "—"}`,
+      `Notes: ${opts.notes || "—"}`,
+      `Submission ID: ${opts.submissionId}`,
+    ],
+    cta: { label: "View clients in admin", url: `${APP_URL}/admin/clients` },
+  });
+
+  return sendTransactionalEmail({
+    to: AGENCY_INBOX,
+    subject: `New Onboarding Assistance Request - ${opts.businessName}`,
+    html,
+  });
+}

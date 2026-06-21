@@ -664,13 +664,7 @@ export const TECHNICAL_FIELD_HELP: Record<string, string> = {
 };
 
 /** The on-screen options offered when a client books an onboarding session. */
-export const ONBOARDING_CALL_PLATFORMS = [
-  "Google Meet",
-  "Zoom",
-  "WhatsApp Call",
-  "TeamViewer",
-  "AnyDesk",
-];
+export const ONBOARDING_CALL_PLATFORMS = ["Google Meet"];
 
 export const SERVICE_LIST = Object.values(SERVICES);
 
