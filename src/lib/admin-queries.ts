@@ -549,3 +549,48 @@ export async function getClientBilling(clientId: string): Promise<ClientBilling>
     kpis: { outstandingTotal, paidLifetime, overdueCount, activeRetainers },
   };
 }
+
+/** A client's ❓ follow-up request, with the related update's title resolved. */
+export interface UpdateQuestionView {
+  id: string;
+  update_id: string;
+  updateTitle: string | null;
+  channel: "callback" | "email";
+  message: string | null;
+  status: "open" | "resolved";
+  created_at: string;
+}
+
+/**
+ * All ❓ follow-up requests a client has raised on their updates, newest first,
+ * with the related update title resolved for display. Admin-only.
+ */
+export async function getClientUpdateQuestions(
+  clientId: string
+): Promise<UpdateQuestionView[]> {
+  const supabase = await createClient();
+  const { data: questions } = await supabase
+    .from("update_questions")
+    .select("id, update_id, channel, message, status, created_at")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (!questions || questions.length === 0) return [];
+
+  const updateIds = [...new Set(questions.map((q) => q.update_id))];
+  const titleById = new Map<string, string>();
+  const { data: updates } = await supabase
+    .from("updates")
+    .select("id, title")
+    .in("id", updateIds);
+  for (const u of updates ?? []) titleById.set(u.id, u.title);
+
+  return questions.map((q) => ({
+    id: q.id,
+    update_id: q.update_id,
+    updateTitle: titleById.get(q.update_id) ?? null,
+    channel: q.channel,
+    message: q.message,
+    status: q.status,
+    created_at: q.created_at,
+  }));
+}

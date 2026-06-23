@@ -261,6 +261,48 @@ export interface Database {
           }
         ];
       };
+      update_reactions: {
+        Row: {
+          id: string;
+          update_id: string;
+          client_id: string;
+          profile_id: string;
+          emoji: string;
+          created_at: string;
+        };
+        Insert: {
+          update_id: string;
+          client_id: string;
+          profile_id: string;
+          emoji: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["update_reactions"]["Row"]>;
+        Relationships: [];
+      };
+      update_questions: {
+        Row: {
+          id: string;
+          update_id: string;
+          client_id: string;
+          profile_id: string | null;
+          channel: "callback" | "email";
+          message: string | null;
+          status: "open" | "resolved";
+          created_at: string;
+          resolved_at: string | null;
+          resolved_by: string | null;
+        };
+        Insert: {
+          update_id: string;
+          client_id: string;
+          profile_id?: string | null;
+          channel: "callback" | "email";
+          message?: string | null;
+          status?: "open" | "resolved";
+        };
+        Update: Partial<Database["public"]["Tables"]["update_questions"]["Row"]>;
+        Relationships: [];
+      };
       reports: {
         Row: {
           id: string;
@@ -878,6 +920,9 @@ export type OnboardingSubmission =
   Database["public"]["Tables"]["onboarding_submissions"]["Row"];
 export type ProjectStage = Database["public"]["Tables"]["project_stages"]["Row"];
 export type Update = Database["public"]["Tables"]["updates"]["Row"];
+export type UpdateReaction = Database["public"]["Tables"]["update_reactions"]["Row"];
+export type UpdateQuestion = Database["public"]["Tables"]["update_questions"]["Row"];
+export type QuestionChannel = "callback" | "email";
 export type Report = Database["public"]["Tables"]["reports"]["Row"];
 export type FileRecord = Database["public"]["Tables"]["files"]["Row"];
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"];

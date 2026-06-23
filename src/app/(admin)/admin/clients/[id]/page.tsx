@@ -12,6 +12,7 @@ import {
   getFiles,
   getOnboarding,
   getClientContracts,
+  getUpdateReactions,
 } from "@/lib/queries";
 import {
   getPortalAccess,
@@ -20,6 +21,7 @@ import {
   getClientDealLink,
   getLinkableDeals,
   getClientBilling,
+  getClientUpdateQuestions,
 } from "@/lib/admin-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -57,6 +59,7 @@ export default async function ClientDetailPage({
     dealLink,
     linkableDeals,
     billing,
+    updateQuestions,
   ] = await Promise.all([
     getClientServices(id),
     getProjectStages(id),
@@ -71,7 +74,11 @@ export default async function ClientDetailPage({
     getClientDealLink(id),
     getLinkableDeals(),
     getClientBilling(id),
+    getClientUpdateQuestions(id),
   ]);
+
+  // Reaction counts depend on the fetched update ids (read-only for admins).
+  const updateReactions = await getUpdateReactions(updates.map((u) => u.id));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -107,6 +114,8 @@ export default async function ClientDetailPage({
         dealLink={dealLink}
         linkableDeals={linkableDeals}
         billing={billing}
+        updateReactions={updateReactions}
+        updateQuestions={updateQuestions}
       />
 
       <DangerZone clientId={client.id} clientName={client.name} />

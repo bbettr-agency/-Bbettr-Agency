@@ -1,10 +1,24 @@
 import { format } from "date-fns";
 import { Megaphone } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
+import { UpdateReactions } from "@/components/updates/update-reactions";
 import type { Update } from "@/lib/database.types";
+import type { ReactionSummary } from "@/lib/update-reactions";
 
-/** Project update feed rendered as a vertical timeline. */
-export function UpdatesTimeline({ updates }: { updates: Update[] }) {
+/**
+ * Project update feed rendered as a vertical timeline. Optionally renders the
+ * emoji reaction bar per update — interactive for clients, read-only counts for
+ * admins.
+ */
+export function UpdatesTimeline({
+  updates,
+  reactions,
+  interactive = false,
+}: {
+  updates: Update[];
+  reactions?: Record<string, ReactionSummary>;
+  interactive?: boolean;
+}) {
   return (
     <div className="relative">
       <span
@@ -35,6 +49,15 @@ export function UpdatesTimeline({ updates }: { updates: Update[] }) {
                   <span className="text-xs font-medium text-ink-500">
                     {u.author_name}
                   </span>
+                </div>
+              )}
+              {(interactive || reactions) && (
+                <div className="mt-4 border-t border-ink-100 pt-3">
+                  <UpdateReactions
+                    updateId={u.id}
+                    summary={reactions?.[u.id]}
+                    interactive={interactive}
+                  />
                 </div>
               )}
             </div>

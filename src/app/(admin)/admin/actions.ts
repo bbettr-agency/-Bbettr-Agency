@@ -2111,3 +2111,36 @@ export async function deleteRetainerAction(
   revalidateClient(retainer.client_id);
   return { ok: true };
 }
+
+// ── Update questions (❓ follow-up requests) ──────────────────────────────────
+
+/** Mark a client's ❓ follow-up request as resolved once the team has actioned it. */
+export async function resolveUpdateQuestionAction(
+  questionId: string
+): Promise<ActionResult> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: question } = await supabase
+    .from("update_questions")
+    .select("id, client_id, status")
+    .eq("id", questionId)
+    .maybeSingle();
+  if (!question) return { error: "Request not found." };
+
+  if (question.status !== "resolved") {
+    const { error } = await supabase
+      .from("update_questions")
+      .update({
+        status: "resolved",
+        resolved_at: new Date().toISOString(),
+        resolved_by: profile.id,
+      })
+      .eq("id", questionId);
+    if (error) return { error: error.message };
+  }
+
+  revalidateClient(question.client_id);
+  revalidatePath(`/admin/clients/${question.client_id}`);
+  return { ok: true };
+}

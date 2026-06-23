@@ -169,3 +169,44 @@ export async function sendInvoiceReminderEmail(
     html,
   });
 }
+
+/** Agency inbox that receives client follow-up requests. */
+const AGENCY_INBOX = "info@bbettragency.com";
+
+/**
+ * Notify the team that a client raised a ❓ follow-up request on an update —
+ * either a callback or an email. Includes the client's contact details so the
+ * team can action it directly. Best-effort (never throws).
+ */
+export async function sendClientQuestionEmail(opts: {
+  businessName: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  updateTitle: string;
+  channel: "callback" | "email";
+  message: string | null;
+  clientAdminUrl: string;
+}): Promise<SendResult> {
+  const channelLabel = opts.channel === "callback" ? "Callback" : "Email reply";
+  const html = renderEmail({
+    preheader: `${opts.businessName} requested a ${channelLabel.toLowerCase()}.`,
+    heading: "Client follow-up request",
+    paragraphs: [
+      `${opts.businessName} raised a question on an update and would like a ${channelLabel.toLowerCase()}.`,
+      `Update: ${opts.updateTitle}`,
+      `Preferred follow-up: ${channelLabel}`,
+      `Message: ${opts.message?.trim() || "—"}`,
+      `Contact name: ${opts.contactName || "—"}`,
+      `Email: ${opts.contactEmail || "—"}`,
+      `Phone: ${opts.contactPhone || "—"}`,
+    ],
+    cta: { label: "Open client", url: opts.clientAdminUrl },
+  });
+
+  return sendTransactionalEmail({
+    to: AGENCY_INBOX,
+    subject: `Client follow-up request - ${opts.businessName}`,
+    html,
+  });
+}

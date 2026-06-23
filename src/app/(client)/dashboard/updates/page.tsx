@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { SeenMarker } from "@/components/shared/seen-marker";
 import { Megaphone } from "lucide-react";
 import { requireClient } from "@/lib/auth";
-import { getUpdates } from "@/lib/queries";
+import { getUpdates, getUpdateReactions } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
@@ -12,6 +12,10 @@ export const metadata: Metadata = { title: "Updates" };
 export default async function UpdatesPage() {
   const profile = await requireClient();
   const updates = await getUpdates(profile.client_id);
+  const reactions = await getUpdateReactions(
+    updates.map((u) => u.id),
+    profile.id
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -23,7 +27,7 @@ export default async function UpdatesPage() {
 
       {updates.length > 0 ? (
         <div className="max-w-3xl">
-          <UpdatesTimeline updates={updates} />
+          <UpdatesTimeline updates={updates} reactions={reactions} interactive />
         </div>
       ) : (
         <EmptyState

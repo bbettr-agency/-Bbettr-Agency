@@ -17,12 +17,14 @@ import { ContractManager } from "@/components/admin/contract-manager";
 import { IntakePanel } from "@/components/admin/intake-panel";
 import { BillingPanel } from "@/components/admin/billing-panel";
 import type { ContractView } from "@/lib/queries";
+import type { ReactionSummary } from "@/lib/update-reactions";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
 import { computeReadiness } from "@/lib/readiness";
 import { UpdateComposer } from "@/components/admin/update-composer";
 import { ReportComposer } from "@/components/admin/report-composer";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
+import { UpdateQuestionsPanel } from "@/components/admin/update-questions-panel";
 import { ReportCard } from "@/components/reports/report-card";
 import { FileManager } from "@/components/files/file-manager";
 import { PortalAccessCard } from "@/components/admin/portal-access-card";
@@ -32,6 +34,7 @@ import type {
   DealLink,
   LinkableDeal,
   ClientBilling,
+  UpdateQuestionView,
 } from "@/lib/admin-queries";
 import type {
   Client,
@@ -67,6 +70,8 @@ interface ClientDetailProps {
   dealLink: DealLink | null;
   linkableDeals: LinkableDeal[];
   billing: ClientBilling;
+  updateReactions: Record<string, ReactionSummary>;
+  updateQuestions: UpdateQuestionView[];
 }
 
 export function ClientDetail({
@@ -85,6 +90,8 @@ export function ClientDetail({
   dealLink,
   linkableDeals,
   billing,
+  updateReactions,
+  updateQuestions,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -291,9 +298,10 @@ export function ClientDetail({
                   </CardContent>
                 </Card>
               </div>
-              <div>
+              <div className="space-y-6">
+                <UpdateQuestionsPanel questions={updateQuestions} />
                 {updates.length > 0 ? (
-                  <UpdatesTimeline updates={updates} />
+                  <UpdatesTimeline updates={updates} reactions={updateReactions} />
                 ) : (
                   <p className="py-8 text-center text-sm text-ink-400">
                     No updates posted yet.

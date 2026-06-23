@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { NotificationType } from "@/lib/database.types";
+import type { ReactionSummary } from "@/lib/update-reactions";
 
 /**
  * Tenant-scoped data access helpers. RLS guarantees a client can only ever
@@ -184,6 +185,34 @@ export async function getUpdates(clientId: string, limit?: number) {
   if (limit) query = query.limit(limit);
   const { data } = await query;
   return data ?? [];
+}
+
+/**
+ * Aggregate emoji reactions for a set of updates. RLS scopes rows to the caller
+ * (a client sees reactions on their own updates; an admin sees all), so we just
+ * count per emoji and flag the viewer's own choice.
+ */
+export async function getUpdateReactions(
+  updateIds: string[],
+  viewerProfileId?: string
+): Promise<Record<string, ReactionSummary>> {
+  const result: Record<string, ReactionSummary> = {};
+  if (updateIds.length === 0) return result;
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("update_reactions")
+    .select("update_id, emoji, profile_id")
+    .in("update_id", updateIds);
+
+  for (const row of data ?? []) {
+    const summary = (result[row.update_id] ??= { counts: {}, mine: null });
+    summary.counts[row.emoji] = (summary.counts[row.emoji] ?? 0) + 1;
+    if (viewerProfileId && row.profile_id === viewerProfileId) {
+      summary.mine = row.emoji;
+    }
+  }
+  return result;
 }
 
 export async function getReports(clientId: string) {
