@@ -6,7 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidateClient } from "@/lib/revalidate";
 import { getEmailService, type EmailKind } from "@/lib/email";
-import { sendClientWelcomeEmail } from "@/lib/email/client-notifications";
+import {
+  sendClientWelcomeEmail,
+  sendInvoiceAvailableEmail,
+  sendInvoiceReminderEmail,
+} from "@/lib/email/client-notifications";
 import { notify } from "@/lib/notifications";
 import { notifyInternal, notifyAdmins } from "@/lib/internal-notifications";
 import {
@@ -1536,11 +1540,63 @@ export interface NewInvoiceInput {
   title: string;
   description?: string | null;
   amount: number;
+  currency?: string;
   kind?: InvoiceKind;
   /** Initial state: a draft, or sent immediately. Paid is only set via payments. */
   send?: boolean;
   issuedAt?: string | null;
   dueAt?: string | null;
+  /** Linked invoice PDF in Files & Assets (asset_category 'invoices'). */
+  fileId?: string | null;
+}
+
+/** Client-facing label for an invoice status (overdue is derived from due date). */
+function invoiceStatusLabel(status: string, dueAt: string | null): string {
+  if (status === "paid") return "Paid";
+  if (status === "void") return "Cancelled";
+  const overdue =
+    status === "sent" && dueAt != null && new Date(dueAt).getTime() < Date.now();
+  return overdue ? "Overdue" : "Outstanding";
+}
+
+/**
+ * Best-effort: email the client that an invoice is available + log a
+ * client-visible activity event. Called only when an invoice becomes
+ * client-visible (created-as-sent or marked sent), never for drafts.
+ */
+async function notifyInvoiceAvailable(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  inv: {
+    client_id: string;
+    invoice_number: string;
+    amount: number;
+    currency: string;
+    due_at: string | null;
+  }
+): Promise<void> {
+  const { data: client } = await supabase
+    .from("clients")
+    .select("contact_email, contact_name")
+    .eq("id", inv.client_id)
+    .maybeSingle();
+
+  if (client?.contact_email) {
+    await sendInvoiceAvailableEmail({
+      to: client.contact_email,
+      clientName: client.contact_name,
+      invoiceNumber: inv.invoice_number,
+      amount: Number(inv.amount),
+      currency: inv.currency,
+      dueAt: inv.due_at,
+      statusLabel: invoiceStatusLabel("sent", inv.due_at),
+    });
+  }
+  await logActivity({
+    clientId: inv.client_id,
+    type: "invoice_available",
+    title: `Invoice ${inv.invoice_number} available`,
+    visibility: "client",
+  });
 }
 
 /** Create a manual invoice for a client. Reserves the next INV- number. */
@@ -1567,20 +1623,37 @@ export async function createClientInvoiceAction(
     };
   }
 
+  const currency = input.currency === "USD" ? "USD" : "ZAR";
+  const invoiceNumber = numberValue as string;
+  const dueAt = input.dueAt ?? null;
+
   const { error } = await supabase.from("client_invoices").insert({
     client_id: clientId,
-    invoice_number: numberValue as string,
+    invoice_number: invoiceNumber,
     title,
     description: input.description?.trim() || null,
     amount,
+    currency,
     kind: input.kind ?? "one_off",
     status: input.send ? "sent" : "draft",
     issued_at: input.send ? input.issuedAt ?? new Date().toISOString() : input.issuedAt ?? null,
-    due_at: input.dueAt ?? null,
+    due_at: dueAt,
+    file_id: input.fileId ?? null,
     source: "admin",
     created_by: profile.id,
   });
   if (error) return { error: error.message };
+
+  // Email + activity only when the invoice is client-visible (sent), never draft.
+  if (input.send) {
+    await notifyInvoiceAvailable(supabase, {
+      client_id: clientId,
+      invoice_number: invoiceNumber,
+      amount,
+      currency,
+      due_at: dueAt,
+    });
+  }
 
   revalidateClient(clientId);
   return { ok: true };
@@ -1590,9 +1663,11 @@ export interface UpdateInvoiceInput {
   title?: string;
   description?: string | null;
   amount?: number;
+  currency?: string;
   kind?: InvoiceKind;
   issuedAt?: string | null;
   dueAt?: string | null;
+  fileId?: string | null;
 }
 
 /** Edit a draft/sent invoice. Paid or void invoices are locked. */
@@ -1626,8 +1701,10 @@ export async function updateClientInvoiceAction(
     patch.amount = a;
   }
   if (input.kind !== undefined) patch.kind = input.kind;
+  if (input.currency !== undefined) patch.currency = input.currency === "USD" ? "USD" : "ZAR";
   if (input.issuedAt !== undefined) patch.issued_at = input.issuedAt;
   if (input.dueAt !== undefined) patch.due_at = input.dueAt;
+  if (input.fileId !== undefined) patch.file_id = input.fileId;
 
   const { error } = await supabase
     .from("client_invoices")
@@ -1649,7 +1726,7 @@ export async function setInvoiceStatusAction(
 
   const { data: invoice } = await supabase
     .from("client_invoices")
-    .select("id, client_id, status")
+    .select("id, client_id, status, invoice_number, amount, currency, due_at")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!invoice) return { error: "Invoice not found." };
@@ -1657,8 +1734,9 @@ export async function setInvoiceStatusAction(
     return { error: "A paid invoice can't change status. Remove its payments first." };
   }
 
+  const becomingVisible = status === "sent" && invoice.status === "draft";
   const patch: ClientInvoiceUpdate = { status };
-  if (status === "sent" && invoice.status === "draft") {
+  if (becomingVisible) {
     patch.issued_at = new Date().toISOString();
   }
   const { error } = await supabase
@@ -1667,6 +1745,109 @@ export async function setInvoiceStatusAction(
     .eq("id", invoiceId);
   if (error) return { error: error.message };
 
+  // A draft becoming sent is the client's first sight of it → notify.
+  if (becomingVisible) {
+    await notifyInvoiceAvailable(supabase, {
+      client_id: invoice.client_id,
+      invoice_number: invoice.invoice_number,
+      amount: Number(invoice.amount),
+      currency: invoice.currency,
+      due_at: invoice.due_at,
+    });
+  }
+
+  revalidateClient(invoice.client_id);
+  return { ok: true };
+}
+
+/**
+ * Simple, direct "Mark paid" for the client-facing flow: sets status=paid and
+ * paid_at without requiring a recorded payment. The richer payment-recording
+ * flow (recordPaymentAction) remains available and unchanged. Never touches
+ * draft or void invoices.
+ */
+export async function markInvoicePaidAction(
+  invoiceId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, status, invoice_number, paid_at")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { error: "Invoice not found." };
+  if (invoice.status === "draft") {
+    return { error: "Send the invoice before marking it paid." };
+  }
+  if (invoice.status === "void") {
+    return { error: "A cancelled invoice can't be marked paid." };
+  }
+  if (invoice.status === "paid") return { ok: true };
+
+  const { error } = await supabase
+    .from("client_invoices")
+    .update({ status: "paid", paid_at: invoice.paid_at ?? new Date().toISOString() })
+    .eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  await logActivity({
+    clientId: invoice.client_id,
+    type: "invoice_paid",
+    title: `Invoice ${invoice.invoice_number} marked paid`,
+    visibility: "client",
+  });
+  revalidateClient(invoice.client_id);
+  return { ok: true };
+}
+
+/**
+ * Manually email the client a reminder for an outstanding/overdue invoice.
+ * Records `reminded_at` for the admin UI. Best-effort email (never throws).
+ */
+export async function sendInvoiceReminderAction(
+  invoiceId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, status, invoice_number, amount, currency, due_at")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { error: "Invoice not found." };
+  if (invoice.status !== "sent") {
+    return { error: "Reminders are only for outstanding (sent) invoices." };
+  }
+
+  const { data: client } = await supabase
+    .from("clients")
+    .select("contact_email, contact_name")
+    .eq("id", invoice.client_id)
+    .maybeSingle();
+  if (!client?.contact_email) {
+    return { error: "This client has no contact email on file." };
+  }
+
+  const result = await sendInvoiceReminderEmail({
+    to: client.contact_email,
+    clientName: client.contact_name,
+    invoiceNumber: invoice.invoice_number,
+    amount: Number(invoice.amount),
+    currency: invoice.currency,
+    dueAt: invoice.due_at,
+    statusLabel: invoiceStatusLabel(invoice.status, invoice.due_at),
+  });
+  if (!result.ok) {
+    return { error: result.error ?? "Could not send the reminder email." };
+  }
+
+  await supabase
+    .from("client_invoices")
+    .update({ reminded_at: new Date().toISOString() })
+    .eq("id", invoiceId);
   revalidateClient(invoice.client_id);
   return { ok: true };
 }

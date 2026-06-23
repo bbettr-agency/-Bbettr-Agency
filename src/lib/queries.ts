@@ -202,6 +202,9 @@ export async function getFiles(clientId: string) {
     .from("files")
     .select("*")
     .eq("client_id", clientId)
+    // Invoice PDFs live only in the Billing/Invoices surfaces — never the
+    // generic Files manager (admin or client).
+    .neq("asset_category", "invoices")
     .order("created_at", { ascending: false });
   return data ?? [];
 }
@@ -273,6 +276,83 @@ export async function getClientContracts(clientId: string): Promise<ContractView
     created_at: c.created_at,
     signedFile: c.file_id ? fileMap.get(c.file_id) ?? null : null,
   }));
+}
+
+/** Client-facing invoice. "Overdue" is derived (sent + past due), never stored. */
+export interface ClientInvoiceView {
+  id: string;
+  invoice_number: string;
+  title: string;
+  amount: number;
+  currency: string;
+  status: string;
+  /** "outstanding" | "overdue" | "paid" | "cancelled" — for the client badge. */
+  clientStatus: "outstanding" | "overdue" | "paid" | "cancelled";
+  issued_at: string | null;
+  due_at: string | null;
+  paid_at: string | null;
+  /** Linked invoice PDF in the Files system, for download (if any). */
+  pdf: { name: string; path: string } | null;
+}
+
+/**
+ * A client's own invoices for the portal Invoices page. RLS already restricts
+ * this to the client's own, non-draft rows; we mirror that filter + ordering
+ * and resolve the linked PDF for download. Read-only — clients never mutate.
+ */
+export async function getClientInvoices(
+  clientId: string
+): Promise<ClientInvoiceView[]> {
+  const supabase = await createClient();
+  const { data: invoices } = await supabase
+    .from("client_invoices")
+    .select(
+      "id, invoice_number, title, amount, currency, status, issued_at, due_at, paid_at, file_id"
+    )
+    .eq("client_id", clientId)
+    .neq("status", "draft")
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (!invoices || invoices.length === 0) return [];
+
+  const fileIds = invoices
+    .map((i) => i.file_id)
+    .filter((id): id is string => Boolean(id));
+  const fileMap = new Map<string, { name: string; path: string }>();
+  if (fileIds.length > 0) {
+    const { data: files } = await supabase
+      .from("files")
+      .select("id, name, path")
+      .in("id", fileIds);
+    for (const f of files ?? []) fileMap.set(f.id, { name: f.name, path: f.path });
+  }
+
+  const now = Date.now();
+  return invoices.map((i) => {
+    const overdue =
+      i.status === "sent" && i.due_at != null && new Date(i.due_at).getTime() < now;
+    const clientStatus: ClientInvoiceView["clientStatus"] =
+      i.status === "paid"
+        ? "paid"
+        : i.status === "void"
+          ? "cancelled"
+          : overdue
+            ? "overdue"
+            : "outstanding";
+    return {
+      id: i.id,
+      invoice_number: i.invoice_number,
+      title: i.title,
+      amount: Number(i.amount),
+      currency: i.currency,
+      status: i.status,
+      clientStatus,
+      issued_at: i.issued_at,
+      due_at: i.due_at,
+      paid_at: i.paid_at,
+      pdf: i.file_id ? fileMap.get(i.file_id) ?? null : null,
+    };
+  });
 }
 
 export async function getOnboarding(clientId: string) {

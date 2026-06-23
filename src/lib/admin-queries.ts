@@ -434,6 +434,8 @@ export interface BillingInvoice extends ClientInvoice {
   amountPaid: number;
   balance: number;
   derivedStatus: InvoiceStatus | "overdue";
+  /** Linked invoice PDF (Files & Assets), for admin download (if any). */
+  pdf: { name: string; path: string } | null;
 }
 
 export interface BillingPayment extends ClientPayment {
@@ -489,6 +491,20 @@ export async function getClientBilling(clientId: string): Promise<ClientBilling>
   const retainerList = retainerRows ?? [];
   const now = Date.now();
 
+  // Resolve linked invoice PDFs (Files & Assets) for admin download.
+  const invoiceFileIds = invoiceList
+    .map((i) => i.file_id)
+    .filter((id): id is string => Boolean(id));
+  const invoiceFileMap = new Map<string, { name: string; path: string }>();
+  if (invoiceFileIds.length > 0) {
+    const { data: invoiceFiles } = await supabase
+      .from("files")
+      .select("id, name, path")
+      .in("id", invoiceFileIds);
+    for (const f of invoiceFiles ?? [])
+      invoiceFileMap.set(f.id, { name: f.name, path: f.path });
+  }
+
   // Sum payments per invoice for balance + paid detection.
   const paidByInvoice = new Map<string, number>();
   for (const p of paymentList) {
@@ -509,6 +525,7 @@ export async function getClientBilling(clientId: string): Promise<ClientBilling>
       amountPaid,
       balance,
       derivedStatus: isOverdue ? "overdue" : inv.status,
+      pdf: inv.file_id ? invoiceFileMap.get(inv.file_id) ?? null : null,
     };
   });
 

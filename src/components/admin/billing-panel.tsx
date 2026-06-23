@@ -15,12 +15,17 @@ import {
   Clock,
   Banknote,
   Repeat,
+  Download,
+  Mail,
+  CheckCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { InvoiceStatusBadge } from "@/components/ui/status-badge";
+import { FileDropzone } from "@/components/shared/file-dropzone";
+import { getSignedUrl } from "@/lib/upload";
 import { formatCurrency } from "@/lib/utils";
 import type {
   ClientBilling,
@@ -32,6 +37,8 @@ import {
   createClientInvoiceAction,
   updateClientInvoiceAction,
   setInvoiceStatusAction,
+  markInvoicePaidAction,
+  sendInvoiceReminderAction,
   deleteClientInvoiceAction,
   recordPaymentAction,
   deleteClientPaymentAction,
@@ -97,6 +104,15 @@ export function BillingPanel({
       after?.();
       router.refresh();
     });
+  }
+
+  async function openPath(path: string) {
+    try {
+      const url = await getSignedUrl(path);
+      window.open(url, "_blank");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not open the file.");
+    }
   }
 
   const visibleInvoices = invoices.filter((i) => {
@@ -201,6 +217,15 @@ export function BillingPanel({
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
+                  {inv.pdf && (
+                    <IconBtn
+                      title="Download PDF"
+                      onClick={() => openPath(inv.pdf!.path)}
+                      disabled={pending}
+                    >
+                      <Download className="h-4 w-4" />
+                    </IconBtn>
+                  )}
                   {inv.status === "draft" && (
                     <IconBtn
                       title="Mark sent"
@@ -208,6 +233,24 @@ export function BillingPanel({
                       disabled={pending}
                     >
                       <Send className="h-4 w-4" />
+                    </IconBtn>
+                  )}
+                  {inv.status === "sent" && (
+                    <IconBtn
+                      title="Send reminder"
+                      onClick={() => run(() => sendInvoiceReminderAction(inv.id))}
+                      disabled={pending}
+                    >
+                      <Mail className="h-4 w-4" />
+                    </IconBtn>
+                  )}
+                  {inv.status === "sent" && (
+                    <IconBtn
+                      title="Mark paid"
+                      onClick={() => run(() => markInvoicePaidAction(inv.id))}
+                      disabled={pending}
+                    >
+                      <CheckCheck className="h-4 w-4" />
                     </IconBtn>
                   )}
                   {(inv.status === "sent" || inv.status === "paid") && (
@@ -479,8 +522,12 @@ function InvoiceModal({
   const [title, setTitle] = useState(invoice?.title ?? "");
   const [description, setDescription] = useState(invoice?.description ?? "");
   const [amount, setAmount] = useState(invoice ? String(invoice.amount) : "");
+  const [currency, setCurrency] = useState<string>(invoice?.currency ?? "ZAR");
   const [kind, setKind] = useState<InvoiceKind>(invoice?.kind ?? "one_off");
+  const [issuedAt, setIssuedAt] = useState(toDateInput(invoice?.issued_at ?? null));
   const [dueAt, setDueAt] = useState(toDateInput(invoice?.due_at ?? null));
+  const [fileId, setFileId] = useState<string | null>(invoice?.file_id ?? null);
+  const [fileName, setFileName] = useState<string | null>(invoice?.pdf?.name ?? null);
   const [send, setSend] = useState(false);
 
   function submit() {
@@ -488,8 +535,11 @@ function InvoiceModal({
       title,
       description,
       amount: Number(amount),
+      currency,
       kind,
+      issuedAt: fromDateInput(issuedAt),
       dueAt: fromDateInput(dueAt),
+      fileId,
     };
     if (editing) {
       onSubmit(() => updateClientInvoiceAction(invoice!.id, fields), onClose);
@@ -515,7 +565,7 @@ function InvoiceModal({
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Amount (ZAR)">
+          <Field label="Amount">
             <Input
               type="number"
               min="0"
@@ -524,6 +574,18 @@ function InvoiceModal({
               onChange={(e) => setAmount(e.target.value)}
             />
           </Field>
+          <Field label="Currency">
+            <select
+              className={selectClass}
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+            >
+              <option value="ZAR">ZAR</option>
+              <option value="USD">USD</option>
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
             <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as InvoiceKind)}>
               {INVOICE_KINDS.map((k) => (
@@ -533,9 +595,41 @@ function InvoiceModal({
               ))}
             </select>
           </Field>
+          <Field label="Invoice date (optional)">
+            <Input type="date" value={issuedAt} onChange={(e) => setIssuedAt(e.target.value)} />
+          </Field>
         </div>
         <Field label="Due date (optional)">
           <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+        </Field>
+        <Field label="Invoice PDF (optional)">
+          {fileName ? (
+            <div className="flex items-center justify-between rounded-xl border border-ink-200 px-3 py-2 text-sm">
+              <span className="truncate text-ink-700">{fileName}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFileId(null);
+                  setFileName(null);
+                }}
+                className="ml-2 shrink-0 text-xs font-medium text-ink-400 hover:text-rose-500"
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <FileDropzone
+              clientId={clientId}
+              assetCategory="invoices"
+              subcategory="invoice"
+              clientVisible
+              multiple={false}
+              onUploaded={(rec) => {
+                setFileId(rec.id);
+                setFileName(rec.name);
+              }}
+            />
+          )}
         </Field>
         {!editing && (
           <label className="flex items-center gap-2 text-sm text-ink-700">

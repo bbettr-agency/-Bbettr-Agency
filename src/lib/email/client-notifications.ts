@@ -1,6 +1,7 @@
 import "server-only";
 import { sendTransactionalEmail, type SendResult } from "@/lib/email/resend";
 import { renderEmail } from "@/lib/email/templates";
+import { formatCurrency } from "@/lib/utils";
 
 /**
  * Client-flow welcome / credentials email.
@@ -88,6 +89,83 @@ export async function sendOnboardingAssistanceEmail(opts: {
   return sendTransactionalEmail({
     to: AGENCY_INBOX,
     subject: `New Onboarding Assistance Request - ${opts.businessName}`,
+    html,
+  });
+}
+
+/** YYYY-MM-DD (or "—") for an ISO date string, for plain-text email lines. */
+function emailDate(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : "—";
+}
+
+interface InvoiceEmailInput {
+  to: string;
+  clientName: string | null;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+  dueAt: string | null;
+  /** Client-facing status label, e.g. "Outstanding" / "Overdue" / "Paid". */
+  statusLabel: string;
+}
+
+const INVOICES_URL = `${APP_URL}/dashboard/invoices`;
+
+/**
+ * Notify a client that a new invoice is available to view in the portal. Sent
+ * only when an invoice becomes client-visible (created-as-sent or marked sent);
+ * never for drafts. Best-effort (never throws).
+ */
+export async function sendInvoiceAvailableEmail(
+  opts: InvoiceEmailInput
+): Promise<SendResult> {
+  const html = renderEmail({
+    preheader: `Invoice ${opts.invoiceNumber} is available in your portal.`,
+    heading: "A new invoice is available",
+    paragraphs: [
+      `Hi ${opts.clientName || "there"},`,
+      "A new invoice is now available to view and download in your Bbettr Agency portal.",
+      `Invoice number: ${opts.invoiceNumber}`,
+      `Amount: ${formatCurrency(opts.amount, opts.currency)}`,
+      `Due date: ${emailDate(opts.dueAt)}`,
+      `Status: ${opts.statusLabel}`,
+    ],
+    cta: { label: "View invoice", url: INVOICES_URL },
+    footnote: "You can view and download all your invoices any time in the portal.",
+  });
+
+  return sendTransactionalEmail({
+    to: opts.to,
+    subject: "New invoice available in your Bbettr portal",
+    html,
+  });
+}
+
+/**
+ * Manual payment reminder for an outstanding/overdue invoice. Triggered by an
+ * admin clicking "Send reminder". Best-effort (never throws).
+ */
+export async function sendInvoiceReminderEmail(
+  opts: InvoiceEmailInput
+): Promise<SendResult> {
+  const html = renderEmail({
+    preheader: `A reminder about invoice ${opts.invoiceNumber}.`,
+    heading: "Invoice reminder",
+    paragraphs: [
+      `Hi ${opts.clientName || "there"},`,
+      "This is a friendly reminder about the following invoice on your account:",
+      `Invoice number: ${opts.invoiceNumber}`,
+      `Amount: ${formatCurrency(opts.amount, opts.currency)}`,
+      `Due date: ${emailDate(opts.dueAt)}`,
+      `Current status: ${opts.statusLabel}`,
+    ],
+    cta: { label: "View invoice", url: INVOICES_URL },
+    footnote: "If you've already paid, please disregard this reminder.",
+  });
+
+  return sendTransactionalEmail({
+    to: opts.to,
+    subject: "Invoice reminder from Bbettr Agency",
     html,
   });
 }

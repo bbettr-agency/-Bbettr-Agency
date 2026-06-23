@@ -67,7 +67,8 @@ export type AssetCategory =
   | "media"
   | "documents"
   | "deliverables"
-  | "reports";
+  | "reports"
+  | "invoices";
 
 export type ContractStatus = "not_sent" | "sent" | "signed";
 
@@ -764,6 +765,8 @@ export interface Database {
           quickbooks_invoice_number: string | null;
           invoice_request_id: string | null;
           source: InvoiceSource;
+          file_id: string | null;
+          reminded_at: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -784,6 +787,8 @@ export interface Database {
           quickbooks_invoice_number?: string | null;
           invoice_request_id?: string | null;
           source?: InvoiceSource;
+          file_id?: string | null;
+          reminded_at?: string | null;
           created_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["client_invoices"]["Row"]>;

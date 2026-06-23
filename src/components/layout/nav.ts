@@ -31,6 +31,7 @@ export const CLIENT_NAV: NavItem[] = [
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
   { label: "Files", href: "/dashboard/files", icon: FolderOpen },
   { label: "Contracts", href: "/dashboard/contracts", icon: FileSignature },
+  { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
 ];
 
 /** Admin operating-system navigation. */

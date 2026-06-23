@@ -6,6 +6,7 @@ import {
   Folder,
   PackageCheck,
   BarChart3,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,7 +27,8 @@ export type AssetCategoryKey =
   | "media"
   | "documents"
   | "deliverables"
-  | "reports";
+  | "reports"
+  | "invoices";
 
 export interface SubcategoryDef {
   key: string;
@@ -123,6 +125,16 @@ export const ASSET_CATEGORIES: Record<AssetCategoryKey, AssetCategoryDef> = {
       sub("advertising", "Advertising Reports"),
       sub("analytics", "Analytics Reports"),
     ],
+  },
+  // Admin-managed invoice PDFs. Intentionally excluded from ASSET_CATEGORY_ORDER
+  // so invoices never surface in the Files manager/pages — they appear only in
+  // the admin Billing tab and the client Invoices page.
+  invoices: {
+    key: "invoices",
+    label: "Invoices",
+    icon: Receipt,
+    clientCanUpload: false,
+    subcategories: [sub("invoice", "Invoice")],
   },
 };
 
