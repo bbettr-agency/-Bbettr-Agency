@@ -1,12 +1,17 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/database.types";
 
 /**
  * Returns the authenticated user's profile (role + tenant binding), or null.
  * Server-only.
+ *
+ * Wrapped in React `cache()` so repeated calls within a single request (e.g. a
+ * layout and its page both calling requireClient) reuse one auth + profile
+ * lookup instead of re-querying. Auth logic and permissions are unchanged.
  */
-export async function getCurrentProfile(): Promise<Profile | null> {
+export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   const supabase = await createClient();
   const {
     data: { user },
@@ -21,7 +26,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     .single();
 
   return profile ?? null;
-}
+});
 
 /** Require any authenticated session; redirect to /login otherwise. */
 export async function requireProfile(): Promise<Profile> {
