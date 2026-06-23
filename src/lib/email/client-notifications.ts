@@ -49,7 +49,7 @@ export async function sendClientWelcomeEmail(opts: {
   });
 }
 
-/** Agency inbox that receives onboarding assistance requests. */
+/** Shared agency inbox that receives client-side notification emails. */
 const AGENCY_INBOX = "info@bbettragency.com";
 
 /**
@@ -169,9 +169,6 @@ export async function sendInvoiceReminderEmail(
     html,
   });
 }
-
-/** Agency inbox that receives client follow-up requests. */
-const AGENCY_INBOX = "info@bbettragency.com";
 
 /**
  * Notify the team that a client raised a ❓ follow-up request on an update —
