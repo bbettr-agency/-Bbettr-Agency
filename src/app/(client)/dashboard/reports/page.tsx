@@ -47,8 +47,8 @@ export default async function ReportsPage() {
       ) : (
         <EmptyState
           icon={BarChart3}
-          title="No reports yet"
-          description="Your first monthly performance report will appear here once published."
+          title="Your first report is on its way"
+          description="Once your services are live, your team publishes a detailed performance report here every month."
         />
       )}
     </div>

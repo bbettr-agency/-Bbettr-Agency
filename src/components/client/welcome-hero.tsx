@@ -25,9 +25,10 @@ export function WelcomeHero({
       : pct === 0
         ? "Welcome aboard — we’re getting your project underway."
         : "Your project is progressing beautifully.";
+  // Warm, active fallback — "To be confirmed" reads like a shrug on day one.
   const launch = estimatedLaunchDate
     ? format(new Date(estimatedLaunchDate), "d MMM yyyy")
-    : "To be confirmed";
+    : "We'll confirm shortly";
 
   return (
     <Card className="relative overflow-hidden border-0 bg-ink-900 text-white shadow-card-hover">

@@ -22,8 +22,8 @@ export default async function ContractsPage() {
       {contracts.length === 0 ? (
         <EmptyState
           icon={FileSignature}
-          title="No contracts yet"
-          description="Your agreement is being prepared. We’ll let you know when it’s ready."
+          title="Your agreement is being prepared"
+          description="We’ll send it to you for signing, and it will appear here to view and download the moment it’s ready."
         />
       ) : (
         <ContractList contracts={contracts} />

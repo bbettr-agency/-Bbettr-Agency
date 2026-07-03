@@ -81,7 +81,7 @@ export function InvoiceList({ invoices }: { invoices: ClientInvoiceView[] }) {
             {inv.pdf ? (
               <button
                 onClick={() => download(inv.pdf!.path)}
-                className="inline-flex items-center gap-1 rounded-lg border border-ink-200 px-2.5 py-1.5 text-xs font-medium text-ink-700 hover:bg-ink-50"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
               >
                 <Download className="h-3.5 w-3.5" /> Download PDF
               </button>

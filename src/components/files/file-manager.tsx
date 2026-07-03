@@ -27,6 +27,8 @@ import {
 } from "@/lib/assets";
 import { FileDropzone } from "@/components/shared/file-dropzone";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { FileRecord } from "@/lib/database.types";
 
@@ -53,6 +55,8 @@ export function FileManager({
   const [files, setFiles] = useState<FileRecord[]>(initialFiles);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** File awaiting delete confirmation (in-app modal, not the browser dialog). */
+  const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null);
 
   const uploadable = isAdmin ? allCategories() : clientUploadCategories();
   const [category, setCategory] = useState<AssetCategoryKey>(
@@ -97,8 +101,9 @@ export function FileManager({
     }
   }
 
+  /** Runs after the in-app modal confirms — never a native browser dialog. */
   async function remove(file: FileRecord) {
-    if (!confirm(`Delete "${file.name}"? This cannot be undone.`)) return;
+    setDeleteTarget(null);
     setBusyId(file.id);
     setError(null);
     const supabase = createClient();
@@ -192,8 +197,12 @@ export function FileManager({
       {files.length === 0 ? (
         <EmptyState
           icon={FolderOpen}
-          title="No files yet"
-          description="Upload contracts, branding, content, media and documents above."
+          title={isAdmin ? "No files yet" : "Let's get your files in"}
+          description={
+            isAdmin
+              ? "Upload contracts, branding, content, media and documents above."
+              : "Start with your logo and brand guidelines, then add photos of your team, products or premises — just drag and drop into the upload area above."
+          }
         />
       ) : (
         <div className="space-y-6">
@@ -253,7 +262,7 @@ export function FileManager({
                             <Download className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => remove(file)}
+                            onClick={() => setDeleteTarget(file)}
                             disabled={busyId === file.id}
                             className={cn(
                               "rounded-lg p-1.5 text-ink-400 hover:bg-red-50 hover:text-red-500",
@@ -273,6 +282,26 @@ export function FileManager({
           })}
         </div>
       )}
+
+      {/* Delete confirmation — in-app modal instead of the native browser dialog. */}
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete this file?"
+        description={deleteTarget ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.` : undefined}
+      >
+        <div className="flex justify-end gap-3 p-6">
+          <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-red-600 hover:bg-red-700"
+            onClick={() => deleteTarget && remove(deleteTarget)}
+          >
+            <Trash2 className="h-4 w-4" /> Delete file
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
