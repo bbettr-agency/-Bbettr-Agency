@@ -52,7 +52,13 @@ export async function getClientNotificationFeed(
 }
 
 /** Portal sections that carry notification dots, mapped to their nav href. */
-export const NOTIFY_SECTIONS = ["project", "updates", "reports", "files"] as const;
+export const NOTIFY_SECTIONS = [
+  "project",
+  "updates",
+  "reports",
+  "files",
+  "invoices",
+] as const;
 export type NotifySection = (typeof NOTIFY_SECTIONS)[number];
 
 export const SECTION_HREF: Record<NotifySection, string> = {
@@ -60,6 +66,7 @@ export const SECTION_HREF: Record<NotifySection, string> = {
   updates: "/dashboard/updates",
   reports: "/dashboard/reports",
   files: "/dashboard/files",
+  invoices: "/dashboard/invoices",
 };
 
 export type ClientNotifications = Record<NotifySection, boolean>;
@@ -78,7 +85,7 @@ export async function getClientNotifications(
 ): Promise<ClientNotifications> {
   const supabase = await createClient();
 
-  const [stages, updates, reports, files, views] = await Promise.all([
+  const [stages, updates, reports, files, invoices, views] = await Promise.all([
     supabase
       .from("project_stages")
       .select("updated_at")
@@ -103,6 +110,16 @@ export async function getClientNotifications(
       .eq("client_id", clientId)
       .order("created_at", { ascending: false })
       .limit(20),
+    // Latest client-visible invoice: `issued_at` is stamped when an invoice is
+    // sent (drafts are excluded here AND by the client RLS policy).
+    supabase
+      .from("client_invoices")
+      .select("issued_at")
+      .eq("client_id", clientId)
+      .neq("status", "draft")
+      .not("issued_at", "is", null)
+      .order("issued_at", { ascending: false })
+      .limit(1),
     supabase
       .from("client_section_views")
       .select("section, last_viewed_at")
@@ -129,6 +146,7 @@ export async function getClientNotifications(
     updates: isUnread("updates", updates.data?.[0]?.published_at),
     reports: isUnread("reports", reports.data?.[0]?.created_at),
     files: isUnread("files", latestForeignFile?.created_at),
+    invoices: isUnread("invoices", invoices.data?.[0]?.issued_at),
   };
 }
 

@@ -11,7 +11,8 @@ export const metadata: Metadata = { title: "Updates" };
 
 export default async function UpdatesPage() {
   const profile = await requireClient();
-  const updates = await getUpdates(profile.client_id);
+  // Cap the feed so a long-lived account never renders an unbounded timeline.
+  const updates = await getUpdates(profile.client_id, 50);
   const reactions = await getUpdateReactions(
     updates.map((u) => u.id),
     profile.id

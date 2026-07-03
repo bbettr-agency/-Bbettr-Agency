@@ -440,6 +440,8 @@ export interface BillingInvoice extends ClientInvoice {
 
 export interface BillingPayment extends ClientPayment {
   invoiceNumber: string | null;
+  /** Currency of the linked invoice (payments store no currency of their own). */
+  invoiceCurrency: string | null;
 }
 
 export type BillingRetainer = ClientRetainer;
@@ -449,8 +451,12 @@ export interface ClientBilling {
   payments: BillingPayment[];
   retainers: BillingRetainer[];
   kpis: {
-    outstandingTotal: number;
-    paidLifetime: number;
+    /**
+     * Money totals are kept PER CURRENCY (e.g. { ZAR: 12000, USD: 500 }) —
+     * ZAR and USD amounts are never summed into one misleading number.
+     */
+    outstandingByCurrency: Record<string, number>;
+    paidByCurrency: Record<string, number>;
     overdueCount: number;
     activeRetainers: number;
   };
@@ -530,15 +536,28 @@ export async function getClientBilling(clientId: string): Promise<ClientBilling>
   });
 
   const numberById = new Map(invoiceList.map((i) => [i.id, i.invoice_number]));
+  const currencyById = new Map(invoiceList.map((i) => [i.id, i.currency]));
   const payments: BillingPayment[] = paymentList.map((p) => ({
     ...p,
     invoiceNumber: p.invoice_id ? numberById.get(p.invoice_id) ?? null : null,
+    invoiceCurrency: p.invoice_id ? currencyById.get(p.invoice_id) ?? null : null,
   }));
 
-  const outstandingTotal = invoices
-    .filter((i) => i.status === "sent")
-    .reduce((sum, i) => sum + i.balance, 0);
-  const paidLifetime = paymentList.reduce((sum, p) => sum + Number(p.amount), 0);
+  // Money KPIs are grouped per currency — never a mixed ZAR+USD sum. Payments
+  // inherit their linked invoice's currency; unlinked payments default to ZAR
+  // (the historic behaviour — payments store no currency of their own).
+  const addTo = (acc: Record<string, number>, currency: string, amount: number) => {
+    acc[currency] = (acc[currency] ?? 0) + amount;
+  };
+  const outstandingByCurrency: Record<string, number> = {};
+  for (const i of invoices) {
+    if (i.status === "sent") addTo(outstandingByCurrency, i.currency, i.balance);
+  }
+  const paidByCurrency: Record<string, number> = {};
+  for (const p of payments) {
+    addTo(paidByCurrency, p.invoiceCurrency ?? "ZAR", Number(p.amount));
+  }
+
   const overdueCount = invoices.filter((i) => i.derivedStatus === "overdue").length;
   const activeRetainers = retainerList.filter((r) => r.active).length;
 
@@ -546,7 +565,7 @@ export async function getClientBilling(clientId: string): Promise<ClientBilling>
     invoices,
     payments,
     retainers: retainerList,
-    kpis: { outstandingTotal, paidLifetime, overdueCount, activeRetainers },
+    kpis: { outstandingByCurrency, paidByCurrency, overdueCount, activeRetainers },
   };
 }
 

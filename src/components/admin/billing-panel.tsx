@@ -68,6 +68,18 @@ function fromDateInput(v: string): string | null {
   return v ? new Date(v + "T00:00:00").toISOString() : null;
 }
 
+/**
+ * One formatted line per currency (ZAR first), e.g. ["R 12 000", "$500"].
+ * An empty record renders as a single zero in ZAR.
+ */
+function currencyLines(byCurrency: Record<string, number>): string[] {
+  const entries = Object.entries(byCurrency).sort(([a], [b]) =>
+    a === "ZAR" ? -1 : b === "ZAR" ? 1 : a.localeCompare(b)
+  );
+  if (entries.length === 0) return [formatCurrency(0)];
+  return entries.map(([currency, amount]) => formatCurrency(amount, currency));
+}
+
 export function BillingPanel({
   clientId,
   billing,
@@ -129,18 +141,18 @@ export function BillingPanel({
         </p>
       )}
 
-      {/* KPI cards */}
+      {/* KPI cards — money totals are shown per currency, never mixed. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi
           icon={Wallet}
           label="Outstanding"
-          value={formatCurrency(kpis.outstandingTotal)}
+          value={currencyLines(kpis.outstandingByCurrency)}
           tone="amber"
         />
         <Kpi
           icon={Banknote}
           label="Paid (lifetime)"
-          value={formatCurrency(kpis.paidLifetime)}
+          value={currencyLines(kpis.paidByCurrency)}
           tone="emerald"
         />
         <Kpi
@@ -317,7 +329,7 @@ export function BillingPanel({
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-ink-900">
-                    {formatCurrency(p.amount)}{" "}
+                    {formatCurrency(p.amount, p.invoiceCurrency ?? "ZAR")}{" "}
                     <span className="font-normal capitalize text-ink-400">
                       · {p.method}
                     </span>
@@ -436,7 +448,8 @@ function Kpi({
 }: {
   icon: typeof Wallet;
   label: string;
-  value: string;
+  /** A single value, or one line per currency (first line rendered largest). */
+  value: string | string[];
   tone: "amber" | "emerald" | "red" | "ink";
 }) {
   const toneClass = {
@@ -445,13 +458,19 @@ function Kpi({
     red: "text-red-600",
     ink: "text-ink-500",
   }[tone];
+  const [first, ...rest] = Array.isArray(value) ? value : [value];
   return (
     <div className="rounded-xl border border-ink-100 p-3">
       <div className={`flex items-center gap-1.5 ${toneClass}`}>
         <Icon className="h-3.5 w-3.5" />
         <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
       </div>
-      <p className="mt-1 text-lg font-semibold text-ink-900">{value}</p>
+      <p className="mt-1 text-lg font-semibold text-ink-900">{first}</p>
+      {rest.map((line) => (
+        <p key={line} className="text-sm font-semibold text-ink-700">
+          {line}
+        </p>
+      ))}
     </div>
   );
 }
@@ -695,7 +714,7 @@ function PaymentModal({
     >
       <div className="space-y-4 p-6">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Amount (ZAR)">
+          <Field label={`Amount (${invoice?.currency ?? "ZAR"})`}>
             <Input
               type="number"
               min="0"

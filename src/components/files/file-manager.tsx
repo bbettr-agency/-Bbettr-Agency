@@ -243,7 +243,8 @@ export function FileManager({
                             )}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        {/* Always visible on touch devices; hover/focus reveal on desktop only. */}
+                        <div className="flex items-center gap-1 transition-opacity lg:opacity-0 lg:focus-within:opacity-100 lg:group-hover:opacity-100">
                           <button
                             onClick={() => open(file)}
                             className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"

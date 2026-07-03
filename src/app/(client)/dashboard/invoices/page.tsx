@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Receipt } from "lucide-react";
+import { SeenMarker } from "@/components/shared/seen-marker";
 import { requireClient } from "@/lib/auth";
 import { getClientInvoices } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,6 +15,7 @@ export default async function InvoicesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <SeenMarker section="invoices" />
       <PageHeader
         title="Invoices"
         description="View and download your invoices from Bbettr Agency."
