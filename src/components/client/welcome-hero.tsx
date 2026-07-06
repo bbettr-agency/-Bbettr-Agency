@@ -1,6 +1,25 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
+
+/**
+ * Time-of-day greeting in the CLIENT's local timezone. Renders a stable
+ * fallback on the server, then upgrades after mount — no hydration mismatch,
+ * and no server-timezone guessing.
+ */
+function useGreeting(): string {
+  const [greeting, setGreeting] = useState("Welcome back");
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(
+      h < 5 ? "Welcome back" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"
+    );
+  }, []);
+  return greeting;
+}
 
 /**
  * Premium welcome hero for the client dashboard: a warm greeting plus the three
@@ -18,6 +37,7 @@ export function WelcomeHero({
   currentStage: string | null;
   estimatedLaunchDate: string | null;
 }) {
+  const greeting = useGreeting();
   const pct = Math.max(0, Math.min(100, completion));
   const subtitle =
     pct >= 100
@@ -42,7 +62,7 @@ export function WelcomeHero({
         <div className="flex items-center gap-2 text-brand-300">
           <Sparkles className="h-4 w-4" />
           <span className="text-xs font-semibold uppercase tracking-wider">
-            Welcome back
+            {greeting}
           </span>
         </div>
         <h1 className="mt-2 font-display text-2xl font-bold sm:text-3xl">

@@ -223,9 +223,18 @@ export default async function DashboardPage() {
               </Link>
             ))
           ) : (
-            <p className="py-8 text-center text-sm text-ink-400 sm:col-span-2 lg:col-span-3">
-              No updates yet. Check back soon.
-            </p>
+            <div className="flex flex-col items-center gap-2 py-8 text-center sm:col-span-2 lg:col-span-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-500">
+                <Megaphone className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-semibold text-ink-900">
+                Your project feed starts soon
+              </p>
+              <p className="max-w-sm text-xs text-ink-400">
+                We post here as work happens — you&apos;ll see a dot in the
+                sidebar whenever something new lands.
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
