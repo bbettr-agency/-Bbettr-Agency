@@ -1,8 +1,16 @@
 "use client";
 
 import { format } from "date-fns";
+import Link from "next/link";
 import { Mail, Phone, User, FileText } from "lucide-react";
-import { Tabs } from "@/components/ui/tabs";
+import { Avatar } from "@/components/ui/avatar";
+import { ClientStatusBadge } from "@/components/ui/status-badge";
+import {
+  WorkspaceRail,
+  WorkspacePills,
+  useWorkspaceSection,
+  type SectionCounts,
+} from "@/components/admin/client-workspace-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -110,22 +118,78 @@ export function ClientDetail({
           ? "not_sent"
           : "none";
 
-  const tabs = [
-    { id: "overview", label: "Overview" },
-    { id: "intake", label: "Intake" },
-    { id: "onboarding", label: "Onboarding", count: onboarding.length },
-    { id: "progress", label: "Progress", count: stages.length },
-    { id: "contracts", label: "Contracts", count: contracts.length },
-    { id: "updates", label: "Updates", count: updates.length },
-    { id: "reports", label: "Reports", count: reports.length },
-    { id: "files", label: "Files", count: files.length },
-    { id: "billing", label: "Billing", count: billing.invoices.length },
-  ];
+  // Active section lives in ?section= (shallow pushState — instant switching,
+  // deep-linkable, reload-safe, back/forward walks section history).
+  const [active, navigate] = useWorkspaceSection();
+
+  const counts: SectionCounts = {
+    onboarding: onboarding.length,
+    progress: stages.length,
+    contracts: contracts.length,
+    updates: updates.length,
+    reports: reports.length,
+    files: files.length,
+    billing: billing.invoices.length,
+  };
 
   return (
-    <Tabs items={tabs}>
-      {(active) => (
-        <>
+    <div>
+      {/* Sticky client header — breadcrumb-shaped, always visible while
+          scrolling. Below xl the section pills stick to it as one unit. */}
+      <div className="sticky top-16 z-10 -mx-4 border-b border-ink-100 bg-white/90 px-4 backdrop-blur-lg sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
+        <div className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 py-2">
+          <Link
+            href="/admin/clients"
+            className="text-sm font-medium text-ink-400 transition-colors hover:text-ink-800"
+          >
+            Clients
+          </Link>
+          <span className="text-ink-300">/</span>
+          <span className="flex min-w-0 items-center gap-2.5">
+            <Avatar name={client.name} size="sm" />
+            <span className="truncate font-display text-base font-bold text-ink-900">
+              {client.name}
+            </span>
+          </span>
+          <ClientStatusBadge status={client.status} />
+          <span className="hidden flex-wrap items-center gap-1 md:flex">
+            {services.map((s) => (
+              <span
+                key={s.id}
+                className="rounded-md bg-ink-100 px-1.5 py-0.5 text-[11px] font-medium text-ink-600"
+              >
+                {getService(s.service).name}
+              </span>
+            ))}
+          </span>
+          <span className="ml-auto hidden items-center gap-1.5 text-xs font-medium sm:flex">
+            <span
+              className={
+                portalAccess.hasLogin
+                  ? "h-2 w-2 rounded-full bg-emerald-500"
+                  : "h-2 w-2 rounded-full bg-ink-300"
+              }
+              aria-hidden
+            />
+            <span className={portalAccess.hasLogin ? "text-emerald-700" : "text-ink-400"}>
+              {portalAccess.hasLogin ? "Portal active" : "No portal access"}
+            </span>
+          </span>
+        </div>
+        {/* Section pills — below xl only */}
+        <div className="xl:hidden">
+          <WorkspacePills active={active} counts={counts} onNavigate={navigate} />
+        </div>
+      </div>
+
+      {/* Workspace: grouped rail (xl+) + section content */}
+      <div className="pt-6 xl:grid xl:grid-cols-[13rem_minmax(0,1fr)] xl:gap-8">
+        <aside className="hidden xl:block">
+          <div className="sticky top-36">
+            <WorkspaceRail active={active} counts={counts} onNavigate={navigate} />
+          </div>
+        </aside>
+        <div className="min-w-0">
           {active === "overview" && (
             <div className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
@@ -349,9 +413,9 @@ export function ClientDetail({
               </CardContent>
             </Card>
           )}
-        </>
-      )}
-    </Tabs>
+        </div>
+      </div>
+    </div>
   );
 }
 
