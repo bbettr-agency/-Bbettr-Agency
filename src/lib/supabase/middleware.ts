@@ -1,6 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
+
+/** Hard cap on the Edge auth call so a slow auth server can't 504 the site. */
+const AUTH_TIMEOUT_MS = 2500;
+
+/**
+ * Resolve `promise`, or reject after `ms`. The timer is always cleared, so a
+ * fast result never leaves a dangling rejection.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("auth-timeout")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 const PUBLIC_ROUTES = [
   "/login",
@@ -43,24 +59,40 @@ export async function updateSession(request: NextRequest) {
   );
 
   // IMPORTANT: do not run code between createServerClient and getUser().
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  //
+  // Refresh the session, but NEVER let a slow/unreachable auth server hang the
+  // Edge middleware — a hang here 504s the ENTIRE site (every route runs through
+  // middleware first). If the auth check can't resolve in time we treat the auth
+  // state as "unknown" and skip the middleware redirects: the request still
+  // renders, and each route group's server layout (requireClient / requireAdmin
+  // / requireRep) independently enforces auth, so protected content is never
+  // exposed. The site degrades gracefully instead of going fully dark.
+  let user: User | null = null;
+  let authKnown = true;
+  try {
+    const { data } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS);
+    user = data.user;
+  } catch {
+    authKnown = false;
+  }
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("redirectedFrom", pathname);
-    return NextResponse.redirect(url);
-  }
+  // Only apply redirects when the auth state is actually known.
+  if (authKnown) {
+    if (!user && !isPublic) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("redirectedFrom", pathname);
+      return NextResponse.redirect(url);
+    }
 
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+    if (user && pathname === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;
