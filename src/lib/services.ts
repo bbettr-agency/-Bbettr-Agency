@@ -11,6 +11,7 @@ export type FieldType =
   | "number"
   | "color"
   | "select" // single choice (dropdown)
+  | "choice-cards" // single choice, rendered as cards with optional descriptions
   | "boolean" // Yes/No toggle
   | "multitext" // repeatable list of strings (e.g. competitors)
   | "checkbox-group" // pick many from options
@@ -38,6 +39,8 @@ export interface OnboardingField {
   help?: string;
   required?: boolean;
   options?: string[];
+  /** Plain-language sub-text per option, for `choice-cards` (value → description). */
+  optionDescriptions?: Record<string, string>;
   accept?: string; // for file fields
   /** Sub-fields for a `group-list` entry. */
   subFields?: OnboardingField[];
@@ -327,13 +330,13 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
       // Lead-specific questions later appear only for the "Leads & Enquiries"
       // objective, so an awareness campaign never gets a lead-gen interrogation.
       {
-        title: "Campaign Objective",
-        description: "What do you mainly want these ads to achieve?",
+        title: "Your Goal & Budget",
+        description: "What do you mainly want these ads to do for your business?",
         fields: [
           {
             name: "campaign_objective",
-            label: "Primary Objective",
-            type: "select",
+            label: "What's your main goal for these ads?",
+            type: "choice-cards",
             required: true,
             options: [
               "Brand Awareness & Reach",
@@ -344,15 +347,29 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
               "Sales / Purchases",
               "App Installs",
             ],
-            help: "Meta can do far more than leads — pick the goal that matters most for this campaign.",
+            optionDescriptions: {
+              "Brand Awareness & Reach": "Get your business in front of more people.",
+              "Engagement & Followers": "More likes, comments, shares and followers.",
+              "Video Views": "Get more people watching your videos.",
+              "Website Traffic": "Send more people to your website.",
+              "Leads & Enquiries": "Generate enquiries through forms, calls or messages.",
+              "Sales / Purchases": "Drive purchases through your online store.",
+              "App Installs": "Get more people to install your app.",
+            },
           },
           {
             name: "objective_detail",
-            label: "What would make this campaign a success?",
+            label: "Anything else you'd like these ads to achieve?",
             type: "textarea",
-            placeholder: "e.g. more brand awareness in Cape Town, 50 leads a month, more Reel views…",
+            placeholder: "Optional — e.g. grow awareness in Cape Town, book more appointments…",
           },
-          { name: "budget", label: "Monthly Ad Budget", type: "number", required: true },
+          { name: "budget", label: "Ad Budget", type: "number", required: true, placeholder: "e.g. 5000" },
+          {
+            name: "campaign_duration",
+            label: "Is this a once-off or ongoing campaign?",
+            type: "select",
+            options: ["Once-off campaign", "Ongoing monthly campaign"],
+          },
         ],
       },
       {
@@ -396,19 +413,26 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
             type: "boolean",
             help: "An email/phone list lets us target people similar to your best customers.",
           },
+          {
+            name: "audience_exclusions",
+            label: "Are there any audiences you do NOT want to target?",
+            type: "textarea",
+            placeholder: "Optional — e.g. existing customers, under-18s, certain areas…",
+          },
         ],
       },
       {
         title: "Creative",
         description: "Creative is the single biggest driver of results on Meta.",
         fields: [
-          { name: "creative_uploads", label: "Photos & Video", type: "file", accept: "image/*,video/*", help: "Anything we can use — product shots, behind-the-scenes, clips, testimonials." },
           {
-            name: "has_video",
-            label: "Do you have video content we can use?",
-            type: "boolean",
-            help: "Short video and Reels typically outperform static images on Meta.",
+            name: "existing_content",
+            label: "Do you already have content we can use?",
+            type: "checkbox-group",
+            options: ["Professional photos", "Videos", "Brand assets", "We need Bbettr to create content"],
+            help: "Tick anything you have. Video and Reels typically perform best on Meta.",
           },
+          { name: "creative_uploads", label: "Upload photos & video", type: "file", accept: "image/*,video/*", help: "Anything we can use — product shots, behind-the-scenes, clips, testimonials." },
           {
             name: "preferred_creative_type",
             label: "Preferred creative styles",
@@ -439,7 +463,22 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
         description: "How enquiries reach you and get followed up.",
         visibleWhen: { field: "campaign_objective", equals: "Leads & Enquiries" },
         fields: [
-          { name: "lead_destination", label: "Where should leads go?", type: "select", options: LEAD_DESTINATION_OPTIONS },
+          {
+            name: "lead_contact_channels",
+            label: "Where would you like customers to contact you?",
+            type: "checkbox-group",
+            options: [
+              "WhatsApp",
+              "Facebook Messenger",
+              "Instagram DM",
+              "Instant Lead Form",
+              "Website Form",
+              "Phone Call",
+              "Email",
+              "Other",
+            ],
+            help: "This shapes how we build your campaigns — pick any that suit you.",
+          },
           { name: "responsible_contact_person", label: "Who handles new leads?", type: "text" },
           { name: "average_response_time", label: "How quickly can you respond?", type: "select", options: RESPONSE_TIME_OPTIONS, help: "Fast responses win far more business on Meta." },
           { name: "crm_in_use", label: "Do you use a CRM?", type: "boolean" },
@@ -448,14 +487,20 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
       },
       {
         title: "Tracking",
-        description: "So we can measure what's working. We'll help set anything up that's missing.",
+        description: "So we can measure what's working. We'll happily set up anything that's missing.",
         fields: [
-          { name: "conversion_tracking_installed", label: "Is conversion tracking set up on your site?", type: "boolean" },
+          {
+            name: "tracking_installed",
+            label: "Do you already have tracking installed on your website?",
+            type: "select",
+            options: ["Yes", "No", "Not sure"],
+            help: "Tracking is code on your site (like the Meta Pixel) that measures results. Not sure? No problem — we'll check.",
+          },
           {
             name: "key_conversion_action",
-            label: "What action counts as a win?",
+            label: "What would you count as a win?",
             type: "text",
-            placeholder: "e.g. purchase, form submit, WhatsApp click, booking",
+            placeholder: "e.g. a purchase, an enquiry, a WhatsApp message, a booking",
           },
         ],
       },

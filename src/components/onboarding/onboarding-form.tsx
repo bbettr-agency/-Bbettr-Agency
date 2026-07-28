@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, FieldHelp } from "@/components/ui/input";
+import { ChoiceCards } from "@/components/ui/choice-cards";
 import { FileDropzone } from "@/components/shared/file-dropzone";
 import { saveOnboarding, type OnboardingState } from "@/app/(client)/dashboard/onboarding/actions";
 import {
@@ -73,6 +74,7 @@ interface OnboardingFormProps {
 const FULL_WIDTH_TYPES = new Set([
   "textarea",
   "checkbox-group",
+  "choice-cards",
   "file",
   "multitext",
   "group-list",
@@ -894,6 +896,25 @@ function FieldRenderer({
         ) : (
           field.help && <FieldHelp>{field.help}</FieldHelp>
         )}
+      </div>
+    );
+  }
+
+  if (field.type === "choice-cards") {
+    return (
+      <div>
+        <FieldLabel field={field} />
+        <ChoiceCards
+          ariaLabel={field.label}
+          options={(field.options ?? []).map((opt) => ({
+            value: opt,
+            description: field.optionDescriptions?.[opt],
+          }))}
+          value={(value as string) ?? null}
+          onChange={(v) => onChange(v)}
+          disabled={readOnly}
+        />
+        {field.help && <FieldHelp>{field.help}</FieldHelp>}
       </div>
     );
   }
