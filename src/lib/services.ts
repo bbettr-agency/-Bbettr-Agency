@@ -322,12 +322,47 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
     icon: Megaphone,
     accent: "from-indigo-500 to-purple-600",
     sections: [
+      // Objective FIRST — Meta is demand generation. Not every campaign is about
+      // leads; it can be awareness, engagement, video views, traffic or sales.
+      // Lead-specific questions later appear only for the "Leads & Enquiries"
+      // objective, so an awareness campaign never gets a lead-gen interrogation.
       {
-        title: "Business Information",
+        title: "Campaign Objective",
+        description: "What do you mainly want these ads to achieve?",
+        fields: [
+          {
+            name: "campaign_objective",
+            label: "Primary Objective",
+            type: "select",
+            required: true,
+            options: [
+              "Brand Awareness & Reach",
+              "Engagement & Followers",
+              "Video Views",
+              "Website Traffic",
+              "Leads & Enquiries",
+              "Sales / Purchases",
+              "App Installs",
+            ],
+            help: "Meta can do far more than leads — pick the goal that matters most for this campaign.",
+          },
+          {
+            name: "objective_detail",
+            label: "What would make this campaign a success?",
+            type: "textarea",
+            placeholder: "e.g. more brand awareness in Cape Town, 50 leads a month, more Reel views…",
+          },
+          { name: "budget", label: "Monthly Ad Budget", type: "number", required: true },
+        ],
+      },
+      {
+        title: "Business & Offer",
         fields: [
           { name: "business_description", label: "Business Description", type: "textarea", required: true },
-          { name: "unique_selling_points", label: "Unique Selling Points", type: "textarea" },
-          { name: "website_url", label: "Website URL", type: "url" },
+          { name: "unique_selling_points", label: "What makes you different?", type: "textarea" },
+          { name: "product_service_to_advertise", label: "What are we promoting?", type: "textarea", required: true },
+          { name: "offer_description", label: "Any specific offer, promotion or hook?", type: "textarea" },
+          { name: "website_url", label: "Website / Landing Page URL", type: "url" },
         ],
       },
       {
@@ -336,104 +371,101 @@ export const SERVICES: Record<ServiceType, ServiceDefinition> = {
           { name: "facebook_page", label: "Facebook Page", type: "url" },
           { name: "instagram_account", label: "Instagram Account", type: "text" },
           { name: "meta_business_manager", label: "Meta Business Manager Access", type: "text", help: "Business Manager ID or the email to add us to." },
-          { name: "meta_business_manager_id", label: "Meta Business Manager ID", type: "text" },
           { name: "ad_account_id", label: "Ad Account ID", type: "text" },
-          { name: "pixel_id", label: "Pixel / Dataset ID", type: "text" },
-          { name: "pixel_installed", label: "Pixel Installed?", type: "boolean" },
+          { name: "pixel_id", label: "Meta Pixel / Dataset ID", type: "text" },
+          { name: "pixel_installed", label: "Is the Meta Pixel installed on your site?", type: "boolean" },
         ],
       },
       {
-        title: "Offer & Services",
+        title: "Audience",
+        description: "Who should see these ads? Meta is brilliant at reaching the right people.",
         fields: [
-          { name: "product_service_to_advertise", label: "Product/Service To Advertise", type: "textarea", required: true },
-          { name: "offer_description", label: "Offer Description", type: "textarea" },
-          { name: "current_promotions", label: "Current Promotions", type: "textarea" },
-          { name: "pricing_information", label: "Pricing Information", type: "textarea" },
-          { name: "guarantees", label: "Guarantees", type: "textarea" },
-        ],
-      },
-      {
-        title: "Target Audience",
-        fields: [
-          { name: "ideal_customer_description", label: "Ideal Customer Description", type: "textarea", required: true },
+          { name: "ideal_customer_description", label: "Describe your ideal customer", type: "textarea", required: true },
           { name: "age_range", label: "Age Range", type: "select", options: AGE_RANGE_OPTIONS },
           { name: "gender", label: "Gender", type: "select", options: GENDER_OPTIONS },
           { name: "target_locations", label: "Target Locations", type: "multitext" },
-          { name: "customer_types", label: "Customer Types / Industries", type: "multitext" },
+          {
+            name: "interests_behaviours",
+            label: "Interests, behaviours or passions",
+            type: "multitext",
+            help: "Things your audience is into — e.g. fitness, home décor, small business owners.",
+          },
+          {
+            name: "customer_list_available",
+            label: "Do you have a customer list for lookalike audiences?",
+            type: "boolean",
+            help: "An email/phone list lets us target people similar to your best customers.",
+          },
         ],
       },
       {
-        title: "Lead Handling",
+        title: "Creative",
+        description: "Creative is the single biggest driver of results on Meta.",
         fields: [
-          { name: "lead_destination", label: "Lead Destination", type: "select", required: true, options: LEAD_DESTINATION_OPTIONS },
-          { name: "responsible_contact_person", label: "Responsible Contact Person", type: "text", required: true },
-          { name: "best_contact_number", label: "Best Contact Number", type: "tel" },
-          { name: "best_contact_email", label: "Best Contact Email", type: "email" },
-          { name: "average_response_time", label: "Average Response Time", type: "select", options: RESPONSE_TIME_OPTIONS },
-        ],
-      },
-      {
-        title: "Sales Process",
-        fields: [
-          { name: "after_lead_process", label: "What Happens After A Lead Is Generated?", type: "textarea" },
-          { name: "sales_team_exists", label: "Sales Team Exists?", type: "boolean" },
-          { name: "crm_in_use", label: "CRM In Use?", type: "boolean" },
-          { name: "crm_name", label: "CRM Name", type: "text", visibleWhen: { field: "crm_in_use", equals: "Yes" } },
-        ],
-      },
-      {
-        title: "Competitors",
-        fields: [
-          { name: "competitor_websites", label: "Competitor Websites", type: "multitext" },
-          { name: "competitor_facebook_pages", label: "Competitor Facebook Pages", type: "multitext" },
-          { name: "competitor_instagram_pages", label: "Competitor Instagram Pages", type: "multitext" },
-        ],
-      },
-      {
-        title: "Creative Assets",
-        fields: [
-          { name: "creative_uploads", label: "Creative Uploads", type: "file", accept: "image/*,video/*", help: "Photos or video clips we can use for ads." },
+          { name: "creative_uploads", label: "Photos & Video", type: "file", accept: "image/*,video/*", help: "Anything we can use — product shots, behind-the-scenes, clips, testimonials." },
+          {
+            name: "has_video",
+            label: "Do you have video content we can use?",
+            type: "boolean",
+            help: "Short video and Reels typically outperform static images on Meta.",
+          },
           {
             name: "preferred_creative_type",
-            label: "Preferred Creative Type",
+            label: "Preferred creative styles",
             type: "checkbox-group",
-            options: ["Images", "Videos", "Testimonials", "Before & After", "Educational", "Promotional"],
+            options: ["Images", "Video / Reels", "Carousel", "Testimonials", "User-generated (UGC)", "Before & After", "Educational", "Promotional"],
           },
-          { name: "ads_you_like", label: "Ads You Like (URLs)", type: "multitext" },
+          {
+            name: "brand_tone",
+            label: "How should your brand sound & feel?",
+            type: "checkbox-group",
+            options: ["Friendly", "Professional", "Bold", "Fun", "Premium", "Inspirational", "Educational"],
+          },
+          { name: "posts_organically", label: "Do you already post on Facebook / Instagram?", type: "boolean" },
+          { name: "ads_you_like", label: "Ads or brands whose style you like (links)", type: "multitext" },
           { name: "brand_guidelines", label: "Brand Guidelines Upload", type: "file", accept: "image/*,.pdf,.zip" },
         ],
       },
       {
-        title: "Campaign Goals",
+        title: "Competitors & Inspiration",
         fields: [
+          { name: "competitor_facebook_pages", label: "Competitor Facebook Pages", type: "multitext" },
+          { name: "competitor_instagram_pages", label: "Competitor Instagram Accounts", type: "multitext" },
+        ],
+      },
+      // Lead handling — only relevant when the objective is leads/enquiries.
+      {
+        title: "Lead Handling",
+        description: "How enquiries reach you and get followed up.",
+        visibleWhen: { field: "campaign_objective", equals: "Leads & Enquiries" },
+        fields: [
+          { name: "lead_destination", label: "Where should leads go?", type: "select", options: LEAD_DESTINATION_OPTIONS },
+          { name: "responsible_contact_person", label: "Who handles new leads?", type: "text" },
+          { name: "average_response_time", label: "How quickly can you respond?", type: "select", options: RESPONSE_TIME_OPTIONS, help: "Fast responses win far more business on Meta." },
+          { name: "crm_in_use", label: "Do you use a CRM?", type: "boolean" },
+          { name: "crm_name", label: "CRM Name", type: "text", visibleWhen: { field: "crm_in_use", equals: "Yes" } },
+        ],
+      },
+      {
+        title: "Tracking",
+        description: "So we can measure what's working. We'll help set anything up that's missing.",
+        fields: [
+          { name: "conversion_tracking_installed", label: "Is conversion tracking set up on your site?", type: "boolean" },
           {
-            name: "primary_campaign_goal",
-            label: "Primary Campaign Goal",
-            type: "select",
-            required: true,
-            options: ["Generate Leads", "WhatsApp Messages", "Phone Calls", "Website Enquiries", "Bookings", "Online Sales"],
+            name: "key_conversion_action",
+            label: "What action counts as a win?",
+            type: "text",
+            placeholder: "e.g. purchase, form submit, WhatsApp click, booking",
           },
-          { name: "budget", label: "Monthly Budget", type: "number", required: true },
-          { name: "existing_campaigns", label: "Existing Campaigns", type: "textarea", placeholder: "Describe any campaigns currently running or paused." },
         ],
       },
       {
-        title: "Tracking & Reporting",
+        title: "Previous Meta Ads",
         fields: [
-          { name: "ga_installed", label: "Google Analytics Installed?", type: "boolean" },
-          { name: "gtm_installed", label: "Google Tag Manager Installed?", type: "boolean" },
-          { name: "conversion_tracking_installed", label: "Conversion Tracking Installed?", type: "boolean" },
-        ],
-      },
-      {
-        title: "Previous Campaign Performance",
-        fields: [
-          { name: "ran_meta_ads", label: "Run Meta Ads Before?", type: "boolean" },
-          { name: "previous_avg_spend", label: "Average Monthly Spend", type: "number", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
-          { name: "best_campaign", label: "Best Performing Campaign", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
-          { name: "worst_campaign", label: "Worst Performing Campaign", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
-          { name: "what_worked", label: "What Worked?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
-          { name: "what_didnt_work", label: "What Did Not Work?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "ran_meta_ads", label: "Have you run Meta ads before?", type: "boolean" },
+          { name: "previous_avg_spend", label: "Roughly how much per month?", type: "number", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "what_worked", label: "What worked well?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
+          { name: "what_didnt_work", label: "What didn't work?", type: "textarea", visibleWhen: { field: "ran_meta_ads", equals: "Yes" } },
         ],
       },
       REVIEW_SECTION,
