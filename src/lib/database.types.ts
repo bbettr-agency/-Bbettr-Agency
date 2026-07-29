@@ -77,6 +77,10 @@ export type OnboardingType = "legacy" | "new";
 export type InvoiceStatus = "draft" | "sent" | "paid" | "void";
 export type InvoiceKind = "one_off" | "retainer" | "custom";
 export type InvoiceSource = "admin" | "rep_deal" | "quickbooks";
+
+// Planner (Bbettr OS — internal, admin-only)
+export type TaskStatus = "todo" | "in_progress" | "completed";
+export type TaskPriority = "normal" | "high" | "urgent";
 export type PaymentMethod = "eft" | "payfast" | "quickbooks" | "cash" | "manual";
 
 export type IntakeStatus =
@@ -889,6 +893,70 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["client_retainers"]["Row"]>;
         Relationships: [];
       };
+      tasks: {
+        Row: {
+          id: string;
+          title: string;
+          notes: string | null;
+          client_or_project: string | null;
+          assignee_id: string;
+          scheduled_date: string | null; // 'YYYY-MM-DD' or null (Inbox)
+          status: TaskStatus;
+          priority: TaskPriority;
+          estimated_minutes: number | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+          completed_by: string | null;
+          completed_at: string | null;
+          deleted_at: string | null;
+        };
+        Insert: {
+          // Audit fields (created_by/at, completed_*) are server-stamped by a
+          // trigger — never send them from app code.
+          title: string;
+          notes?: string | null;
+          client_or_project?: string | null;
+          assignee_id: string;
+          scheduled_date?: string | null;
+          status?: TaskStatus;
+          priority?: TaskPriority;
+          estimated_minutes?: number | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["tasks"]["Row"]>;
+        Relationships: [];
+      };
+      calendar_credentials: {
+        Row: {
+          id: number;
+          provider: string;
+          google_account_email: string | null;
+          google_calendar_id: string | null;
+          scopes: string | null;
+          status: "connected" | "reconnect_required" | "disconnected";
+          refresh_token_enc: string | null;
+          connected_by: string | null;
+          connected_at: string | null;
+          updated_at: string;
+          disconnected_by: string | null;
+          disconnected_at: string | null;
+        };
+        Insert: {
+          id?: number;
+          provider?: string;
+          google_account_email?: string | null;
+          google_calendar_id?: string | null;
+          scopes?: string | null;
+          status?: "connected" | "reconnect_required" | "disconnected";
+          refresh_token_enc?: string | null;
+          connected_by?: string | null;
+          connected_at?: string | null;
+          disconnected_by?: string | null;
+          disconnected_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["calendar_credentials"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -940,3 +1008,5 @@ export type Contract = Database["public"]["Tables"]["contracts"]["Row"];
 export type ClientInvoice = Database["public"]["Tables"]["client_invoices"]["Row"];
 export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
 export type ClientRetainer = Database["public"]["Tables"]["client_retainers"]["Row"];
+export type Task = Database["public"]["Tables"]["tasks"]["Row"];
+export type CalendarCredential = Database["public"]["Tables"]["calendar_credentials"]["Row"];
