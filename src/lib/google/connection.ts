@@ -16,6 +16,7 @@ import {
   GOOGLE_TOKEN_URL,
   type GoogleConfig,
 } from "./config";
+import { verifyConsentAccount } from "./account";
 
 /**
  * Google OAuth connection lifecycle for the single shared agency calendar.
@@ -39,20 +40,6 @@ interface GoogleTokenResponse {
   refresh_token?: string;
   /** Present because we request openid+email; carries the consenting account. */
   id_token?: string;
-}
-
-/** Decode the email claim from a Google id_token (JWT). Null if unavailable. */
-function emailFromIdToken(idToken: string | undefined): string | null {
-  if (!idToken) return null;
-  try {
-    const payload = idToken.split(".")[1];
-    if (!payload) return null;
-    const json = Buffer.from(payload, "base64url").toString("utf8");
-    const claims = JSON.parse(json) as { email?: string };
-    return claims.email ? claims.email.toLowerCase() : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -199,22 +186,9 @@ export async function exchangeAndStore(
   );
 
   // Refuse any account other than the configured shared calendar account.
-  const email = emailFromIdToken(tokens.id_token);
-  const expected = cfg.calendarId.toLowerCase();
-  if (email && email !== expected) {
-    logIntegrationEvent("warn", {
-      integration: INTEGRATION,
-      event: "token_exchange",
-      correlationId,
-      outcome: "failure",
-      reason: "wrong_account",
-    });
-    throw new IntegrationAuthError(
-      INTEGRATION,
-      "A different Google account was used than the configured shared calendar.",
-      "wrong_account"
-    );
-  }
+  // Account-identity policy lives entirely in account.ts (throws on mismatch);
+  // returns the verified email to persist, or null if it couldn't be confirmed.
+  const email = verifyConsentAccount(tokens.id_token, cfg);
 
   // We force access_type=offline + prompt=consent, so a refresh token is
   // expected. Without one we cannot operate long-term — treat as a failure.

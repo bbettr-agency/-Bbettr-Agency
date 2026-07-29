@@ -33,6 +33,14 @@ export interface IntegrationCardProps {
   actions?: React.ReactNode;
 }
 
+/**
+ * The provider-agnostic view contract every integration renders through. Each
+ * provider module exposes a builder `(status) => IntegrationCardView | null`
+ * (null hides the card); the Integrations page just renders the list. This is
+ * the shared "provider interface" — no provider-specific logic lives in the page.
+ */
+export type IntegrationCardView = IntegrationCardProps;
+
 export function IntegrationCard({
   title,
   badge,
