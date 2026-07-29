@@ -951,6 +951,7 @@ export interface Database {
           refresh_token_enc?: string | null;
           connected_by?: string | null;
           connected_at?: string | null;
+          updated_at?: string;
           disconnected_by?: string | null;
           disconnected_at?: string | null;
         };
