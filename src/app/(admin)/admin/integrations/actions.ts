@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { disconnectGoogle } from "@/lib/google";
 
 export interface IntegrationsActionResult {
   ok?: boolean;
@@ -29,6 +30,19 @@ export async function disconnectQuickbooksAction(): Promise<IntegrationsActionRe
         "Server is missing its service-role key, so QuickBooks could not be disconnected.",
     };
   }
+  revalidatePath("/admin/integrations");
+  return { ok: true };
+}
+
+/**
+ * Disconnect Google Calendar: forget the stored (encrypted) refresh token and
+ * mark the shared credential disconnected. The admin can reconnect any time.
+ * Best-effort — never throws into the UI.
+ */
+export async function disconnectGoogleAction(): Promise<IntegrationsActionResult> {
+  const profile = await requireAdmin();
+  const res = await disconnectGoogle(profile.id);
+  if (!res.ok) return { error: res.error };
   revalidatePath("/admin/integrations");
   return { ok: true };
 }
