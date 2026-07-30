@@ -9,11 +9,12 @@ import { Logo } from "@/components/brand/logo";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
-  CLIENT_NAV,
-  ADMIN_NAV,
-  REP_NAV,
-  PLANNER_MEETINGS_NAV,
+  adminNavSections,
+  CLIENT_SECTIONS,
+  REP_SECTIONS,
+  EXACT_NAV_HREFS,
   type NavItem,
+  type NavSection,
 } from "@/components/layout/nav";
 
 /**
@@ -32,8 +33,8 @@ interface AppShellProps {
   badges?: NavBadges;
   /**
    * Whether the internal Planner module is enabled (server-resolved
-   * PLANNER_ENABLED, passed as a plain boolean). Injects the admin-only Meetings
-   * nav item. Never grants access on its own — routes/RLS still enforce admin.
+   * PLANNER_ENABLED, passed as a plain boolean). Adds the admin-only Planner
+   * sub-menu. Never grants access on its own — routes/RLS still enforce admin.
    */
   plannerEnabled?: boolean;
   /** Optional top-bar content (e.g. the client notification bell). */
@@ -55,32 +56,27 @@ export function AppShell({
 
   // Select the navigation inside the client bundle. The nav items contain
   // Lucide icon components (functions), which cannot be serialized across the
-  // server→client boundary — so they must NOT be passed in as a prop.
-  let nav: NavItem[] =
-    roleLabel === "Admin" ? ADMIN_NAV : roleLabel === "Rep" ? REP_NAV : CLIENT_NAV;
+  // server→client boundary — so they must NOT be passed in as a prop. The
+  // Planner sub-menu is gated by the server-resolved `plannerEnabled` boolean.
+  const sections: NavSection[] =
+    roleLabel === "Admin"
+      ? adminNavSections(Boolean(plannerEnabled))
+      : roleLabel === "Rep"
+        ? REP_SECTIONS
+        : CLIENT_SECTIONS;
 
-  // Inject the Planner (Meetings) item just before Settings, admin + flag only.
-  if (roleLabel === "Admin" && plannerEnabled) {
-    const idx = nav.findIndex((n) => n.href === "/admin/settings");
-    nav =
-      idx >= 0
-        ? [...nav.slice(0, idx), PLANNER_MEETINGS_NAV, ...nav.slice(idx)]
-        : [...nav, PLANNER_MEETINGS_NAV];
-  }
-
-  const isActive = (href: string) =>
-    href === pathname ||
-    (href !== "/dashboard" &&
-      href !== "/admin" &&
-      href !== "/rep" &&
-      pathname.startsWith(href));
+  const isActive = (href: string) => {
+    if (href === pathname) return true;
+    if (EXACT_NAV_HREFS.has(href)) return false;
+    return pathname.startsWith(href + "/");
+  };
 
   return (
     <div className="min-h-screen bg-ink-50">
       {/* Sidebar (desktop) */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-ink-100 bg-white lg:flex">
         <SidebarInner
-          nav={nav}
+          sections={sections}
           user={user}
           context={context}
           roleLabel={roleLabel}
@@ -120,7 +116,7 @@ export function AppShell({
               <X className="h-5 w-5" />
             </button>
             <SidebarInner
-              nav={nav}
+              sections={sections}
               user={user}
               context={context}
               roleLabel={roleLabel}
@@ -149,7 +145,7 @@ export function AppShell({
 }
 
 function SidebarInner({
-  nav,
+  sections,
   user,
   context,
   roleLabel,
@@ -157,7 +153,7 @@ function SidebarInner({
   badges,
   onNavigate,
 }: {
-  nav: NavItem[];
+  sections: NavSection[];
   user: AppShellProps["user"];
   context: string;
   roleLabel: "Client" | "Admin" | "Rep";
@@ -171,46 +167,30 @@ function SidebarInner({
         <Logo />
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {nav.map((item) => {
-          const active = isActive(item.href);
-          const badge = badges?.[item.href];
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
-                active
-                  ? "bg-brand-50 text-brand-700"
-                  : "text-ink-600 hover:bg-ink-50 hover:text-ink-900"
-              )}
-            >
-              <item.icon
-                className={cn(
-                  "h-4.5 w-4.5 shrink-0",
-                  active ? "text-brand-600" : "text-ink-400 group-hover:text-ink-600"
-                )}
-              />
-              <span className="flex-1">{item.label}</span>
-              {badge === "dot" && (
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
-                  aria-label="New activity"
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+        {sections.map((section, si) => (
+          <div key={section.label ?? `group-${si}`}>
+            {si > 0 && <div className="mx-2 my-2 border-t border-ink-100" />}
+            {section.label && (
+              <div className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+                {section.icon && <section.icon className="h-3.5 w-3.5" />}
+                {section.label}
+              </div>
+            )}
+            <div className="space-y-1">
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.href}
+                  item={item}
+                  active={isActive(item.href)}
+                  badge={badges?.[item.href]}
+                  indented={Boolean(section.label)}
+                  onNavigate={onNavigate}
                 />
-              )}
-              {badge === "check" && (
-                <span
-                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-                  aria-label="Complete"
-                >
-                  <Check className="h-3 w-3" strokeWidth={3} />
-                </span>
-              )}
-            </Link>
-          );
-        })}
+              ))}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="border-t border-ink-100 p-3">
@@ -239,5 +219,55 @@ function SidebarInner({
         </form>
       </div>
     </>
+  );
+}
+
+function NavLink({
+  item,
+  active,
+  badge,
+  indented,
+  onNavigate,
+}: {
+  item: NavItem;
+  active: boolean;
+  badge?: "dot" | "check";
+  indented?: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      className={cn(
+        "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+        indented && "pl-6",
+        active
+          ? "bg-brand-50 text-brand-700"
+          : "text-ink-600 hover:bg-ink-50 hover:text-ink-900"
+      )}
+    >
+      <item.icon
+        className={cn(
+          "h-4.5 w-4.5 shrink-0",
+          active ? "text-brand-600" : "text-ink-400 group-hover:text-ink-600"
+        )}
+      />
+      <span className="flex-1">{item.label}</span>
+      {badge === "dot" && (
+        <span
+          className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
+          aria-label="New activity"
+        />
+      )}
+      {badge === "check" && (
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+          aria-label="Complete"
+        >
+          <Check className="h-3 w-3" strokeWidth={3} />
+        </span>
+      )}
+    </Link>
   );
 }
