@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
 import { reconcileMeeting } from "@/lib/planner/scheduling/service";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
@@ -43,7 +43,7 @@ export async function createMeetingAction(
   input: MeetingInput,
   idempotencyKey?: string
 ): Promise<MeetingActionResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
 
   const v = validateMeetingInput(input);
@@ -108,7 +108,7 @@ export async function updateMeetingAction(
   id: string,
   input: MeetingInput
 ): Promise<MeetingActionResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
 
   const v = validateMeetingInput(input);
@@ -148,7 +148,7 @@ export async function updateMeetingAction(
 }
 
 export async function cancelMeetingAction(id: string): Promise<MeetingActionResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
 
   const correlationId = newCorrelationId();
@@ -165,7 +165,7 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
 }
 
 export async function deleteMeetingAction(id: string): Promise<MeetingActionResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
 
   const correlationId = newCorrelationId();

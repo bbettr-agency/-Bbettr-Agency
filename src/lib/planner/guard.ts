@@ -1,7 +1,7 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import type { Profile } from "@/lib/database.types";
 
 /**
@@ -12,6 +12,6 @@ import type { Profile } from "@/lib/database.types";
  */
 export async function requirePlannerAccess(): Promise<Profile> {
   const profile = await requireAdmin();
-  if (!PLANNER_ENABLED) notFound();
+  if (!isPlannerEnabled()) notFound();
   return profile;
 }

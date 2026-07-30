@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getCurrentProfile } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { exchangeAndStore } from "@/lib/google";
 import {
   IntegrationAuthError,
@@ -16,7 +16,7 @@ import {
  * to the Integrations page with a status.
  */
 export async function GET(request: Request) {
-  if (!PLANNER_ENABLED) {
+  if (!isPlannerEnabled()) {
     return NextResponse.redirect(new URL("/admin/integrations", request.url), {
       status: 302,
     });

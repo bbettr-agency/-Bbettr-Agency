@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
 import { reconciliationScheduler } from "@/lib/planner/scheduling/service";
 
@@ -26,7 +26,7 @@ import { reconciliationScheduler } from "@/lib/planner/scheduling/service";
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  if (!PLANNER_ENABLED) {
+  if (!isPlannerEnabled()) {
     return NextResponse.json({ error: "disabled" }, { status: 404 });
   }
 

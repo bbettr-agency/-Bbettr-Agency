@@ -32,11 +32,11 @@ interface AppShellProps {
   roleLabel: "Client" | "Admin" | "Rep";
   badges?: NavBadges;
   /**
-   * Whether the internal Planner module is enabled (server-resolved
-   * PLANNER_ENABLED, passed as a plain boolean). Adds the admin-only Planner
+   * Capability resolved server-side (authenticated admin role AND the runtime
+   * PLANNER_ENABLED flag), passed as a plain boolean. Adds the admin-only Planner
    * sub-menu. Never grants access on its own — routes/RLS still enforce admin.
    */
-  plannerEnabled?: boolean;
+  canUsePlanner?: boolean;
   /** Optional top-bar content (e.g. the client notification bell). */
   headerSlot?: React.ReactNode;
   children: React.ReactNode;
@@ -47,7 +47,7 @@ export function AppShell({
   context,
   roleLabel,
   badges,
-  plannerEnabled,
+  canUsePlanner,
   headerSlot,
   children,
 }: AppShellProps) {
@@ -57,10 +57,12 @@ export function AppShell({
   // Select the navigation inside the client bundle. The nav items contain
   // Lucide icon components (functions), which cannot be serialized across the
   // server→client boundary — so they must NOT be passed in as a prop. The
-  // Planner sub-menu is gated by the server-resolved `plannerEnabled` boolean.
+  // Planner sub-menu is gated by the server-resolved `canUsePlanner` capability
+  // (real admin role + runtime flag), never by the display label alone. Clients
+  // and reps use their own sections and never receive the capability.
   const sections: NavSection[] =
     roleLabel === "Admin"
-      ? adminNavSections(Boolean(plannerEnabled))
+      ? adminNavSections(Boolean(canUsePlanner))
       : roleLabel === "Rep"
         ? REP_SECTIONS
         : CLIENT_SECTIONS;

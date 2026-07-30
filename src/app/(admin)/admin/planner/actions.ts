@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
 import { reconciliationScheduler, rebuildCalendar } from "@/lib/planner/scheduling/service";
 import type { ReconcileSummary } from "@/lib/planner/scheduling/reconcile";
@@ -26,7 +26,7 @@ export interface RebuildResult {
  * path. It never calls Google directly.
  */
 export async function reconcileNowAction(): Promise<ReconcileNowResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
   const summary = await reconciliationScheduler.tick(newCorrelationId());
   revalidatePath("/admin/planner/meetings");
@@ -39,7 +39,7 @@ export async function reconcileNowAction(): Promise<ReconcileNowResult> {
  * unrelated Google events.
  */
 export async function rebuildCalendarAction(): Promise<RebuildResult> {
-  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
   const summary = await rebuildCalendar();
   revalidatePath("/admin/planner/meetings");
