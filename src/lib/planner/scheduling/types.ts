@@ -21,6 +21,13 @@ export interface DesiredAttendee {
   displayName?: string | null;
 }
 
+/**
+ * Desired state as loaded from Portal data, WITHOUT idEpoch. The engine injects
+ * idEpoch from the projection record (it is reflected/cache state, and advancing
+ * it is how a rebuild mints a fresh id namespace).
+ */
+export type DesiredDraft = Omit<DesiredEvent, "idEpoch">;
+
 /** Everything needed to (re)create a provider event from Portal data alone. */
 export interface DesiredEvent {
   entityType: "meeting";
