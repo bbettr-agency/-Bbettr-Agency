@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getCurrentProfile } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { getGoogleAuthorizeUrl, isGoogleConfigured } from "@/lib/google";
 import { logIntegrationEvent, newCorrelationId } from "@/lib/net";
 
@@ -12,7 +12,7 @@ import { logIntegrationEvent, newCorrelationId } from "@/lib/net";
  */
 export async function GET(request: Request) {
   // Feature-flagged internal module: when off, the surface simply doesn't exist.
-  if (!PLANNER_ENABLED) {
+  if (!isPlannerEnabled()) {
     return NextResponse.redirect(new URL("/admin/integrations", request.url), {
       status: 302,
     });

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { isPlannerEnabled } from "@/lib/flags";
 import { getConnectionStatus } from "@/lib/quickbooks";
 import { getGoogleConnectionStatus } from "@/lib/google";
 import { getPayfastDebugInfo } from "@/lib/payfast";
@@ -71,7 +71,7 @@ export default async function IntegrationsPage({
     searchParams,
     getConnectionStatus(),
     // Google is part of the internal Planner module; only read it when enabled.
-    PLANNER_ENABLED ? getGoogleConnectionStatus() : Promise.resolve(null),
+    isPlannerEnabled() ? getGoogleConnectionStatus() : Promise.resolve(null),
   ]);
   const payfast = getPayfastDebugInfo();
   const banner = resolveBanner(params);
