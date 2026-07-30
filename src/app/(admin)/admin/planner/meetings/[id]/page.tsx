@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { requireAdmin } from "@/lib/auth";
-import { PLANNER_ENABLED } from "@/lib/flags";
+import { requirePlannerAccess } from "@/lib/planner/guard";
 import { getMeeting, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,8 +17,7 @@ export default async function MeetingDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAdmin();
-  if (!PLANNER_ENABLED) notFound();
+  await requirePlannerAccess();
 
   const { id } = await params;
   const data = await getMeeting(id);
