@@ -12,6 +12,7 @@ import {
   CLIENT_NAV,
   ADMIN_NAV,
   REP_NAV,
+  PLANNER_MEETINGS_NAV,
   type NavItem,
 } from "@/components/layout/nav";
 
@@ -29,6 +30,12 @@ interface AppShellProps {
   context: string;
   roleLabel: "Client" | "Admin" | "Rep";
   badges?: NavBadges;
+  /**
+   * Whether the internal Planner module is enabled (server-resolved
+   * PLANNER_ENABLED, passed as a plain boolean). Injects the admin-only Meetings
+   * nav item. Never grants access on its own — routes/RLS still enforce admin.
+   */
+  plannerEnabled?: boolean;
   /** Optional top-bar content (e.g. the client notification bell). */
   headerSlot?: React.ReactNode;
   children: React.ReactNode;
@@ -39,6 +46,7 @@ export function AppShell({
   context,
   roleLabel,
   badges,
+  plannerEnabled,
   headerSlot,
   children,
 }: AppShellProps) {
@@ -48,8 +56,17 @@ export function AppShell({
   // Select the navigation inside the client bundle. The nav items contain
   // Lucide icon components (functions), which cannot be serialized across the
   // server→client boundary — so they must NOT be passed in as a prop.
-  const nav: NavItem[] =
+  let nav: NavItem[] =
     roleLabel === "Admin" ? ADMIN_NAV : roleLabel === "Rep" ? REP_NAV : CLIENT_NAV;
+
+  // Inject the Planner (Meetings) item just before Settings, admin + flag only.
+  if (roleLabel === "Admin" && plannerEnabled) {
+    const idx = nav.findIndex((n) => n.href === "/admin/settings");
+    nav =
+      idx >= 0
+        ? [...nav.slice(0, idx), PLANNER_MEETINGS_NAV, ...nav.slice(idx)]
+        : [...nav, PLANNER_MEETINGS_NAV];
+  }
 
   const isActive = (href: string) =>
     href === pathname ||

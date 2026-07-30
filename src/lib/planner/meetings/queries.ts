@@ -1,12 +1,10 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type {
-  Meeting,
-  MeetingAttendee,
-  MeetState,
-  ProjectionSyncState,
-} from "@/lib/database.types";
+import type { Meeting, MeetingAttendee } from "@/lib/database.types";
+import type { SafeProjectionView } from "./view-types";
+
+export type { SafeProjectionView } from "./view-types";
 
 /**
  * Read side of the meetings domain. Meeting reads use the session (RLS) client;
@@ -41,19 +39,6 @@ export async function getMeeting(
     .eq("meeting_id", id)
     .order("created_at", { ascending: true });
   return { meeting, attendees: attendees ?? [] };
-}
-
-/**
- * The ONLY projection data the UI may see (refinement 4). Explicitly whitelisted
- * safe fields — never raw rows, etags, locks, id_epoch, sync_version internals or
- * error payloads.
- */
-export interface SafeProjectionView {
-  entityId: string;
-  syncState: ProjectionSyncState;
-  meetState: MeetState;
-  meetUrl: string | null;
-  lastSyncAt: string | null;
 }
 
 export async function getSafeProjectionViews(
