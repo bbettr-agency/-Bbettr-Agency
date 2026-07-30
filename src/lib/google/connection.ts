@@ -9,6 +9,7 @@ import {
   IntegrationApiError,
   IntegrationAuthError,
   IntegrationConfigError,
+  IntegrationError,
 } from "@/lib/net";
 import {
   getGoogleConfig,
@@ -201,7 +202,7 @@ export async function exchangeAndStore(
 
   const now = new Date().toISOString();
   const admin = createAdminClient();
-  await admin.from("calendar_credentials").upsert(
+  const { error } = await admin.from("calendar_credentials").upsert(
     {
       id: 1,
       provider: "google",
@@ -218,6 +219,25 @@ export async function exchangeAndStore(
     },
     { onConflict: "id" }
   );
+
+  // The Supabase write RETURNS an error object (it does not throw). If we don't
+  // check it, a failed persist (e.g. the table is missing, or a constraint/RLS
+  // rejection) is silently ignored and the caller/callback would falsely report
+  // "connected" while nothing was saved. Surface it as a sanitized typed error —
+  // logging only the safe Postgres code, never the token or the raw DB message.
+  if (error) {
+    logIntegrationEvent("error", {
+      integration: INTEGRATION,
+      event: "terminal_failure",
+      correlationId,
+      outcome: "failure",
+      reason: `persist_failed${error.code ? `:${error.code}` : ""}`,
+    });
+    throw new IntegrationError(
+      INTEGRATION,
+      "Failed to persist the Google credential."
+    );
+  }
 }
 
 /** Flip the stored credential to reconnect_required (grant revoked/expired). */
