@@ -34,6 +34,15 @@ import {
 const BASE = "https://www.googleapis.com/calendar/v3/calendars";
 const TIMEOUT_MS = 8000;
 
+/**
+ * Provider tuning. The inline, post-commit projection uses `maxRetries: 0` so a
+ * server action is bounded to a single ~8s attempt (failures just leave the row
+ * pending for the scheduler); the scheduled reconciler uses the default retries.
+ */
+export interface GoogleCalendarProviderOptions {
+  maxRetries?: number;
+}
+
 function sendUpdates(): string {
   return getGoogleConfig()?.sendUpdates ?? "none";
 }
@@ -50,8 +59,11 @@ function reflect(ev: GoogleEventResource, wantsMeet: boolean): ReflectedEvent {
 }
 
 export function createGoogleCalendarProvider(
-  correlationId?: string
+  correlationId?: string,
+  options: GoogleCalendarProviderOptions = {}
 ): CalendarProvider {
+  const retries = options.maxRetries ?? 2;
+
   async function authHeaders(
     extra: Record<string, string> = {}
   ): Promise<Record<string, string>> {
@@ -69,13 +81,15 @@ export function createGoogleCalendarProvider(
       desired.calendarId,
       `/${id}?conferenceDataVersion=1`
     );
-    const ev = await withRetry(async () =>
-      fetchJsonWithTimeout<GoogleEventResource>(url, {
-        integration: "google",
-        timeoutMs: TIMEOUT_MS,
-        method: "GET",
-        headers: await authHeaders(),
-      })
+    const ev = await withRetry(
+      async () =>
+        fetchJsonWithTimeout<GoogleEventResource>(url, {
+          integration: "google",
+          timeoutMs: TIMEOUT_MS,
+          method: "GET",
+          headers: await authHeaders(),
+        }),
+      { retries }
     );
     return reflect(ev, desired.wantsMeet);
   }
@@ -87,14 +101,16 @@ export function createGoogleCalendarProvider(
     );
     const body = JSON.stringify(toGoogleEventBody(desired));
     try {
-      const ev = await withRetry(async () =>
-        fetchJsonWithTimeout<GoogleEventResource>(url, {
-          integration: "google",
-          timeoutMs: TIMEOUT_MS,
-          method: "POST",
-          headers: await authHeaders({ "Content-Type": "application/json" }),
-          body,
-        })
+      const ev = await withRetry(
+        async () =>
+          fetchJsonWithTimeout<GoogleEventResource>(url, {
+            integration: "google",
+            timeoutMs: TIMEOUT_MS,
+            method: "POST",
+            headers: await authHeaders({ "Content-Type": "application/json" }),
+            body,
+          }),
+        { retries }
       );
       return reflect(ev, desired.wantsMeet);
     } catch (err) {
@@ -117,17 +133,19 @@ export function createGoogleCalendarProvider(
     );
     const body = JSON.stringify(toGoogleEventBody(desired));
     const patch = (useEtag: boolean) =>
-      withRetry(async () =>
-        fetchJsonWithTimeout<GoogleEventResource>(url, {
-          integration: "google",
-          timeoutMs: TIMEOUT_MS,
-          method: "PATCH",
-          headers: await authHeaders({
-            "Content-Type": "application/json",
-            ...(useEtag && ref.etag ? { "If-Match": ref.etag } : {}),
+      withRetry(
+        async () =>
+          fetchJsonWithTimeout<GoogleEventResource>(url, {
+            integration: "google",
+            timeoutMs: TIMEOUT_MS,
+            method: "PATCH",
+            headers: await authHeaders({
+              "Content-Type": "application/json",
+              ...(useEtag && ref.etag ? { "If-Match": ref.etag } : {}),
+            }),
+            body,
           }),
-          body,
-        })
+        { retries }
       );
     try {
       return reflect(await patch(true), desired.wantsMeet);
@@ -149,19 +167,22 @@ export function createGoogleCalendarProvider(
       ref.calendarId,
       `/${encodeURIComponent(ref.eventId)}?sendUpdates=${sendUpdates()}`
     );
-    await withRetry(async () => {
-      const res = await fetchWithTimeout(url, {
-        integration: "google",
-        timeoutMs: TIMEOUT_MS,
-        method: "DELETE",
-        headers: await authHeaders(),
-      });
-      if (res.status === 404 || res.status === 410) return; // already gone
-      if (!res.ok) {
-        const b = await res.text().catch(() => "");
-        throw new IntegrationApiError("google", res.status, b);
-      }
-    });
+    await withRetry(
+      async () => {
+        const res = await fetchWithTimeout(url, {
+          integration: "google",
+          timeoutMs: TIMEOUT_MS,
+          method: "DELETE",
+          headers: await authHeaders(),
+        });
+        if (res.status === 404 || res.status === 410) return; // already gone
+        if (!res.ok) {
+          const b = await res.text().catch(() => "");
+          throw new IntegrationApiError("google", res.status, b);
+        }
+      },
+      { retries }
+    );
   }
 
   async function reconcile(
