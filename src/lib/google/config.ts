@@ -10,6 +10,18 @@ import "server-only";
  * prevent the Portal from loading or functioning.
  */
 
+/**
+ * Who Google notifies on event create/update/delete. Central policy (E4): keep
+ * `none` during controlled rollout, switch to `all` only after real-calendar
+ * validation. Validated centrally — an invalid env value falls back to `none`.
+ */
+export type SendUpdatesPolicy = "none" | "all" | "externalOnly";
+const SEND_UPDATES_VALUES: readonly SendUpdatesPolicy[] = [
+  "none",
+  "all",
+  "externalOnly",
+];
+
 export interface GoogleConfig {
   clientId: string;
   clientSecret: string;
@@ -21,6 +33,17 @@ export interface GoogleConfig {
    * this account's primary calendar.
    */
   calendarId: string;
+  /** Notification policy for calendar writes (default "none"). */
+  sendUpdates: SendUpdatesPolicy;
+}
+
+/** Read + validate the send-updates policy from the environment. */
+export function resolveSendUpdates(
+  raw: string | undefined = process.env.GOOGLE_CALENDAR_SEND_UPDATES
+): SendUpdatesPolicy {
+  return SEND_UPDATES_VALUES.includes(raw as SendUpdatesPolicy)
+    ? (raw as SendUpdatesPolicy)
+    : "none";
 }
 
 /**
@@ -60,5 +83,12 @@ export function getGoogleConfig(): GoogleConfig | null {
 
   if (!redirectUri.startsWith("http")) return null;
 
-  return { clientId, clientSecret, redirectUri, tokenSecret, calendarId };
+  return {
+    clientId,
+    clientSecret,
+    redirectUri,
+    tokenSecret,
+    calendarId,
+    sendUpdates: resolveSendUpdates(),
+  };
 }
