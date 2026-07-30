@@ -81,6 +81,15 @@ export type InvoiceSource = "admin" | "rep_deal" | "quickbooks";
 // Planner (Bbettr OS — internal, admin-only)
 export type TaskStatus = "todo" | "in_progress" | "completed";
 export type TaskPriority = "normal" | "high" | "urgent";
+// Phase 3 — meetings + calendar projection.
+export type MeetingStatus = "scheduled" | "cancelled";
+export type MeetState = "not_requested" | "pending" | "ready" | "failed";
+export type ProjectionSyncState =
+  | "not_applicable"
+  | "pending"
+  | "synced"
+  | "failed"
+  | "disconnected";
 export type PaymentMethod = "eft" | "payfast" | "quickbooks" | "cash" | "manual";
 
 export type IntakeStatus =
@@ -958,6 +967,119 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["calendar_credentials"]["Row"]>;
         Relationships: [];
       };
+      meetings: {
+        Row: {
+          id: string;
+          title: string;
+          description: string | null;
+          starts_at: string;
+          ends_at: string;
+          time_zone: string;
+          has_meet: boolean;
+          status: MeetingStatus;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+          cancelled_by: string | null;
+          cancelled_at: string | null;
+          deleted_at: string | null;
+        };
+        // Audit fields (created_by/at, cancelled_by/at, updated_at) are
+        // server-stamped by the meetings_enforce_audit trigger — omit on insert.
+        Insert: {
+          id?: string;
+          title: string;
+          description?: string | null;
+          starts_at: string;
+          ends_at: string;
+          time_zone?: string;
+          has_meet?: boolean;
+          status?: MeetingStatus;
+          deleted_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["meetings"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "meetings_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      meeting_attendees: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          email: string;
+          display_name: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          email: string;
+          display_name?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["meeting_attendees"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "meeting_attendees_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "meetings";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      calendar_projections: {
+        Row: {
+          id: string;
+          entity_type: "meeting";
+          entity_id: string;
+          google_calendar_id: string;
+          google_event_id: string | null;
+          id_epoch: number;
+          etag: string | null;
+          meet_url: string | null;
+          meet_state: MeetState;
+          last_meet_error: string | null;
+          sync_state: ProjectionSyncState;
+          synced_hash: string | null;
+          sync_attempts: number;
+          next_attempt_at: string | null;
+          locked_at: string | null;
+          lock_token: string | null;
+          last_sync_at: string | null;
+          last_sync_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          entity_type?: "meeting";
+          entity_id: string;
+          google_calendar_id: string;
+          google_event_id?: string | null;
+          id_epoch?: number;
+          etag?: string | null;
+          meet_url?: string | null;
+          meet_state?: MeetState;
+          last_meet_error?: string | null;
+          sync_state?: ProjectionSyncState;
+          synced_hash?: string | null;
+          sync_attempts?: number;
+          next_attempt_at?: string | null;
+          locked_at?: string | null;
+          lock_token?: string | null;
+          last_sync_at?: string | null;
+          last_sync_error?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["calendar_projections"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: { [key: string]: never };
     Functions: {
@@ -1011,3 +1133,6 @@ export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row
 export type ClientRetainer = Database["public"]["Tables"]["client_retainers"]["Row"];
 export type Task = Database["public"]["Tables"]["tasks"]["Row"];
 export type CalendarCredential = Database["public"]["Tables"]["calendar_credentials"]["Row"];
+export type Meeting = Database["public"]["Tables"]["meetings"]["Row"];
+export type MeetingAttendee = Database["public"]["Tables"]["meeting_attendees"]["Row"];
+export type CalendarProjection = Database["public"]["Tables"]["calendar_projections"]["Row"];
