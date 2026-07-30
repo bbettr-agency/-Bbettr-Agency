@@ -62,6 +62,11 @@ export async function createMeetingAction(
     return { error: error?.message ?? "Could not create the meeting." };
   }
 
+  // TODO (pre-production, not Stage 3): meeting + attendee creation should be
+  // atomic. These are currently two sequential auto-committed statements; a
+  // failure between them can leave a meeting with no attendees. Wrap the insert
+  // of the meeting and its attendees in a single database transaction via a
+  // Postgres RPC (SECURITY INVOKER, so RLS + the audit trigger still apply).
   const attendees = normaliseAttendees(input.attendees);
   if (attendees.length > 0) {
     await supabase.from("meeting_attendees").insert(

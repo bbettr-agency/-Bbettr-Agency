@@ -1,5 +1,3 @@
-import type { ReconcileSummary } from "./reconcile";
-
 /**
  * REBUILD CONTRACT (documented in Stage 3.4; implemented in Stage 3.6).
  *
@@ -45,11 +43,20 @@ export interface RebuildOptions {
 
 export interface RebuildItemResult {
   entityId: string;
-  action: "reprojected" | "skipped" | "failed";
+  action: "rebuilt" | "skipped" | "failed";
   /** Sanitized code only — never bodies, tokens or attendee data. */
   reason?: string;
 }
 
-export interface RebuildSummary extends ReconcileSummary {
+/**
+ * Structured audit summary returned to the admin (refinement 5) — never
+ * free-form text. `items` carries per-entity outcomes with sanitized reasons.
+ */
+export interface RebuildSummary {
+  processed: number;
+  rebuilt: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
   items: RebuildItemResult[];
 }

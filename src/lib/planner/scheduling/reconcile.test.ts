@@ -8,6 +8,7 @@ import type {
   ProjectionRecord,
   ProjectionStore,
 } from "./store";
+import type { DesiredStateProvider } from "./desired-provider";
 import type {
   CalendarProvider,
   DesiredDraft,
@@ -58,7 +59,8 @@ class InMemoryStore implements ProjectionStore {
   raw(ref: EntityRef) {
     return this.records.get(this.key(ref));
   }
-  async loadDesired(ref: EntityRef) {
+  /** Test-only desired-state lookup, exposed to the fake DesiredStateProvider. */
+  peekDesired(ref: EntityRef) {
     return this.desired.get(this.key(ref)) ?? null;
   }
   async loadProjection(ref: EntityRef) {
@@ -177,9 +179,13 @@ let clockMs: number;
 let tokenSeq: number;
 
 function deps(overrides: Partial<EngineDeps> = {}): EngineDeps {
+  const desired: DesiredStateProvider = {
+    loadDesired: async (ref) => store.peekDesired(ref),
+  };
   return {
     provider,
     store,
+    desired,
     log: (f) => logs.push(f),
     now: () => new Date(clockMs),
     newToken: () => `tok-${++tokenSeq}`,

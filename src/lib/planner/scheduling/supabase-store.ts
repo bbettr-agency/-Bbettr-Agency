@@ -2,26 +2,25 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { CalendarProjection, Database } from "@/lib/database.types";
 
-type ProjectionUpdate =
-  Database["public"]["Tables"]["calendar_projections"]["Update"];
-import { loadMeetingDesired } from "@/lib/planner/meetings/loader";
 import type {
   EntityRef,
   ProjectionPatch,
   ProjectionRecord,
   ProjectionStore,
 } from "./store";
-import type { DesiredDraft } from "./types";
+
+type ProjectionUpdate =
+  Database["public"]["Tables"]["calendar_projections"]["Update"];
 
 /**
- * Supabase (service-role) implementation of the ProjectionStore boundary.
+ * Supabase (service-role) implementation of the ProjectionStore boundary — the
+ * reflected/cache layer ONLY. Desired-state loading is a separate concern
+ * (DesiredStateProvider, owned by the meetings domain).
  *
  * The reconciliation engine depends only on this interface, so persistence is
  * fully replaceable (the tests use an in-memory version). This adapter owns:
  * loading/saving projection state, lock acquire/release, sync-metadata updates
- * and recording sanitized failures. Desired-state loading is delegated to the
- * entity's own loader (meetings today), keeping projection persistence and
- * authoritative-data reading cleanly separated within this one boundary.
+ * and recording sanitized failures.
  *
  * calendar_projections is service-role only (RLS-locked), so this must run in
  * trusted server code exclusively.
@@ -83,12 +82,6 @@ export function createSupabaseProjectionStore(): ProjectionStore {
   }
 
   return {
-    async loadDesired(ref: EntityRef): Promise<DesiredDraft | null> {
-      // Only meetings are projected in Phase 3.
-      if (ref.entityType === "meeting") return loadMeetingDesired(ref.entityId);
-      return null;
-    },
-
     loadProjection,
 
     async ensureProjection(ref, calendarId) {

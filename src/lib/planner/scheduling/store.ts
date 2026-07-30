@@ -1,8 +1,10 @@
 import type { MeetState, ProjectionSyncState } from "@/lib/database.types";
-import type { DesiredDraft } from "./types";
 
 /**
  * Projection persistence contract (the reflected/cache layer).
+ *
+ * This has ONE responsibility: managing projection state. Desired-state loading
+ * belongs to the domain and is a separate interface (DesiredStateProvider).
  *
  * The engine depends on this interface, not on Supabase — so it is fully
  * unit-testable with an in-memory fake, and the real service-role-backed store
@@ -53,8 +55,6 @@ export interface ProjectionPatch {
 }
 
 export interface ProjectionStore {
-  /** Desired state for an entity (null if the entity is gone / not syncable). */
-  loadDesired(ref: EntityRef): Promise<DesiredDraft | null>;
   /** The projection record for an entity, or null if none exists yet. */
   loadProjection(ref: EntityRef): Promise<ProjectionRecord | null>;
   /** Create (pending) or return the projection record for an entity. */

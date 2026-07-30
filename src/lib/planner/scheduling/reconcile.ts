@@ -7,6 +7,7 @@ import type {
   DesiredEvent,
 } from "./types";
 import type { EntityRef, ProjectionRecord, ProjectionStore } from "./store";
+import type { DesiredStateProvider } from "./desired-provider";
 
 /**
  * The reconciliation engine: makes the reflected Google projection match desired
@@ -27,6 +28,7 @@ import type { EntityRef, ProjectionRecord, ProjectionStore } from "./store";
 export interface EngineDeps {
   provider: CalendarProvider;
   store: ProjectionStore;
+  desired: DesiredStateProvider;
   log?: SyncLogger;
   now: () => Date;
   newToken: () => string;
@@ -80,7 +82,7 @@ export async function projectEntity(
   // earliest return, before a calendar is known.
   let calendarId = "";
 
-  const draft: DesiredDraft | null = await deps.store.loadDesired(ref);
+  const draft: DesiredDraft | null = await deps.desired.loadDesired(ref);
   let rec = await deps.store.loadProjection(ref);
 
   // Nothing to project and nothing projected → nothing to do.

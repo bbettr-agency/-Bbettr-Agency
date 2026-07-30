@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { createGoogleCalendarProvider, isGoogleConfigured } from "@/lib/google";
 import { newCorrelationId } from "@/lib/net";
 import { createSupabaseProjectionStore } from "./supabase-store";
+import { createMeetingDesiredStateProvider } from "@/lib/planner/meetings/desired-provider";
 import { productionSyncLogger } from "./sync-log";
 import {
   projectEntity,
@@ -32,6 +33,7 @@ function buildDeps(
   return {
     provider: createGoogleCalendarProvider(correlationId, providerOpts),
     store: createSupabaseProjectionStore(),
+    desired: createMeetingDesiredStateProvider(),
     log: productionSyncLogger,
     now: () => new Date(),
     newToken: () => randomUUID(),
