@@ -1114,6 +1114,12 @@ export interface Database {
         };
         Returns: string;
       };
+      // Returns the affected meeting id, or null when the meeting is missing /
+      // already deleted (idempotent no-op).
+      soft_delete_meeting: {
+        Args: { p_meeting_id: string };
+        Returns: string;
+      };
     };
   };
 }

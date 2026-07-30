@@ -170,10 +170,16 @@ export async function deleteMeetingAction(id: string): Promise<MeetingActionResu
 
   const correlationId = newCorrelationId();
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("meetings")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
+
+  // Soft-delete via the guarded SECURITY DEFINER RPC. A plain UPDATE setting
+  // deleted_at is rejected by RLS (the SELECT visibility policy hides deleted
+  // rows, and PostgreSQL forbids updating a row out of the updater's view). The
+  // RPC re-checks is_admin() internally, so the authenticated session client is
+  // still used and authorization is unchanged. Google projection deletion runs
+  // ONLY after the Portal soft-delete has succeeded.
+  const { error } = await supabase.rpc("soft_delete_meeting", {
+    p_meeting_id: id,
+  });
   if (error) return { error: error.message };
 
   await project(id, correlationId);
