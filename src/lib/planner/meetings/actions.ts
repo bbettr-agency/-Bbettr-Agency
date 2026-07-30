@@ -65,20 +65,28 @@ export async function createMeetingAction(
     if (existing) return { ok: true, id: existing.id };
   }
 
-  const { data: meeting, error } = await supabase
-    .from("meetings")
-    .insert({
-      title: input.title.trim(),
-      description: input.description?.trim() || null,
-      starts_at: input.startsAt,
-      ends_at: input.endsAt,
-      time_zone: input.timeZone,
-      has_meet: input.hasMeet,
-      idempotency_key: key,
-    })
-    .select("id")
-    .single();
-  if (error || !meeting) {
+  // Atomic: meeting + attendees commit together (or not at all) via a
+  // SECURITY-INVOKER RPC, so RLS + the audit trigger still apply. Idempotency is
+  // preserved by the unique index: a replay raises a unique-violation and is
+  // resolved by re-reading the already-created meeting.
+  const attendees = normaliseAttendees(input.attendees);
+  const { data: newId, error } = await supabase.rpc(
+    "create_meeting_with_attendees",
+    {
+      p_title: input.title.trim(),
+      p_description: input.description?.trim() || null,
+      p_starts_at: input.startsAt,
+      p_ends_at: input.endsAt,
+      p_time_zone: input.timeZone,
+      p_has_meet: input.hasMeet,
+      p_idempotency_key: key,
+      p_attendees: attendees.map((a) => ({
+        email: a.email,
+        display_name: a.displayName,
+      })),
+    }
+  );
+  if (error || !newId) {
     // Unique-violation race: another request with the same key won — adopt it.
     if (key) {
       const { data: again } = await supabase
@@ -91,25 +99,9 @@ export async function createMeetingAction(
     return { error: error?.message ?? "Could not create the meeting." };
   }
 
-  // TODO (pre-production, not Stage 3): meeting + attendee creation should be
-  // atomic. These are currently two sequential auto-committed statements; a
-  // failure between them can leave a meeting with no attendees. Wrap the insert
-  // of the meeting and its attendees in a single database transaction via a
-  // Postgres RPC (SECURITY INVOKER, so RLS + the audit trigger still apply).
-  const attendees = normaliseAttendees(input.attendees);
-  if (attendees.length > 0) {
-    await supabase.from("meeting_attendees").insert(
-      attendees.map((a) => ({
-        meeting_id: meeting.id,
-        email: a.email,
-        display_name: a.displayName,
-      }))
-    );
-  }
-
-  await project(meeting.id, correlationId);
+  await project(newId, correlationId);
   revalidatePath(MEETINGS_PATH);
-  return { ok: true, id: meeting.id };
+  return { ok: true, id: newId };
 }
 
 export async function updateMeetingAction(

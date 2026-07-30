@@ -77,6 +77,11 @@ export interface CalendarProvider {
   create(desired: DesiredEvent): Promise<ReflectedEvent>;
   update(desired: DesiredEvent, ref: EventRef): Promise<ReflectedEvent>;
   delete(ref: { eventId: string; calendarId: string }): Promise<void>;
+  /**
+   * Read-only fetch of the current reflected state (a GET). Used to refresh a
+   * still-provisioning Meet link without a PATCH (which would re-notify guests).
+   */
+  read(desired: DesiredEvent): Promise<ReflectedEvent>;
   reconcile(
     desired: DesiredEvent,
     current: { googleEventId: string | null; etag: string | null }

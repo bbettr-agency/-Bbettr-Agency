@@ -12,7 +12,19 @@ import { reconciliationScheduler } from "@/lib/planner/scheduling/service";
  * Auth is a shared bearer secret (PLANNER_CRON_SECRET), NOT a user session —
  * there is no user in a scheduled run. Absent secret ⇒ the endpoint is disabled
  * (503), never open.
+ *
+ * A pass is time-budgeted (PLANNER_RECONCILE_MAX_MS, default 8s) and stops before
+ * the function timeout, leaving the rest pending for the next tick. Keep the
+ * budget below `maxDuration` below.
+ *
+ * RECOMMENDED CRON INTERVAL: every 2–5 minutes (and ≥ 2× the max pass duration),
+ * so backlogs drain steadily without overlapping ticks. Overlap is safe anyway —
+ * per-row locking prevents double processing.
  */
+
+// Give the pass headroom on platforms that honour it (e.g. Vercel; capped by plan).
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   if (!PLANNER_ENABLED) {
     return NextResponse.json({ error: "disabled" }, { status: 404 });
