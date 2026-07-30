@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PLANNER_ENABLED } from "@/lib/flags";
+import { newCorrelationId } from "@/lib/net";
 import { reconcileMeeting } from "@/lib/planner/scheduling/service";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
 import type { MeetingInput } from "./types";
@@ -23,21 +24,24 @@ export interface MeetingActionResult {
 const MEETINGS_PATH = "/admin/planner/meetings";
 
 /**
- * Invoke the reconciliation service after a committed write. Bounded and
- * best-effort: it is AWAITED (not fire-and-forget — a serverless function may be
- * frozen after the response), but any failure is swallowed because the Portal
- * write already succeeded; the row is left pending for the scheduler.
+ * Invoke the reconciliation service after a committed write, threading the one
+ * correlation id for this request so every downstream log line (service →
+ * engine → provider) shares it. Bounded and best-effort: it is AWAITED (not
+ * fire-and-forget — a serverless function may be frozen after the response), but
+ * any failure is swallowed because the Portal write already succeeded; the row
+ * is left pending for the scheduler.
  */
-async function project(entityId: string): Promise<void> {
+async function project(entityId: string, correlationId: string): Promise<void> {
   try {
-    await reconcileMeeting(entityId);
+    await reconcileMeeting(entityId, correlationId);
   } catch {
     // Intentionally ignored — projection state is persisted; scheduler retries.
   }
 }
 
 export async function createMeetingAction(
-  input: MeetingInput
+  input: MeetingInput,
+  idempotencyKey?: string
 ): Promise<MeetingActionResult> {
   if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
   await requireAdmin();
@@ -45,7 +49,22 @@ export async function createMeetingAction(
   const v = validateMeetingInput(input);
   if (!v.ok) return { error: v.errors.join(" ") };
 
+  const correlationId = newCorrelationId();
   const supabase = await createClient();
+  const key = idempotencyKey?.trim() || null;
+
+  // Replay-safe: if this key already created a meeting, return it — never a
+  // duplicate (refresh / retry / double-click). A concurrent race is caught by
+  // the partial-unique index below and resolved by re-reading.
+  if (key) {
+    const { data: existing } = await supabase
+      .from("meetings")
+      .select("id")
+      .eq("idempotency_key", key)
+      .maybeSingle();
+    if (existing) return { ok: true, id: existing.id };
+  }
+
   const { data: meeting, error } = await supabase
     .from("meetings")
     .insert({
@@ -55,10 +74,20 @@ export async function createMeetingAction(
       ends_at: input.endsAt,
       time_zone: input.timeZone,
       has_meet: input.hasMeet,
+      idempotency_key: key,
     })
     .select("id")
     .single();
   if (error || !meeting) {
+    // Unique-violation race: another request with the same key won — adopt it.
+    if (key) {
+      const { data: again } = await supabase
+        .from("meetings")
+        .select("id")
+        .eq("idempotency_key", key)
+        .maybeSingle();
+      if (again) return { ok: true, id: again.id };
+    }
     return { error: error?.message ?? "Could not create the meeting." };
   }
 
@@ -78,7 +107,7 @@ export async function createMeetingAction(
     );
   }
 
-  await project(meeting.id);
+  await project(meeting.id, correlationId);
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id: meeting.id };
 }
@@ -93,6 +122,7 @@ export async function updateMeetingAction(
   const v = validateMeetingInput(input);
   if (!v.ok) return { error: v.errors.join(" ") };
 
+  const correlationId = newCorrelationId();
   const supabase = await createClient();
   const { error } = await supabase
     .from("meetings")
@@ -120,7 +150,7 @@ export async function updateMeetingAction(
     );
   }
 
-  await project(id);
+  await project(id, correlationId);
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id };
 }
@@ -129,6 +159,7 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
   if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
   await requireAdmin();
 
+  const correlationId = newCorrelationId();
   const supabase = await createClient();
   const { error } = await supabase
     .from("meetings")
@@ -136,7 +167,7 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
     .eq("id", id);
   if (error) return { error: error.message };
 
-  await project(id);
+  await project(id, correlationId);
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id };
 }
@@ -145,6 +176,7 @@ export async function deleteMeetingAction(id: string): Promise<MeetingActionResu
   if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
   await requireAdmin();
 
+  const correlationId = newCorrelationId();
   const supabase = await createClient();
   const { error } = await supabase
     .from("meetings")
@@ -152,7 +184,7 @@ export async function deleteMeetingAction(id: string): Promise<MeetingActionResu
     .eq("id", id);
   if (error) return { error: error.message };
 
-  await project(id);
+  await project(id, correlationId);
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id };
 }

@@ -139,6 +139,7 @@ async function setup() {
     "0029_meetings.sql",
     "0030_meeting_attendees.sql",
     "0031_calendar_projections.sql",
+    "0032_meetings_idempotency.sql",
   ]) {
     await client.query(readFileSync(join(MIG, f), "utf8"));
   }
@@ -263,6 +264,24 @@ async function main() {
     `insert into public.meetings (title,starts_at,ends_at,created_by) values ('spoof',now(),now()+interval '1 hour','${U.admin2}') returning created_by`);
   check("meeting created_by is forced to auth.uid(), not the spoofed value",
     mspoof.rows[0]?.created_by === U.admin1, `got ${mspoof.rows[0]?.created_by}`);
+
+  console.log("\n── meetings: idempotency key (replay-safe creation) ──");
+  await c.query(`select set_config('request.jwt.claims',$1,false)`, [
+    JSON.stringify({ sub: U.admin1, role: "authenticated" }),
+  ]);
+  await c.query(
+    `insert into public.meetings (title,starts_at,ends_at,idempotency_key) values ('idem','2026-08-05T09:00:00Z','2026-08-05T10:00:00Z','dup-key')`,
+  );
+  let dupRejected = false;
+  try {
+    await c.query(
+      `insert into public.meetings (title,starts_at,ends_at,idempotency_key) values ('idem2','2026-08-06T09:00:00Z','2026-08-06T10:00:00Z','dup-key')`,
+    );
+  } catch {
+    dupRejected = true;
+  }
+  await c.query(`select set_config('request.jwt.claims','',false)`);
+  check("duplicate idempotency_key is rejected (partial-unique index)", dupRejected);
 
   console.log("\n── meeting_attendees: access matrix ──");
   await c.query(`insert into public.meeting_attendees (meeting_id,email,display_name) values ('${m1}','guest@ex.test','Guest')`);

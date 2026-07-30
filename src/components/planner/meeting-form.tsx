@@ -37,6 +37,32 @@ function isoToLocalInput(iso: string, tz: string): string {
   return s.replace(" ", "T"); // "2026-08-01 09:00" → "2026-08-01T09:00"
 }
 
+const IDEM_KEY = "planner:new-meeting-idem";
+
+/**
+ * A stable idempotency key for creating one meeting. Persisted in sessionStorage
+ * so a browser refresh, network retry or double-click reuses the SAME key (the
+ * server action then dedupes) — cleared on a successful create.
+ */
+function getIdempotencyKey(): string {
+  try {
+    const existing = sessionStorage.getItem(IDEM_KEY);
+    if (existing) return existing;
+    const k = crypto.randomUUID();
+    sessionStorage.setItem(IDEM_KEY, k);
+    return k;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+function clearIdempotencyKey() {
+  try {
+    sessionStorage.removeItem(IDEM_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** A `datetime-local` wall-clock string interpreted in `tz` → UTC ISO instant. */
 function localInputToIso(local: string, tz: string): string {
   if (!local) return "";
@@ -101,9 +127,12 @@ export function MeetingForm({ initial }: { initial?: MeetingFormInitial }) {
     startTransition(async () => {
       const res = initial
         ? await updateMeetingAction(initial.id, input)
-        : await createMeetingAction(input);
+        : await createMeetingAction(input, getIdempotencyKey());
       if (res.error) setError(res.error);
-      else router.push("/admin/planner/meetings");
+      else {
+        if (!initial) clearIdempotencyKey();
+        router.push("/admin/planner/meetings");
+      }
     });
   }
 

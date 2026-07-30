@@ -977,6 +977,7 @@ export interface Database {
           time_zone: string;
           has_meet: boolean;
           status: MeetingStatus;
+          idempotency_key: string | null;
           created_by: string;
           created_at: string;
           updated_at: string;
@@ -995,6 +996,7 @@ export interface Database {
           time_zone?: string;
           has_meet?: boolean;
           status?: MeetingStatus;
+          idempotency_key?: string | null;
           deleted_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["meetings"]["Row"]>;
