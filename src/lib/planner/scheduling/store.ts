@@ -74,4 +74,13 @@ export interface ProjectionStore {
   saveResult(id: string, patch: ProjectionPatch): Promise<void>;
   /** Due pending/failed projections (nextAttemptAt null or <= now), for batch reconcile. */
   listDue(limit: number, nowIso: string): Promise<ProjectionRecord[]>;
+  /** All Portal-managed projections (for rebuild enumeration), oldest first. */
+  listAll(limit: number): Promise<ProjectionRecord[]>;
+  /**
+   * Reset a projection for rebuild: force re-projection (clear synced_hash, set
+   * pending). When `advanceEpoch`, also bump id_epoch and clear the cached
+   * event/etag/meet, so a fresh deterministic id is minted (for the
+   * calendar/account-change case). Operates ONLY on this projection row.
+   */
+  prepareRebuild(id: string, advanceEpoch: boolean): Promise<void>;
 }

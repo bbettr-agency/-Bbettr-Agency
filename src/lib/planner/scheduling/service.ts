@@ -12,6 +12,7 @@ import {
   type ReconcileResult,
   type ReconcileSummary,
 } from "./reconcile";
+import { rebuildProjections, type RebuildOptions, type RebuildSummary } from "./rebuild";
 import type { Scheduler } from "./scheduler";
 
 /**
@@ -76,9 +77,25 @@ export async function reconcileDue(
 }
 
 /**
+ * Rebuild all Portal-managed projections (the reconstructability operation).
+ * Returns the structured audit summary. No-op (empty summary) when Google isn't
+ * configured. Safe in-place re-sync by default; pass `freshIds` for the
+ * calendar/account-change case.
+ */
+export async function rebuildCalendar(
+  opts: RebuildOptions = {},
+  correlationId: string = newCorrelationId()
+): Promise<RebuildSummary> {
+  if (!isGoogleConfigured()) {
+    return { processed: 0, rebuilt: 0, skipped: 0, failed: 0, durationMs: 0, items: [] };
+  }
+  return rebuildProjections(buildDeps(correlationId), opts, correlationId);
+}
+
+/**
  * Default Scheduler: one due-reconciliation pass. The scheduling adapter (a
- * Supabase scheduled function → internal endpoint, wired in Stage 3.6) calls
- * this; swapping the trigger changes only the adapter.
+ * Supabase scheduled function → internal endpoint) calls this; swapping the
+ * trigger changes only the adapter.
  */
 export const reconciliationScheduler: Scheduler = {
   tick: (correlationId: string) => reconcileDue(undefined, correlationId),

@@ -131,5 +131,47 @@ export function createSupabaseProjectionStore(): ProjectionStore {
         .limit(limit);
       return (data ?? []).map(mapRow);
     },
+
+    async listAll(limit) {
+      const { data } = await admin
+        .from("calendar_projections")
+        .select("*")
+        .order("created_at", { ascending: true })
+        .limit(limit);
+      return (data ?? []).map(mapRow);
+    },
+
+    async prepareRebuild(id, advanceEpoch) {
+      const nowIso = new Date().toISOString();
+      const base: ProjectionUpdate = {
+        synced_hash: null,
+        sync_state: "pending",
+        next_attempt_at: null,
+        sync_attempts: 0,
+        last_sync_error: null,
+        updated_at: nowIso,
+      };
+      if (advanceEpoch) {
+        const { data } = await admin
+          .from("calendar_projections")
+          .select("id_epoch")
+          .eq("id", id)
+          .maybeSingle();
+        await admin
+          .from("calendar_projections")
+          .update({
+            ...base,
+            id_epoch: (data?.id_epoch ?? 0) + 1,
+            google_event_id: null,
+            etag: null,
+            meet_url: null,
+            meet_state: "not_requested",
+            last_meet_error: null,
+          })
+          .eq("id", id);
+      } else {
+        await admin.from("calendar_projections").update(base).eq("id", id);
+      }
+    },
   };
 }

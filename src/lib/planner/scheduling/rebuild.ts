@@ -1,3 +1,5 @@
+import { projectEntity, type EngineDeps } from "./reconcile";
+
 /**
  * REBUILD CONTRACT (documented in Stage 3.4; implemented in Stage 3.6).
  *
@@ -39,6 +41,12 @@ export interface RebuildOptions {
   dryRun?: boolean;
   /** Max projections to process in one pass. */
   limit?: number;
+  /**
+   * Advance id_epoch to mint fresh event ids (for a calendar/account change —
+   * old-calendar events are intentionally abandoned). Default false: a safe
+   * in-place re-sync that is duplicate-free and creates no orphans.
+   */
+  freshIds?: boolean;
 }
 
 export interface RebuildItemResult {
@@ -59,4 +67,59 @@ export interface RebuildSummary {
   failed: number;
   durationMs: number;
   items: RebuildItemResult[];
+}
+
+/**
+ * Execute the rebuild contract: enumerate Portal-managed projections, reset each
+ * for rebuild (optionally advancing the epoch), and drive the normal idempotent
+ * reconciliation. Replay-safe; never touches events we hold no projection for.
+ * Returns the structured audit summary.
+ */
+export async function rebuildProjections(
+  deps: EngineDeps,
+  opts: RebuildOptions,
+  correlationId: string
+): Promise<RebuildSummary> {
+  const start = deps.now().getTime();
+  const recs = await deps.store.listAll(opts.limit ?? 500);
+  const items: RebuildItemResult[] = [];
+  let rebuilt = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const rec of recs) {
+    if (opts.entityType && rec.entityType !== opts.entityType) continue;
+
+    if (opts.dryRun) {
+      items.push({ entityId: rec.entityId, action: "skipped", reason: "dry_run" });
+      skipped++;
+      continue;
+    }
+
+    await deps.store.prepareRebuild(rec.id, opts.freshIds ?? false);
+    const r = await projectEntity(
+      deps,
+      { entityType: rec.entityType, entityId: rec.entityId },
+      correlationId
+    );
+    if (r.result === "success") {
+      rebuilt++;
+      items.push({ entityId: rec.entityId, action: "rebuilt" });
+    } else if (r.result === "failure") {
+      failed++;
+      items.push({ entityId: rec.entityId, action: "failed", reason: r.reason });
+    } else {
+      skipped++;
+      items.push({ entityId: rec.entityId, action: "skipped", reason: r.reason });
+    }
+  }
+
+  return {
+    processed: items.length,
+    rebuilt,
+    skipped,
+    failed,
+    durationMs: deps.now().getTime() - start,
+    items,
+  };
 }

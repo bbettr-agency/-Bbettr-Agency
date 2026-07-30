@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IntegrationAuthError, IntegrationTimeoutError } from "@/lib/net";
 import { projectEntity, reconcilePending, type EngineDeps } from "./reconcile";
+import { rebuildProjections } from "./rebuild";
 import type { SyncLogFields } from "./observability";
 import type {
   EntityRef,
@@ -122,6 +123,25 @@ class InMemoryStore implements ProjectionStore {
       )
       .slice(0, limit)
       .map((r) => ({ ...r }));
+  }
+  async listAll(limit: number) {
+    return [...this.records.values()].slice(0, limit).map((r) => ({ ...r }));
+  }
+  async prepareRebuild(id: string, advanceEpoch: boolean) {
+    const r = [...this.records.values()].find((x) => x.id === id);
+    if (!r) return;
+    r.syncedHash = null;
+    r.syncState = "pending";
+    r.nextAttemptAt = null;
+    r.syncAttempts = 0;
+    if (advanceEpoch) {
+      r.idEpoch += 1;
+      r.googleEventId = null;
+      r.etag = null;
+      r.meetUrl = null;
+      r.meetState = "not_requested";
+      r.lastMeetError = null;
+    }
   }
 }
 
@@ -345,5 +365,43 @@ describe("reconcilePending", () => {
 
     const summary = await reconcilePending(deps(), { limit: 10, correlationId: "batch-1" });
     expect(summary).toMatchObject({ processed: 2, succeeded: 2, failed: 0 });
+  });
+});
+
+describe("rebuildProjections", () => {
+  async function seedSynced() {
+    store.setDesired(REF, makeDraft());
+    await projectEntity(deps(), REF, "seed");
+  }
+
+  it("re-syncs Portal-managed projections in place (no epoch change) with a structured summary", async () => {
+    await seedSynced();
+    expect(store.raw(REF)!.idEpoch).toBe(0);
+
+    const summary = await rebuildProjections(deps(), {}, "rb-1");
+    expect(summary).toMatchObject({ processed: 1, rebuilt: 1, failed: 0, skipped: 0 });
+    expect(summary.items[0]).toMatchObject({ entityId: UUID, action: "rebuilt" });
+    expect(typeof summary.durationMs).toBe("number");
+    // In-place: epoch unchanged, event updated (not duplicated).
+    expect(store.raw(REF)!.idEpoch).toBe(0);
+    expect(provider.updates).toBe(1);
+  });
+
+  it("freshIds advances the epoch and recreates under a new id", async () => {
+    await seedSynced();
+    const before = provider.creates;
+    const summary = await rebuildProjections(deps(), { freshIds: true }, "rb-2");
+    expect(summary.rebuilt).toBe(1);
+    expect(store.raw(REF)!.idEpoch).toBe(1); // fresh id namespace
+    expect(provider.creates).toBe(before + 1); // recreated, not updated
+  });
+
+  it("dryRun reports intended work without calling the provider", async () => {
+    await seedSynced();
+    const reconcilesBefore = provider.reconciles;
+    const summary = await rebuildProjections(deps(), { dryRun: true }, "rb-3");
+    expect(summary).toMatchObject({ processed: 1, skipped: 1, rebuilt: 0 });
+    expect(summary.items[0]).toMatchObject({ action: "skipped", reason: "dry_run" });
+    expect(provider.reconciles).toBe(reconcilesBefore); // no Google calls
   });
 });

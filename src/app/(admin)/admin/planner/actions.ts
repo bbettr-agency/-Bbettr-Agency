@@ -4,13 +4,20 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { PLANNER_ENABLED } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
-import { reconciliationScheduler } from "@/lib/planner/scheduling/service";
+import { reconciliationScheduler, rebuildCalendar } from "@/lib/planner/scheduling/service";
 import type { ReconcileSummary } from "@/lib/planner/scheduling/reconcile";
+import type { RebuildSummary } from "@/lib/planner/scheduling/rebuild";
 
 export interface ReconcileNowResult {
   ok?: boolean;
   error?: string;
   summary?: ReconcileSummary;
+}
+
+export interface RebuildResult {
+  ok?: boolean;
+  error?: string;
+  summary?: RebuildSummary;
 }
 
 /**
@@ -22,6 +29,19 @@ export async function reconcileNowAction(): Promise<ReconcileNowResult> {
   if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
   await requireAdmin();
   const summary = await reconciliationScheduler.tick(newCorrelationId());
+  revalidatePath("/admin/planner/meetings");
+  return { ok: true, summary };
+}
+
+/**
+ * Rebuild all Portal-managed calendar projections (safe in-place re-sync).
+ * Returns the structured audit summary. Portal-managed only; never touches
+ * unrelated Google events.
+ */
+export async function rebuildCalendarAction(): Promise<RebuildResult> {
+  if (!PLANNER_ENABLED) return { error: "Planner is not enabled." };
+  await requireAdmin();
+  const summary = await rebuildCalendar();
   revalidatePath("/admin/planner/meetings");
   return { ok: true, summary };
 }
