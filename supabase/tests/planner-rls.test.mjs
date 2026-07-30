@@ -1,14 +1,14 @@
 /**
  * Bbettr OS — Planner RLS proof (the Phase 1 hard gate).
  *
- * Runs the REAL migration files (supabase/migrations/0027, 0028) against a local
+ * Runs the REAL migration files (supabase/migrations/0027–0031) against a local
  * PostgreSQL scaffolded with the Portal's identity model (user_role enum,
  * public.profiles, is_admin()) plus Supabase-equivalent roles + auth.uid(), then
  * asserts the access matrix exactly as PostgREST would enforce it.
  *
- * Proves: admin has intended access; client, rep and anonymous have ZERO access;
- * the audit trigger is non-spoofable; and calendar_credentials is reachable only
- * by service_role.
+ * Proves: admin has intended access to tasks + meetings + attendees; client, rep
+ * and anonymous have ZERO access; the audit triggers are non-spoofable; and
+ * calendar_credentials AND calendar_projections are reachable only by service_role.
  *
  * ⚠️ DESTRUCTIVE: this harness DROPS AND RECREATES the public + auth schemas on
  * the target database. It must ONLY ever run against a disposable local or CI
@@ -133,7 +133,14 @@ async function setup() {
   await client.query(`drop schema if exists public cascade; create schema public;
                       drop schema if exists auth cascade;`);
   await client.query(PORTAL_SCAFFOLD);
-  for (const f of ["0027_planner_tasks.sql", "0028_calendar_credentials.sql"]) {
+  for (const f of [
+    "0027_planner_tasks.sql",
+    "0028_calendar_credentials.sql",
+    "0029_meetings.sql",
+    "0030_meeting_attendees.sql",
+    "0031_calendar_projections.sql",
+    "0032_meetings_idempotency.sql",
+  ]) {
     await client.query(readFileSync(join(MIG, f), "utf8"));
   }
   await client.query(seed());
@@ -148,6 +155,19 @@ async function seedTask(c, uid, fields) {
   const { rows } = await c.query(
     `insert into public.tasks (title,assignee_id,scheduled_date,status) values ($1,$2,$3,$4) returning id`,
     [fields.title, fields.assignee_id, fields.scheduled_date ?? null, fields.status ?? "todo"],
+  );
+  await c.query(`select set_config('request.jwt.claims','',false)`);
+  return rows[0].id;
+}
+
+/** Insert a committed meeting, stamping created_by from `uid` via the audit trigger. */
+async function seedMeeting(c, uid, fields) {
+  await c.query(`select set_config('request.jwt.claims',$1,false)`, [
+    JSON.stringify({ sub: uid, role: "authenticated" }),
+  ]);
+  const { rows } = await c.query(
+    `insert into public.meetings (title,starts_at,ends_at,has_meet) values ($1,$2,$3,$4) returning id`,
+    [fields.title, fields.starts_at, fields.ends_at, fields.has_meet ?? false],
   );
   await c.query(`select set_config('request.jwt.claims','',false)`);
   return rows[0].id;
@@ -179,6 +199,12 @@ async function main() {
   const c = await setup();
   const t1 = await seedTask(c, U.admin1, { title: "Eloff task", assignee_id: U.admin1, scheduled_date: "2026-07-20" });
   await seedTask(c, U.admin2, { title: "Ashwin task", assignee_id: U.admin2, scheduled_date: "2026-07-21" });
+  const m1 = await seedMeeting(c, U.admin1, {
+    title: "Kickoff", starts_at: "2026-08-01T09:00:00Z", ends_at: "2026-08-01T10:00:00Z", has_meet: true,
+  });
+  await seedMeeting(c, U.admin2, {
+    title: "Review", starts_at: "2026-08-02T09:00:00Z", ends_at: "2026-08-02T10:00:00Z",
+  });
 
   console.log("\n── tasks: access matrix ──");
   check("anon cannot read tasks", denied(await runAs(c, "anon", null, "select * from public.tasks")));
@@ -215,6 +241,65 @@ async function main() {
   check("created_by is forced to auth.uid(), not the spoofed value",
     spoof.rows[0]?.created_by === U.admin1, `got ${spoof.rows[0]?.created_by}`);
 
+  console.log("\n── meetings: access matrix ──");
+  check("anon cannot read meetings", denied(await runAs(c, "anon", null, "select * from public.meetings")));
+  check("client (role=client) sees ZERO meetings",
+    (await runAs(c, "authenticated", U.client, "select * from public.meetings")).rowCount === 0);
+  check("rep (role=rep) sees ZERO meetings",
+    (await runAs(c, "authenticated", U.rep, "select * from public.meetings")).rowCount === 0);
+  check("admin sees ALL meetings (2)",
+    (await runAs(c, "authenticated", U.admin1, "select * from public.meetings")).rowCount === 2);
+
+  console.log("\n── meetings: writes ──");
+  check("client cannot INSERT a meeting", denied(await runAs(c, "authenticated", U.client,
+    `insert into public.meetings (title,starts_at,ends_at) values ('x', now(), now()+interval '1 hour')`)));
+  check("admin CAN insert a meeting",
+    (await runAs(c, "authenticated", U.admin1,
+      `insert into public.meetings (title,starts_at,ends_at) values ('ok', now(), now()+interval '1 hour') returning id`)).rowCount === 1);
+  check("admin cannot HARD delete a meeting (no delete policy)",
+    denied(await runAs(c, "authenticated", U.admin1, `delete from public.meetings where id='${m1}'`)));
+
+  console.log("\n── meetings: audit trigger (non-spoofable) ──");
+  const mspoof = await runAs(c, "authenticated", U.admin1,
+    `insert into public.meetings (title,starts_at,ends_at,created_by) values ('spoof',now(),now()+interval '1 hour','${U.admin2}') returning created_by`);
+  check("meeting created_by is forced to auth.uid(), not the spoofed value",
+    mspoof.rows[0]?.created_by === U.admin1, `got ${mspoof.rows[0]?.created_by}`);
+
+  console.log("\n── meetings: idempotency key (replay-safe creation) ──");
+  await c.query(`select set_config('request.jwt.claims',$1,false)`, [
+    JSON.stringify({ sub: U.admin1, role: "authenticated" }),
+  ]);
+  await c.query(
+    `insert into public.meetings (title,starts_at,ends_at,idempotency_key) values ('idem','2026-08-05T09:00:00Z','2026-08-05T10:00:00Z','dup-key')`,
+  );
+  let dupRejected = false;
+  try {
+    await c.query(
+      `insert into public.meetings (title,starts_at,ends_at,idempotency_key) values ('idem2','2026-08-06T09:00:00Z','2026-08-06T10:00:00Z','dup-key')`,
+    );
+  } catch {
+    dupRejected = true;
+  }
+  await c.query(`select set_config('request.jwt.claims','',false)`);
+  check("duplicate idempotency_key is rejected (partial-unique index)", dupRejected);
+
+  console.log("\n── meeting_attendees: access matrix ──");
+  await c.query(`insert into public.meeting_attendees (meeting_id,email,display_name) values ('${m1}','guest@ex.test','Guest')`);
+  check("anon cannot read attendees", denied(await runAs(c, "anon", null, "select * from public.meeting_attendees")));
+  check("client sees ZERO attendees",
+    (await runAs(c, "authenticated", U.client, "select * from public.meeting_attendees")).rowCount === 0);
+  check("rep sees ZERO attendees",
+    (await runAs(c, "authenticated", U.rep, "select * from public.meeting_attendees")).rowCount === 0);
+  check("admin sees attendees (1)",
+    (await runAs(c, "authenticated", U.admin1, "select * from public.meeting_attendees")).rowCount === 1);
+  check("client cannot INSERT an attendee", denied(await runAs(c, "authenticated", U.client,
+    `insert into public.meeting_attendees (meeting_id,email) values ('${m1}','h@x.test')`)));
+  check("admin CAN insert an attendee",
+    (await runAs(c, "authenticated", U.admin1,
+      `insert into public.meeting_attendees (meeting_id,email) values ('${m1}','ok@ex.test') returning id`)).rowCount === 1);
+  check("admin CAN delete an attendee",
+    (await runAs(c, "authenticated", U.admin1, `delete from public.meeting_attendees where meeting_id='${m1}'`)).error === null);
+
   console.log("\n── calendar_credentials: locked to service_role ──");
   // Seed the single row as superuser (stands in for the service-role write path).
   await c.query(`insert into public.calendar_credentials (id,status) values (1,'connected')`);
@@ -227,6 +312,19 @@ async function main() {
     denied(await runAs(c, "authenticated", U.admin1, `update public.calendar_credentials set status='x' where id=1`)));
   check("service_role CAN read credentials",
     (await runAs(c, "service_role", null, "select * from public.calendar_credentials")).rowCount === 1);
+
+  console.log("\n── calendar_projections: locked to service_role ──");
+  // Seed one projection row as superuser (stands in for the service-role engine).
+  await c.query(`insert into public.calendar_projections (entity_type,entity_id,google_calendar_id) values ('meeting','${m1}','primary')`);
+  check("anon cannot read projections", denied(await runAs(c, "anon", null, "select * from public.calendar_projections")));
+  check("client cannot read projections", denied(await runAs(c, "authenticated", U.client, "select * from public.calendar_projections")));
+  check("rep cannot read projections", denied(await runAs(c, "authenticated", U.rep, "select * from public.calendar_projections")));
+  check("even an ADMIN cannot read projections (RLS-locked)",
+    denied(await runAs(c, "authenticated", U.admin1, "select * from public.calendar_projections")));
+  check("admin cannot write projections",
+    denied(await runAs(c, "authenticated", U.admin1, `update public.calendar_projections set sync_state='synced' where entity_id='${m1}'`)));
+  check("service_role CAN read projections",
+    (await runAs(c, "service_role", null, "select * from public.calendar_projections")).rowCount === 1);
 
   await c.end();
   console.log(`\n${fail === 0 ? "✅ ALL RLS CHECKS PASSED" : "❌ RLS FAILURES"}: ${pass} passed, ${fail} failed`);

@@ -23,7 +23,8 @@ export type IntegrationEvent =
   | "token_exchange"
   | "token_refresh"
   | "disconnect"
-  | "terminal_failure";
+  | "terminal_failure"
+  | "calendar_sync";
 
 export interface IntegrationLogFields {
   /** Provider slug, e.g. "google". */
@@ -36,6 +37,16 @@ export interface IntegrationLogFields {
   status?: number;
   /** Safe, secret-free explanation (error class name, "invalid_grant", etc.). */
   reason?: string;
+
+  // Optional projection/sync fields (calendar_sync events). All safe — never
+  // event descriptions, attendee details, tokens or bodies.
+  entityType?: string;
+  entityId?: string;
+  googleCalendarId?: string;
+  googleEventId?: string;
+  operation?: string;
+  durationMs?: number;
+  result?: string;
 }
 
 /** Mint a correlation id for one integration flow. */

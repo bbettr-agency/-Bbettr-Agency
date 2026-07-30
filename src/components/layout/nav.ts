@@ -14,6 +14,7 @@ import {
   Wallet,
   Plug,
   FileSignature,
+  CalendarClock,
 } from "lucide-react";
 
 export interface NavItem {
@@ -21,6 +22,17 @@ export interface NavItem {
   href: string;
   icon: LucideIcon;
 }
+
+/**
+ * Bbettr OS Planner (internal, admin-only). Injected into the admin nav only
+ * when PLANNER_ENABLED is on — the flag is resolved server-side and passed to
+ * AppShell as a plain boolean (icons can't cross the server→client boundary).
+ */
+export const PLANNER_MEETINGS_NAV: NavItem = {
+  label: "Meetings",
+  href: "/admin/planner/meetings",
+  icon: CalendarClock,
+};
 
 /** Client portal navigation. */
 export const CLIENT_NAV: NavItem[] = [

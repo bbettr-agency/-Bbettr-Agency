@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/auth";
 import { AppShell } from "@/components/layout/app-shell";
 import { getInternalFeed } from "@/lib/internal-notifications";
 import { InternalNotificationBell } from "@/components/internal/internal-notification-bell";
+import { PLANNER_ENABLED } from "@/lib/flags";
 
 export default async function AdminLayout({
   children,
@@ -15,6 +16,7 @@ export default async function AdminLayout({
     <AppShell
       roleLabel="Admin"
       context="Bbettr Agency · Administrator"
+      plannerEnabled={PLANNER_ENABLED}
       headerSlot={
         <InternalNotificationBell
           notifications={feed.items}

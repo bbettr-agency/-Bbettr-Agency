@@ -24,6 +24,10 @@ export {
 };
 export type { GoogleConnectionStatus, GoogleAccessToken } from "./connection";
 
+// Calendar projection provider (Phase 3): the Google implementation of the
+// scheduling CalendarProvider contract.
+export { createGoogleCalendarProvider } from "./calendar/service";
+
 /** Is Google configured (env vars present) on this server? */
 export function isGoogleConfigured(): boolean {
   return getGoogleConfig() !== null;
