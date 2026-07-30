@@ -140,6 +140,7 @@ async function setup() {
     "0030_meeting_attendees.sql",
     "0031_calendar_projections.sql",
     "0032_meetings_idempotency.sql",
+    "0033_create_meeting_rpc.sql",
   ]) {
     await client.query(readFileSync(join(MIG, f), "utf8"));
   }
@@ -282,6 +283,42 @@ async function main() {
   }
   await c.query(`select set_config('request.jwt.claims','',false)`);
   check("duplicate idempotency_key is rejected (partial-unique index)", dupRejected);
+
+  console.log("\n── create_meeting_with_attendees RPC (atomic, RLS-enforced) ──");
+  // COMMIT the RPC create as the authenticated admin role (so RLS + audit apply),
+  // then read it back with runAs. Proves meeting + attendees commit together.
+  let adminRpcOk = false;
+  try {
+    await c.query("begin");
+    await c.query("set local role authenticated");
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [
+      JSON.stringify({ sub: U.admin1, role: "authenticated" }),
+    ]);
+    const r = await c.query(
+      `select public.create_meeting_with_attendees(
+         'RPC','notes','2026-08-07T09:00:00Z','2026-08-07T10:00:00Z','UTC',true,'rpc-key-1',
+         '[{"email":"g1@ex.test","display_name":"G1"},{"email":"g2@ex.test"}]'::jsonb) as id`,
+    );
+    await c.query("commit");
+    adminRpcOk = Boolean(r.rows[0]?.id);
+  } catch {
+    await c.query("rollback").catch(() => {});
+  }
+  check("admin CAN create a meeting + attendees atomically via RPC", adminRpcOk);
+  check("RPC inserted both attendees in the same transaction",
+    (await runAs(c, "authenticated", U.admin1,
+      `select count(*)::int as n from public.meeting_attendees a
+         join public.meetings mm on mm.id = a.meeting_id
+        where mm.idempotency_key = 'rpc-key-1'`)).rows[0]?.n === 2);
+  check("RPC stamps created_by from auth.uid() (audit preserved)",
+    (await runAs(c, "authenticated", U.admin1,
+      `select created_by from public.meetings where idempotency_key = 'rpc-key-1'`)).rows[0]?.created_by === U.admin1);
+  check("client CANNOT create a meeting via RPC (RLS enforced under SECURITY INVOKER)",
+    denied(await runAs(c, "authenticated", U.client,
+      `select public.create_meeting_with_attendees('hax',null,'2026-08-08T09:00:00Z','2026-08-08T10:00:00Z','UTC',false,null,'[]'::jsonb)`)));
+  // Clean up the committed RPC meeting (+ cascade attendees) so it doesn't skew
+  // the attendee-count check below.
+  await c.query(`delete from public.meetings where idempotency_key = 'rpc-key-1'`);
 
   console.log("\n── meeting_attendees: access matrix ──");
   await c.query(`insert into public.meeting_attendees (meeting_id,email,display_name) values ('${m1}','guest@ex.test','Guest')`);

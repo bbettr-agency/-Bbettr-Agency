@@ -107,19 +107,34 @@ export async function projectEntity(
     : deletedDesiredFrom(rec);
   const desiredHash = computeDesiredHash(desired);
   const isRemoval = desired.intent !== "active";
+  const upToDate =
+    !isRemoval && rec.syncState === "synced" && rec.syncedHash === desiredHash;
 
   // No-op: already synced to this exact desired state, and Meet isn't mid-flight.
-  if (
-    !isRemoval &&
-    rec.syncState === "synced" &&
-    rec.syncedHash === desiredHash &&
-    rec.meetState !== "pending"
-  ) {
+  if (upToDate && rec.meetState !== "pending") {
     await deps.store.saveResult(rec.id, { releaseLock: token });
     return finish("skipped", { reason: "no_change" }, rec.googleEventId);
   }
 
   try {
+    // Meet is still provisioning and nothing else changed → refresh via a GET
+    // ONLY. A PATCH here would re-notify guests under sendUpdates=all.
+    if (upToDate) {
+      const ev = await deps.provider.read(desired);
+      const meetPending = ev.meetState === "pending";
+      await deps.store.saveResult(rec.id, {
+        meetUrl: ev.meetUrl,
+        meetState: ev.meetState,
+        lastMeetError: ev.meetError ?? null,
+        nextAttemptAt: meetPending
+          ? new Date(deps.now().getTime() + meetPollMs).toISOString()
+          : null,
+        lastSyncAt: deps.now().toISOString(),
+        releaseLock: token,
+      });
+      return finish("success", { operation: "update", meetPending }, ev.googleEventId);
+    }
+
     const outcome = await deps.provider.reconcile(desired, {
       googleEventId: rec.googleEventId,
       etag: rec.etag,
@@ -225,19 +240,33 @@ export interface ReconcileSummary {
   succeeded: number;
   failed: number;
   skipped: number;
+  /** True when a time budget stopped the pass before all due rows were done. */
+  stoppedEarly?: boolean;
 }
 
 /**
  * Reconcile a batch of due projections (pending/failed past their backoff).
  * Idempotent and safe to run from a scheduled/internal trigger at any time.
+ *
+ * `maxDurationMs` makes it serverless-safe: the loop stops BETWEEN entities once
+ * the budget is spent (never mid-entity — each is fully processed or not started),
+ * leaving the remainder pending for the next tick. Locking is unaffected.
  */
 export async function reconcilePending(
   deps: EngineDeps,
-  opts: { limit: number; correlationId: string }
+  opts: { limit: number; correlationId: string; maxDurationMs?: number }
 ): Promise<ReconcileSummary> {
   const due = await deps.store.listDue(opts.limit, deps.now().toISOString());
   const summary: ReconcileSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
+  const startedMs = deps.now().getTime();
   for (const rec of due) {
+    if (
+      opts.maxDurationMs !== undefined &&
+      deps.now().getTime() - startedMs >= opts.maxDurationMs
+    ) {
+      summary.stoppedEarly = true;
+      break;
+    }
     const r = await projectEntity(
       deps,
       { entityType: rec.entityType, entityId: rec.entityId },

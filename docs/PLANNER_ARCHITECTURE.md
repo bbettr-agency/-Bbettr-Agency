@@ -296,6 +296,33 @@ reaching around the architecture.
 
 ---
 
+## Production Hardening (Phase 3.1)
+
+Four production-readiness improvements landed after the audit. None changed the
+architecture or any public contract behaviour.
+
+- **Access-token cache (provider-local).** `src/lib/google/calendar/token-cache.ts`
+  holds one access token + expiry in memory and reuses it for all calendar
+  operations, refreshing only within a 5-minute window of expiry. Refresh-token
+  behaviour is unchanged (a cache miss still runs the full refresh, including
+  `invalid_grant → reconnect_required`); a 401/403 invalidates the cache so the
+  next call refreshes. This removes the previous one-token-refresh-per-operation
+  cost.
+- **Meet-pending refresh via GET, not PATCH.** When a projection is already
+  `synced`, its hash is unchanged, and only `meet_state = 'pending'` remains, the
+  engine issues a provider **read** (GET) to pick up the Meet URL — it no longer
+  PATCHes the event, so guests are never re-notified under `sendUpdates=all`.
+- **Scheduler time budget.** `reconcilePending` accepts `maxDurationMs`
+  (`PLANNER_RECONCILE_MAX_MS`, default 8s). A pass stops **between** entities once
+  the budget is spent — never mid-entity, so there are no partially processed
+  entities — and leaves the rest pending for the next tick. Locking is unchanged.
+  The route sets `maxDuration`; recommended cron interval is every 2–5 minutes
+  (≥ 2× the budget).
+- **Atomic meeting creation.** `create_meeting_with_attendees` (migration 0033, a
+  SECURITY INVOKER RPC) inserts the meeting and its attendees in one transaction —
+  both commit or neither does. RLS, the audit trigger and the idempotency key are
+  all preserved.
+
 ## 9. Non-Negotiable Rules
 
 Violating any of these breaks the architecture. Do not merge code that does.

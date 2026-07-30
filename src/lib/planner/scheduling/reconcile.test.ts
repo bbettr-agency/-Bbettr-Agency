@@ -153,6 +153,7 @@ class FakeProvider implements CalendarProvider {
   updates = 0;
   deletes = 0;
   reconciles = 0;
+  reads = 0;
   private evId = "ev-fixed";
 
   async create(): Promise<ReflectedEvent> {
@@ -162,6 +163,19 @@ class FakeProvider implements CalendarProvider {
     throw new Error("not used directly");
   }
   async delete(): Promise<void> {}
+  async read(desired: DesiredEvent): Promise<ReflectedEvent> {
+    this.reads++;
+    const meetState: MeetState = desired.wantsMeet
+      ? this.meetSequence.shift() ?? "ready"
+      : "not_requested";
+    return {
+      googleEventId: this.evId,
+      etag: "etag-read",
+      meetUrl: meetState === "ready" ? "https://meet.google.com/x" : null,
+      meetState,
+      meetError: meetState === "failed" ? "conference_create_failed" : null,
+    };
+  }
   async reconcile(
     desired: DesiredEvent,
     current: { googleEventId: string | null; etag: string | null }
@@ -297,7 +311,7 @@ describe("projectEntity — failure handling", () => {
 });
 
 describe("projectEntity — explicit Meet state", () => {
-  it("stays synced-but-pending, then promotes to ready on a later pass", async () => {
+  it("stays synced-but-pending, then promotes to ready via a GET (no PATCH)", async () => {
     store.setDesired(REF, makeDraft({ wantsMeet: true }));
     provider.meetSequence = ["pending", "ready"];
 
@@ -307,6 +321,7 @@ describe("projectEntity — explicit Meet state", () => {
     expect(rec.syncState).toBe("synced");
     expect(rec.meetState).toBe("pending");
     expect(rec.nextAttemptAt).not.toBeNull(); // stays due for re-poll
+    const reconcilesAfterFirst = provider.reconciles;
 
     const second = await projectEntity(deps(), REF, "c2");
     expect(second.result).toBe("success");
@@ -314,6 +329,9 @@ describe("projectEntity — explicit Meet state", () => {
     expect(rec.meetState).toBe("ready");
     expect(rec.meetUrl).toBe("https://meet.google.com/x");
     expect(rec.nextAttemptAt).toBeNull();
+    // The refresh used a GET (read), NOT another reconcile/PATCH.
+    expect(provider.reads).toBe(1);
+    expect(provider.reconciles).toBe(reconcilesAfterFirst);
   });
 });
 
@@ -365,6 +383,26 @@ describe("reconcilePending", () => {
 
     const summary = await reconcilePending(deps(), { limit: 10, correlationId: "batch-1" });
     expect(summary).toMatchObject({ processed: 2, succeeded: 2, failed: 0 });
+  });
+
+  it("honours a time budget: stops between entities, leaving the rest pending", async () => {
+    const REF2: EntityRef = { entityType: "meeting", entityId: "00000000-0000-0000-0000-000000000002" };
+    store.setDesired(REF, makeDraft());
+    store.setDesired(REF2, makeDraft({ entityId: REF2.entityId }));
+    await store.ensureProjection(REF, "cal@example.com");
+    await store.ensureProjection(REF2, "cal@example.com");
+
+    // maxDurationMs 0 → the budget is already spent on entry; nothing is processed.
+    const summary = await reconcilePending(deps(), {
+      limit: 10,
+      correlationId: "batch-2",
+      maxDurationMs: 0,
+    });
+    expect(summary.processed).toBe(0);
+    expect(summary.stoppedEarly).toBe(true);
+    // Both rows remain pending for the next tick.
+    expect(store.raw(REF)!.syncState).toBe("pending");
+    expect(store.raw(REF2)!.syncState).toBe("pending");
   });
 });
 

@@ -1101,6 +1101,19 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      create_meeting_with_attendees: {
+        Args: {
+          p_title: string;
+          p_description: string | null;
+          p_starts_at: string;
+          p_ends_at: string;
+          p_time_zone: string;
+          p_has_meet: boolean;
+          p_idempotency_key: string | null;
+          p_attendees: { email: string; display_name: string | null }[];
+        };
+        Returns: string;
+      };
     };
   };
 }

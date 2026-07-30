@@ -5,8 +5,11 @@ import {
   withRetry,
   IntegrationApiError,
 } from "@/lib/net";
-import { getAccessToken } from "@/lib/google/connection";
 import { getGoogleConfig } from "@/lib/google/config";
+import {
+  getCachedAccessToken,
+  invalidateAccessTokenCache,
+} from "./token-cache";
 import type {
   CalendarProvider,
   DesiredEvent,
@@ -67,8 +70,21 @@ export function createGoogleCalendarProvider(
   async function authHeaders(
     extra: Record<string, string> = {}
   ): Promise<Record<string, string>> {
-    const { accessToken } = await getAccessToken(correlationId);
+    const accessToken = await getCachedAccessToken(correlationId);
     return { Authorization: `Bearer ${accessToken}`, Accept: "application/json", ...extra };
+  }
+
+  // On an auth rejection the cached token may be stale/revoked — drop it so the
+  // next operation refreshes (and surfaces invalid_grant → reconnect_required).
+  async function guard<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof IntegrationApiError && (err.status === 401 || err.status === 403)) {
+        invalidateAccessTokenCache();
+      }
+      throw err;
+    }
   }
 
   function eventsUrl(calendarId: string, suffix = ""): string {
@@ -211,5 +227,11 @@ export function createGoogleCalendarProvider(
     return { kind: "projected", event: await create(desired) };
   }
 
-  return { create, update, delete: del, reconcile };
+  return {
+    create,
+    update,
+    delete: del,
+    read: (desired) => guard(() => getReflected(desired)),
+    reconcile: (desired, current) => guard(() => reconcile(desired, current)),
+  };
 }

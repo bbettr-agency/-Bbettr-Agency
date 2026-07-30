@@ -27,6 +27,13 @@ import type { Scheduler } from "./scheduler";
  * and every projection failure is recorded on the row for the scheduler.
  */
 
+/**
+ * Max wall-clock a single scheduled reconcile pass may spend before stopping and
+ * leaving the rest for the next tick. Keep it below the route's function timeout.
+ * Configurable via PLANNER_RECONCILE_MAX_MS; default 8s.
+ */
+const RECONCILE_MAX_MS = Number(process.env.PLANNER_RECONCILE_MAX_MS) || 8000;
+
 function buildDeps(
   correlationId: string,
   providerOpts: { maxRetries?: number } = {}
@@ -73,7 +80,11 @@ export async function reconcileDue(
   if (!isGoogleConfigured()) {
     return { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
   }
-  return reconcilePending(buildDeps(correlationId), { limit, correlationId });
+  return reconcilePending(buildDeps(correlationId), {
+    limit,
+    correlationId,
+    maxDurationMs: RECONCILE_MAX_MS,
+  });
 }
 
 /**
