@@ -141,6 +141,7 @@ async function setup() {
     "0031_calendar_projections.sql",
     "0032_meetings_idempotency.sql",
     "0033_create_meeting_rpc.sql",
+    "0034_soft_delete_meeting.sql",
   ]) {
     await client.query(readFileSync(join(MIG, f), "utf8"));
   }
@@ -362,6 +363,62 @@ async function main() {
     denied(await runAs(c, "authenticated", U.admin1, `update public.calendar_projections set sync_state='synced' where entity_id='${m1}'`)));
   check("service_role CAN read projections",
     (await runAs(c, "service_role", null, "select * from public.calendar_projections")).rowCount === 1);
+
+  console.log("\n── soft_delete_meeting RPC (guarded, SECURITY DEFINER) ──");
+  // Dedicated meetings so we don't disturb rows used by earlier assertions.
+  const mDel = await seedMeeting(c, U.admin1, {
+    title: "ToDelete", starts_at: "2026-09-01T09:00:00Z", ends_at: "2026-09-01T10:00:00Z",
+  });
+  const mKeep = await seedMeeting(c, U.admin1, {
+    title: "Keep", starts_at: "2026-09-02T09:00:00Z", ends_at: "2026-09-02T10:00:00Z",
+  });
+  // A cancelled meeting (trigger stamps cancelled_by/at on the seeding insert).
+  await c.query(`select set_config('request.jwt.claims',$1,false)`, [
+    JSON.stringify({ sub: U.admin1, role: "authenticated" }),
+  ]);
+  const { rows: crows } = await c.query(
+    `insert into public.meetings (title,starts_at,ends_at,status) values ('Cancelled','2026-09-03T09:00:00Z','2026-09-03T10:00:00Z','cancelled') returning id`,
+  );
+  const mCancelled = crows[0].id;
+  await c.query(`select set_config('request.jwt.claims','',false)`);
+
+  // Non-admins are denied (execute is granted to authenticated, but is_admin()
+  // inside the function raises for client/rep; anon has no execute grant at all).
+  check("client is DENIED soft_delete_meeting",
+    denied(await runAs(c, "authenticated", U.client, `select public.soft_delete_meeting('${mDel}')`)));
+  check("rep is DENIED soft_delete_meeting",
+    denied(await runAs(c, "authenticated", U.rep, `select public.soft_delete_meeting('${mDel}')`)));
+  check("anon is DENIED soft_delete_meeting",
+    denied(await runAs(c, "anon", null, `select public.soft_delete_meeting('${mDel}')`)));
+  // Nothing was modified by the denied attempts.
+  check("denied attempts left the meeting live",
+    (await c.query(`select deleted_at is null as live from public.meetings where id='${mDel}'`)).rows[0]?.live === true);
+
+  // Admin can soft-delete a scheduled meeting (commit, then verify).
+  async function adminCall(sql) {
+    await c.query("begin");
+    await c.query("set local role authenticated");
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [
+      JSON.stringify({ sub: U.admin1, role: "authenticated" }),
+    ]);
+    const r = await c.query(sql);
+    await c.query("commit");
+    return r.rows[0];
+  }
+  check("admin CAN soft-delete a SCHEDULED meeting (returns its id)",
+    (await adminCall(`select public.soft_delete_meeting('${mDel}') as id`))?.id === mDel);
+  check("meeting is soft-deleted (deleted_at set), not hard-deleted",
+    (await c.query(`select deleted_at is not null as d from public.meetings where id='${mDel}'`)).rows[0]?.d === true);
+  check("soft-deleted meeting is HIDDEN from admin by the SELECT policy (unchanged)",
+    (await runAs(c, "authenticated", U.admin1, `select count(*)::int as n from public.meetings where id='${mDel}'`)).rows[0]?.n === 0);
+  check("only the requested meeting was modified (the other stays live/visible)",
+    (await runAs(c, "authenticated", U.admin1, `select count(*)::int as n from public.meetings where id='${mKeep}'`)).rows[0]?.n === 1);
+  check("repeated soft-delete is a deterministic no-op (returns null, no error)",
+    (await adminCall(`select public.soft_delete_meeting('${mDel}') as id`))?.id === null);
+  check("soft-delete of a MISSING meeting is a deterministic no-op (null)",
+    (await adminCall(`select public.soft_delete_meeting('00000000-0000-0000-0000-0000000000ee') as id`))?.id === null);
+  check("admin CAN soft-delete a CANCELLED meeting",
+    (await adminCall(`select public.soft_delete_meeting('${mCancelled}') as id`))?.id === mCancelled);
 
   await c.end();
   console.log(`\n${fail === 0 ? "✅ ALL RLS CHECKS PASSED" : "❌ RLS FAILURES"}: ${pass} passed, ${fail} failed`);
