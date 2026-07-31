@@ -68,6 +68,34 @@ export function upcomingMeetings(
   return meetings.filter((m) => localDate(m.starts_at, tz) >= today);
 }
 
+/** Clock time (e.g. "09:30") of an instant, rendered in `tz`. */
+export function formatTimeInZone(iso: string, tz: string = AGENCY_TZ): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+/**
+ * Day-group label for a YYYY-MM-DD agency-local date: "Today", "Tomorrow", or a
+ * weekday/date like "Fri 8 Aug".
+ */
+export function formatDayLabel(date: string, now: Date, tz: string = AGENCY_TZ): string {
+  const today = todayDate(now, tz);
+  if (date === today) return "Today";
+  const [y, m, d] = today.split("-").map(Number);
+  const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  if (date === tomorrow) return "Tomorrow";
+  // Format the plain date at UTC noon so the weekday/day never drift.
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${date}T12:00:00Z`));
+}
+
 /** Human range label, e.g. "Mon 4 Aug, 09:00 – 10:00", rendered in `tz`. */
 export function formatMeetingRange(startsAt: string, endsAt: string, tz: string): string {
   const start = new Intl.DateTimeFormat("en-GB", {
