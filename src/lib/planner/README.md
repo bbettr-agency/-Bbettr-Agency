@@ -20,3 +20,29 @@ module for the internal team. Built phase by phase per
 Phase 0 — scaffolding only (dependencies, feature flag, this namespace, env
 documentation). No runtime code, no routes, no UI. Everything is gated by
 `PLANNER_ENABLED` (`@/lib/flags`) and remains invisible until later phases.
+
+## Planner Overview — deferred sections (Phase B / C)
+
+The Overview (`/admin/planner`) is **Phase A: meetings + calendar only** — it
+renders exclusively from real meeting rows, safe projection views, Google
+connection status, and admin profiles. The following were intentionally **not**
+built because no honest data source exists yet. Do NOT fake them.
+
+**Phase B — requires the Tasks domain**
+- Deploy migration `0027_planner_tasks` to production (not applied yet), then
+  build a Planner tasks domain (queries/actions; real My Tasks / Team View /
+  Inbox pages). Convention (agreed): treat `tasks.scheduled_date` as the working
+  due date unless a task-domain audit proves separate scheduled/due dates are
+  needed.
+- Then add: **Open Tasks / Due Today / Overdue / Completed This Week** KPIs; the
+  task side of **Team Workload** (task counts + Normal/Busy/Needs-Attention
+  classification); task-based briefing/insight lines; and **Upcoming Deadlines**.
+
+**Phase C — requires a Projects model**
+- **Project Attention** needs a Planner "project" entity linking meetings/tasks
+  to clients (today `tasks.client_or_project` is free text, not a FK) plus a
+  stage/last-activity concept. Not renderable honestly until that exists.
+
+**Explicitly deferred (never fabricate):** Team Capacity %, Project %,
+historical productivity, completion trends, and any "increased/decreased/trend"
+language (needs periodic snapshots that don't exist).
