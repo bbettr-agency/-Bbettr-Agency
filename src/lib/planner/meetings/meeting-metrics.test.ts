@@ -13,6 +13,10 @@ import {
   ownerMeetingCounts,
   busiestOwner,
   timelineDays,
+  bucketTodayMeetings,
+  startsWithinMinutes,
+  upcomingWeekDays,
+  capDays,
 } from "./meeting-metrics";
 import { formatDayLabel, formatTimeInZone } from "./date-views";
 
@@ -154,6 +158,38 @@ describe("empty state", () => {
     expect(busiestDay([], NOW, TZ)).toBeNull();
     expect(busiestOwner([], NOW, TZ)).toBeNull();
     expect(syncHealth([]).healthy).toBe(true);
+  });
+});
+
+describe("bucketTodayMeetings", () => {
+  it("splits today into completed / current / upcoming / cancelled", () => {
+    const current = mtg("cur", "2026-08-05T11:30:00Z", "2026-08-05T12:30:00Z"); // spans NOW (12:00)
+    const b = bucketTodayMeetings([...ALL, current], NOW, TZ);
+    expect(b.completed.map((m) => m.id)).toEqual(["todayPast"]); // ended 10:00
+    expect(b.current.map((m) => m.id)).toEqual(["cur"]); // 11:30–12:30
+    expect(b.upcoming.map((m) => m.id)).toEqual(["todayNext", "todayOverlap"]);
+    expect(b.cancelled.map((m) => m.id)).toEqual(["todayCancelled"]);
+  });
+});
+
+describe("startsWithinMinutes", () => {
+  it("is true only for a not-yet-started meeting inside the window", () => {
+    expect(startsWithinMinutes({ starts_at: "2026-08-05T12:20:00Z" }, NOW, 30)).toBe(true); // in 20m
+    expect(startsWithinMinutes({ starts_at: "2026-08-05T12:45:00Z" }, NOW, 30)).toBe(false); // in 45m
+    expect(startsWithinMinutes({ starts_at: "2026-08-05T11:50:00Z" }, NOW, 30)).toBe(false); // already started
+  });
+});
+
+describe("upcomingWeekDays / capDays", () => {
+  it("excludes today and past/next-week; groups future days only", () => {
+    const days = upcomingWeekDays(ALL, NOW, TZ);
+    expect(days.map((d) => d.date)).toEqual(["2026-08-06", "2026-08-07"]); // tomorrow, friday
+  });
+  it("capDays limits the total number of meetings while keeping day order", () => {
+    const days = timelineDays(ALL, NOW, TZ); // today(4), tomorrow(1), friday(1)
+    const capped = capDays(days, 2);
+    expect(capped.reduce((n, d) => n + d.meetings.length, 0)).toBe(2);
+    expect(capped[0].date).toBe("2026-08-05");
   });
 });
 

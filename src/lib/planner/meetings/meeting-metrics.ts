@@ -149,9 +149,103 @@ export function busiestOwner(
   return best;
 }
 
+export interface TodayBuckets {
+  current: Meeting[];
+  upcoming: Meeting[];
+  completed: Meeting[];
+  cancelled: Meeting[];
+}
+
+/**
+ * Split today's meetings into live buckets (agency-local day): `current` (started
+ * but not ended), `upcoming` (not started), `completed` (ended). `cancelled` is
+ * surfaced separately (muted in the UI, excluded from totals). Each bucket sorted
+ * chronologically.
+ */
+export function bucketTodayMeetings(
+  meetings: Meeting[],
+  now: Date,
+  tz: string = AGENCY_TZ
+): TodayBuckets {
+  const d = todayDate(now, tz);
+  const t = now.getTime();
+  const byStart = (a: Meeting, b: Meeting) =>
+    new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+  const today = meetings
+    .filter((m) => localDate(m.starts_at, tz) === d)
+    .sort(byStart);
+  const buckets: TodayBuckets = { current: [], upcoming: [], completed: [], cancelled: [] };
+  for (const m of today) {
+    if (m.status === "cancelled") {
+      buckets.cancelled.push(m);
+      continue;
+    }
+    const s = new Date(m.starts_at).getTime();
+    const e = new Date(m.ends_at).getTime();
+    if (e <= t) buckets.completed.push(m);
+    else if (s <= t) buckets.current.push(m);
+    else buckets.upcoming.push(m);
+  }
+  return buckets;
+}
+
+/** Whether a scheduled meeting starts within `mins` from now (and hasn't started). */
+export function startsWithinMinutes(
+  m: Pick<Meeting, "starts_at">,
+  now: Date,
+  mins: number
+): boolean {
+  const s = new Date(m.starts_at).getTime();
+  const t = now.getTime();
+  return s >= t && s - t <= mins * 60000;
+}
+
 export interface TimelineDay {
   date: string;
   meetings: Meeting[];
+}
+
+/**
+ * Future scheduled meetings grouped by agency-local day, from TOMORROW through
+ * the end of the current week (today excluded, cancelled excluded). Days sorted
+ * ascending, meetings within a day chronological.
+ */
+export function upcomingWeekDays(
+  meetings: Meeting[],
+  now: Date,
+  tz: string = AGENCY_TZ
+): TimelineDay[] {
+  const today = todayDate(now, tz);
+  const { end } = weekRange(now, tz);
+  const byDay = new Map<string, Meeting[]>();
+  for (const m of scheduledMeetings(meetings)) {
+    const d = localDate(m.starts_at, tz);
+    if (d <= today || d > end) continue;
+    const list = byDay.get(d) ?? [];
+    list.push(m);
+    byDay.set(d, list);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([date, ms]) => ({
+      date,
+      meetings: ms.sort(
+        (x, y) => new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime()
+      ),
+    }));
+}
+
+/** Cap grouped days to at most `max` meetings total, preserving day order. */
+export function capDays(days: TimelineDay[], max: number): TimelineDay[] {
+  const out: TimelineDay[] = [];
+  let remaining = max;
+  for (const day of days) {
+    if (remaining <= 0) break;
+    const slice = day.meetings.slice(0, remaining);
+    remaining -= slice.length;
+    out.push({ date: day.date, meetings: slice });
+  }
+  return out;
 }
 
 /**
