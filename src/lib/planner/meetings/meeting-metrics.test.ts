@@ -15,10 +15,16 @@ import {
   timelineDays,
   bucketTodayMeetings,
   startsWithinMinutes,
+  minutesUntil,
   upcomingWeekDays,
   capDays,
 } from "./meeting-metrics";
-import { formatDayLabel, formatTimeInZone } from "./date-views";
+import {
+  formatDayLabel,
+  formatTimeInZone,
+  formatUpcomingDayParts,
+  formatCountdown,
+} from "./date-views";
 
 const NOW = new Date("2026-08-05T12:00:00Z"); // Wednesday, 12:00 UTC
 const TZ = "UTC";
@@ -193,6 +199,14 @@ describe("upcomingWeekDays / capDays", () => {
   });
 });
 
+describe("minutesUntil", () => {
+  it("ceils whole minutes to the start, never negative", () => {
+    expect(minutesUntil({ starts_at: "2026-08-05T12:42:00Z" }, NOW)).toBe(42);
+    expect(minutesUntil({ starts_at: "2026-08-05T12:23:30Z" }, NOW)).toBe(24); // 23m30s → 24
+    expect(minutesUntil({ starts_at: "2026-08-05T11:00:00Z" }, NOW)).toBe(0); // already past
+  });
+});
+
 describe("label formatters", () => {
   it("formatDayLabel: Today / Tomorrow / weekday-date", () => {
     expect(formatDayLabel("2026-08-05", NOW, TZ)).toBe("Today");
@@ -201,5 +215,23 @@ describe("label formatters", () => {
   });
   it("formatTimeInZone: clock time in a zone", () => {
     expect(formatTimeInZone("2026-08-05T14:00:00Z", "UTC")).toBe("14:00");
+  });
+  it("formatUpcomingDayParts: relative lead + calendar detail", () => {
+    // Tomorrow keeps the weekday in the detail for full context.
+    expect(formatUpcomingDayParts("2026-08-06", NOW, TZ)).toEqual({
+      lead: "Tomorrow",
+      detail: "Thursday 6 Aug",
+    });
+    // Later days lead with the weekday, date as detail.
+    expect(formatUpcomingDayParts("2026-08-07", NOW, TZ)).toEqual({
+      lead: "Friday",
+      detail: "7 Aug",
+    });
+  });
+  it("formatCountdown: minutes, hours, and now", () => {
+    expect(formatCountdown(42)).toBe("42 min");
+    expect(formatCountdown(75)).toBe("1 h 15 min");
+    expect(formatCountdown(120)).toBe("2 h");
+    expect(formatCountdown(0)).toBe("now");
   });
 });

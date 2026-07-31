@@ -96,6 +96,40 @@ export function formatDayLabel(date: string, now: Date, tz: string = AGENCY_TZ):
   }).format(new Date(`${date}T12:00:00Z`));
 }
 
+/**
+ * Two-part upcoming day label. The lead is the most human reference ("Tomorrow"
+ * or the weekday name); the detail carries the calendar date so planning has real
+ * context: `{ lead: "Tomorrow", detail: "Friday 1 Aug" }` or
+ * `{ lead: "Friday", detail: "1 Aug" }`.
+ */
+export function formatUpcomingDayParts(
+  date: string,
+  now: Date,
+  tz: string = AGENCY_TZ
+): { lead: string; detail: string } {
+  const today = todayDate(now, tz);
+  const [y, m, d] = today.split("-").map(Number);
+  const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  const at = new Date(`${date}T12:00:00Z`); // UTC noon so weekday/day never drift
+  const weekday = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long" }).format(at);
+  const dayMonth = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+  }).format(at);
+  if (date === tomorrow) return { lead: "Tomorrow", detail: `${weekday} ${dayMonth}` };
+  return { lead: weekday, detail: dayMonth };
+}
+
+/** Short relative countdown, e.g. "42 min" or "1 h 15 min" ("now" at/under 0). */
+export function formatCountdown(mins: number): string {
+  if (mins <= 0) return "now";
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
 /** Human range label, e.g. "Mon 4 Aug, 09:00 – 10:00", rendered in `tz`. */
 export function formatMeetingRange(startsAt: string, endsAt: string, tz: string): string {
   const start = new Intl.DateTimeFormat("en-GB", {

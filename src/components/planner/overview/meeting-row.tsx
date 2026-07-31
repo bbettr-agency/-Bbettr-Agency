@@ -26,6 +26,8 @@ function fmtDuration(mins: number): string {
  * - `highlight` gives the row the brand-tinted "this is the one" treatment.
  * - `muted` dims completed/cancelled rows.
  * - `badge` is an optional lead badge (e.g. "Next", "Starting soon", "Now").
+ * - `timeLabel` overrides the start time (e.g. a "09:00–10:00" range).
+ * - `subLabel` overrides the duration line (e.g. "In progress", "in 24 min").
  */
 export function MeetingRow({
   meeting,
@@ -35,6 +37,8 @@ export function MeetingRow({
   highlight = false,
   muted = false,
   badge,
+  timeLabel,
+  subLabel,
 }: {
   meeting: Meeting;
   view?: SafeProjectionView;
@@ -43,6 +47,8 @@ export function MeetingRow({
   highlight?: boolean;
   muted?: boolean;
   badge?: { label: string; tone: "brand" | "warning" | "success" | "neutral" };
+  timeLabel?: string;
+  subLabel?: string;
 }) {
   const cancelled = meeting.status === "cancelled";
   return (
@@ -54,11 +60,13 @@ export function MeetingRow({
       )}
     >
       <div className="flex min-w-0 items-start gap-3">
-        <div className="w-16 shrink-0">
+        <div className={cn("shrink-0 whitespace-nowrap", timeLabel ? "w-24" : "w-16")}>
           <p className={cn("text-sm font-semibold", highlight ? "text-brand-700" : "text-ink-900")}>
-            {formatTimeInZone(meeting.starts_at, tz)}
+            {timeLabel ?? formatTimeInZone(meeting.starts_at, tz)}
           </p>
-          <p className="text-xs text-ink-400">{fmtDuration(durationMinutes(meeting))}</p>
+          <p className={cn("text-xs", subLabel ? "font-medium text-ink-500" : "text-ink-400")}>
+            {subLabel ?? fmtDuration(durationMinutes(meeting))}
+          </p>
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

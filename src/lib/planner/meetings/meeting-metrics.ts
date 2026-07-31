@@ -200,6 +200,12 @@ export function startsWithinMinutes(
   return s >= t && s - t <= mins * 60000;
 }
 
+/** Whole minutes until a meeting starts (0 if it has already started). Ceil so
+ * "starts in 24 min" reads a hair early rather than late. */
+export function minutesUntil(m: Pick<Meeting, "starts_at">, now: Date): number {
+  return Math.max(0, Math.ceil((new Date(m.starts_at).getTime() - now.getTime()) / 60000));
+}
+
 export interface TimelineDay {
   date: string;
   meetings: Meeting[];

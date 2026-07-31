@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MeetingRow } from "./meeting-row";
-import { formatDayLabel } from "@/lib/planner/meetings/date-views";
+import { formatUpcomingDayParts } from "@/lib/planner/meetings/date-views";
 import type { TimelineDay } from "@/lib/planner/meetings/meeting-metrics";
 import type { SafeProjectionView } from "@/lib/planner/meetings/view-types";
 
@@ -29,10 +29,14 @@ export function UpcomingMeetings({
       {days.length === 0 ? (
         <p className="text-sm text-ink-500">Nothing else scheduled this week.</p>
       ) : (
-        days.map((day) => (
+        days.map((day) => {
+          const label = formatUpcomingDayParts(day.date, now, tz);
+          return (
           <div key={day.date}>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">
-              {formatDayLabel(day.date, now, tz)}
+            <p className="mb-2 text-xs uppercase tracking-wide text-ink-400">
+              <span className="font-semibold text-ink-500">{label.lead}</span>
+              <span className="mx-1.5 text-ink-300">•</span>
+              <span>{label.detail}</span>
             </p>
             <div className="space-y-2">
               {day.meetings.map((m) => (
@@ -46,7 +50,8 @@ export function UpcomingMeetings({
               ))}
             </div>
           </div>
-        ))
+          );
+        })
       )}
       <div className="pt-1">
         <Button asChild variant="ghost" size="sm">

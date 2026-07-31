@@ -7,6 +7,7 @@ import {
   Clock,
   RefreshCw,
   CalendarCheck,
+  User,
 } from "lucide-react";
 import { requirePlannerAccess } from "@/lib/planner/guard";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
@@ -19,6 +20,7 @@ import {
   weekRange,
   formatDayLabel,
   formatTimeInZone,
+  formatCountdown,
 } from "@/lib/planner/meetings/date-views";
 import {
   scheduledMeetings,
@@ -30,6 +32,7 @@ import {
   upcomingWeekDays,
   capDays,
   startsWithinMinutes,
+  minutesUntil,
   overlapCountOnDay,
   busiestDay,
   busiestOwner,
@@ -39,6 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { KpiCard } from "@/components/planner/overview/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { GlanceStrip, type GlanceItem } from "@/components/planner/overview/glance-strip";
 import { TodayMeetings } from "@/components/planner/overview/today-meetings";
 import { UpcomingMeetings } from "@/components/planner/overview/upcoming-meetings";
 import { TeamMeetingLoad } from "@/components/planner/overview/team-meeting-load";
@@ -189,6 +193,35 @@ export default async function PlannerOverviewPage() {
   }
   const insightItems = insights.slice(0, 4);
 
+  // ── Today at a glance — subtle operational snapshot below the KPIs ───────────
+  const firstName = (id: string) => ownerName(id).split(" ")[0];
+  const glance: GlanceItem[] = [];
+  glance.push(
+    todayCount > 0
+      ? { text: `${todayCount} meeting${plural(todayCount)} scheduled`, tone: "success" }
+      : { text: "No meetings today", tone: "neutral" }
+  );
+  if (!google.connected) {
+    glance.push({ text: "Google not connected", tone: "danger" });
+  } else if (health.failed > 0) {
+    glance.push({ text: `${health.failed} sync issue${plural(health.failed)}`, tone: "danger" });
+  } else if (health.pending > 0) {
+    glance.push({ text: `${health.pending} Meet link${plural(health.pending)} pending`, tone: "warning" });
+  }
+  // Busiest today only when one person clearly leads (teamLoad is sorted by today).
+  const topToday = teamLoad[0];
+  if (topToday && topToday.today >= 2 && (teamLoad.length < 2 || topToday.today > teamLoad[1].today)) {
+    glance.push({ text: `${firstName(topToday.id)} busiest today`, icon: User });
+  }
+  if (next) {
+    glance.push({
+      text: nextSameDay
+        ? `Next meeting in ${formatCountdown(minutesUntil(next, now))}`
+        : `Next meeting ${nextDayLabel} at ${formatTimeInZone(next.starts_at, tz)}`,
+      icon: Clock,
+    });
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* 1 — Header */}
@@ -258,6 +291,9 @@ export default async function PlannerOverviewPage() {
         />
         <KpiCard label="Calendar sync" value={syncValue} icon={RefreshCw} tone={syncTone} />
       </div>
+
+      {/* Today at a glance */}
+      <GlanceStrip items={glance} />
 
       {/* 3 — Today's briefing */}
       <Card>

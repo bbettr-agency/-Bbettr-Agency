@@ -1,8 +1,11 @@
 import { MeetingRow } from "./meeting-row";
 import {
   startsWithinMinutes,
+  minutesUntil,
   type TodayBuckets,
 } from "@/lib/planner/meetings/meeting-metrics";
+import { formatTimeInZone, formatCountdown } from "@/lib/planner/meetings/date-views";
+import type { Meeting } from "@/lib/database.types";
 import type { SafeProjectionView } from "@/lib/planner/meetings/view-types";
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
@@ -11,10 +14,18 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+const rangeLabel = (m: Meeting, tz: string) =>
+  `${formatTimeInZone(m.starts_at, tz)}–${formatTimeInZone(m.ends_at, tz)}`;
+
 /**
- * Today's meetings, split into live buckets. Order (most actionable first):
- * Happening now → Upcoming (first is "Next", "Starting soon" within 30m) →
- * Completed (muted) → Cancelled (muted). Calm empty state when nothing today.
+ * Today's meetings, split into live buckets and ordered so the dashboard orients
+ * the user the instant it opens:
+ *   NOW      — meetings in progress ("In progress").
+ *   NEXT     — upcoming today; the next one is highlighted with a live countdown.
+ *              When nothing is in progress, a one-line lead states when the next
+ *              meeting starts instead of a NOW block.
+ *   Completed / Cancelled — muted.
+ * Calm empty state when there is nothing today at all.
  */
 export function TodayMeetings({
   buckets,
@@ -40,11 +51,13 @@ export function TodayMeetings({
     return <p className="text-sm text-ink-500">No meetings scheduled today.</p>;
   }
 
+  const next = upcoming[0];
+
   return (
     <div className="space-y-5">
-      {current.length > 0 && (
+      {current.length > 0 ? (
         <div>
-          <GroupLabel>Happening now</GroupLabel>
+          <GroupLabel>Now</GroupLabel>
           <div className="space-y-2">
             {current.map((m) => (
               <MeetingRow
@@ -54,22 +67,32 @@ export function TodayMeetings({
                 ownerName={ownerName(m.created_by)}
                 tz={tz}
                 highlight
-                badge={{ label: "Now", tone: "success" }}
+                timeLabel={rangeLabel(m, tz)}
+                subLabel="In progress"
+                badge={{ label: "In progress", tone: "success" }}
               />
             ))}
           </div>
         </div>
+      ) : (
+        next && (
+          <p className="text-sm font-medium text-ink-700">
+            Next meeting starts in{" "}
+            <span className="text-brand-700">{formatCountdown(minutesUntil(next, now))}</span>.
+          </p>
+        )
       )}
 
       {upcoming.length > 0 && (
         <div>
-          <GroupLabel>Upcoming today</GroupLabel>
+          <GroupLabel>{current.length > 0 ? "Next" : "Up next"}</GroupLabel>
           <div className="space-y-2">
             {upcoming.map((m, i) => {
+              const isNext = i === 0;
               const soon = startsWithinMinutes(m, now, 30);
               const badge = soon
                 ? ({ label: "Starting soon", tone: "warning" } as const)
-                : i === 0
+                : isNext
                   ? ({ label: "Next", tone: "brand" } as const)
                   : undefined;
               return (
@@ -79,7 +102,8 @@ export function TodayMeetings({
                   view={views.get(m.id)}
                   ownerName={ownerName(m.created_by)}
                   tz={tz}
-                  highlight={i === 0}
+                  highlight={isNext}
+                  subLabel={isNext ? `in ${formatCountdown(minutesUntil(m, now))}` : undefined}
                   badge={badge}
                 />
               );
