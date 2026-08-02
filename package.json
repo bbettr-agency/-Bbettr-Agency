@@ -14,6 +14,7 @@
     "test:tasks-0036": "node supabase/tests/tasks-0036-workspaces.test.mjs",
     "test:tasks-0037": "node supabase/tests/tasks-0037-core.test.mjs",
     "test:tasks-0038": "node supabase/tests/tasks-0038-blockers.test.mjs",
+    "test:tasks-0039": "node supabase/tests/tasks-0039-dependencies.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
