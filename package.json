@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:rls": "node supabase/tests/planner-rls.test.mjs",
     "test:tasks-0035": "node supabase/tests/tasks-0035-supersession.test.mjs",
+    "test:tasks-0036": "node supabase/tests/tasks-0036-workspaces.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
