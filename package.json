@@ -20,6 +20,7 @@
     "test:tasks-0042": "node supabase/tests/tasks-0042-reminders.test.mjs",
     "test:tasks-0043": "node supabase/tests/tasks-0043-events.test.mjs",
     "test:tasks-0044": "node supabase/tests/tasks-0044-event-redactions.test.mjs",
+    "test:tasks-0045": "node supabase/tests/tasks-0045-command-receipts.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
