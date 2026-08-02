@@ -16,6 +16,7 @@
     "test:tasks-0038": "node supabase/tests/tasks-0038-blockers.test.mjs",
     "test:tasks-0039": "node supabase/tests/tasks-0039-dependencies.test.mjs",
     "test:tasks-0040": "node supabase/tests/tasks-0040-labels.test.mjs",
+    "test:tasks-0041": "node supabase/tests/tasks-0041-recurrence.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
