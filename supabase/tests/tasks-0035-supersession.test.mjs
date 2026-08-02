@@ -135,6 +135,35 @@ async function rowCount(c, name) {
   const { rows } = await c.query(`select count(*)::int as n from public.${name}`);
   return rows[0].n;
 }
+/**
+ * Catalog-level residue: count every legacy Tasks object still present across
+ * the system catalogs (pg_class covers the table AND its indexes; pg_type the
+ * enums; pg_proc the audit function; pg_trigger the trigger; pg_policy the RLS
+ * policies). Proves the legacy namespace is gone, not merely the table.
+ */
+async function legacyCatalogResidue(c) {
+  const q = async (text) => (await c.query(text)).rows[0].n;
+  return {
+    pg_class: await q(
+      `select count(*)::int n from pg_class cl
+         join pg_namespace nsp on nsp.oid = cl.relnamespace
+       where nsp.nspname='public' and (cl.relname='tasks' or cl.relname like 'tasks\\_%')`),
+    pg_type: await q(
+      `select count(*)::int n from pg_type t
+         join pg_namespace nsp on nsp.oid = t.typnamespace
+       where nsp.nspname='public' and t.typname in ('task_status','task_priority')`),
+    pg_proc: await q(
+      `select count(*)::int n from pg_proc p
+         join pg_namespace nsp on nsp.oid = p.pronamespace
+       where nsp.nspname='public' and p.proname='tasks_enforce_audit'`),
+    pg_trigger: await q(
+      `select count(*)::int n from pg_trigger where tgname='tasks_enforce_audit' and not tgisinternal`),
+    pg_policy: await q(
+      `select count(*)::int n from pg_policy
+       where polname in ('tasks_select_admin','tasks_insert_admin','tasks_update_admin')`),
+  };
+}
+
 /** Snapshot every Tasks-related object name (tables, types, functions). */
 async function tasksSurface(c) {
   const tables = (await c.query(
@@ -224,6 +253,9 @@ async function main() {
   const b = await tryQuery(c, sql0035());
   check("B: 0035 succeeds on empty legacy schema", b.error === null, b.error?.message ?? "");
   check("B: legacy table/enums/function/trigger removed", await legacyGone(c));
+  const residue = await legacyCatalogResidue(c);
+  check("B (catalog): ZERO legacy residue across pg_class/pg_type/pg_proc/pg_trigger/pg_policy",
+    Object.values(residue).every((v) => v === 0), JSON.stringify(residue));
   check("B: no new Task-Domain objects created", await noNewTaskDomain(c));
 
   // ── C. Unexpected legacy data → abort, untouched ────────────────────────
