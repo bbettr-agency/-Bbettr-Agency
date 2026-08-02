@@ -23,6 +23,7 @@
     "test:tasks-0045": "node supabase/tests/tasks-0045-command-receipts.test.mjs",
     "test:tasks-0046": "node supabase/tests/tasks-0046-internal-persistence.test.mjs",
     "test:tasks-0047": "node supabase/tests/tasks-0047-safe-read-models.test.mjs",
+    "test:parity": "node supabase/tests/schema-parity.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

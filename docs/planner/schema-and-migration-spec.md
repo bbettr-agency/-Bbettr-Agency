@@ -365,6 +365,8 @@ Renames/splits vs 0027: `notes`→**`description`**; `client_or_project`→**`cl
 - **Boundary:** **legal hard-erasure is explicitly out of scope** — it requires a separately approved retention/erasure policy and a distinct privileged path; documented here only as a boundary, not designed.
 - **RLS:** service-role write; overlay is consumed only through the safe read model.
 
+**As shipped (0044 — final).** The overlay is itself **append-only**, enforced by an `event_redactions_reject_mutation` trigger plus `service_role` holding only `INSERT, SELECT` — with the **same narrow FK-driven `SET NULL` exception** used for `task_events` actors: `redacted_by` is a nullable FK `ON DELETE SET NULL` and the trigger permits **only** that referential transition (non-null redactor id → `NULL`, every other column unchanged) so deleting a redactor's profile succeeds while the overlay's content — including the immutable `redacted_by_display` snapshot — stays untouched. The audit event is the overlay row itself; **no `EventRedacted` task-event is appended** (ruling: overlay is the audit).
+
 ---
 
 ## 15. `command_receipts` (0045) — success-only
@@ -451,6 +453,10 @@ The contract enforces: no status change without its required event; no zero-even
 
 **Access:** `revoke execute from anon, authenticated`; callable **only** by the service role / dedicated internal DB role. Task/satellite/event/receipt tables have **no direct write policies**. Automation/AI reach it only through the same application command service.
 
+**As shipped (0046 — final).** Two functions were built, both **`SECURITY INVOKER` with `set search_path = public`**, `EXECUTE` revoked from `public`/`anon`/`authenticated` and granted **only to `service_role`** (Open Decision #1 was resolved to INVOKER, *not* SECURITY DEFINER — `service_role` already bypasses RLS and holds exactly the needed grants, so INVOKER is strictly least-privilege and is itself bound by the append-only grants on `task_events`):
+- **`public.apply_task_command(jsonb) → jsonb`** — the atomic command-apply op. The whitelisted delta set, bounded satellite verbs (blocker add/resolve, dependency add/resolve/remove, label add/remove), the structural command/event contract, and the 9-step transaction are implemented exactly as above. Reminder mutations are **not** routed through this op (engine state; no task-event, per §12). `RecurringDefinition*`/`RecurringInstanceMissed`/`EventRedacted` are **not** emitted as task-events (no task aggregate to anchor / overlay is the audit).
+- **`public.apply_event_redaction(jsonb) → jsonb`** — the append-only redaction overlay writer (a sibling internal function; inserts an `event_redactions` row, emits no task-event, leaves the target event byte-identical).
+
 ---
 
 ## 17. Safe Event Read Model (0047)
@@ -468,6 +474,10 @@ An **admin-only, workspace-scoped SECURITY DEFINER function** — the *only* eve
 **Exposed columns:** `event_id, occurred_at, event_type, aggregate_version, event_sequence, actor_display, summary` (server-generated human-readable line), and a **whitelisted** subset of before/after values per event type. **Never exposed:** raw `payload` JSON, internal correlation/causation (unless whitelisted), secrets/provider bodies, unredacted subject data.
 
 **Execute revoked from `anon`; granted only to `authenticated`**; the function denies non-admins and missing-workspace contexts. **Raw `task_events` and `event_redactions` remain inaccessible** to `anon`/`authenticated` (service-role-only), so the function is the sole human surface. Ordering by `(aggregate_version, event_sequence)` per task; keyset pagination.
+
+**As shipped (0047 — final).** Two `SECURITY DEFINER` functions (`set search_path = public`, `STABLE`), `EXECUTE` revoked from `public`/`anon` and granted **only to `authenticated`**, each performing the in-function fail-closed authz above:
+- **`public.read_task_events(p_task_id uuid, p_after_version int, p_after_seq int, p_limit int)`** → `TABLE(event_id, occurred_at, event_type, aggregate_version, event_sequence, actor_display, summary, details)`. **Conservative v1 projection:** the fixed safe columns plus a server-generated `summary` (controlled `CASE` per event type) and a `details` jsonb holding **only an explicitly whitelisted set of scalar payload keys** (`from_status`/`to_status`/`from_priority`/`to_priority`/`priority`/`reason`/`resume_target`/`blocker_class`/`kind`/`due_date`/`scheduled_date`). Raw `payload`, correlation/causation and non-whitelisted keys are never returned. **Both event-level (`target_event_id`) and subject-level (`subject_ref = actor`) redactions** (suppress/replace) are applied before returning. Keyset cursor `(p_after_version, p_after_seq)`; `p_limit` **normalized into `[1, 200]`**.
+- **`public.read_task_reminders(p_task_id uuid)`** → `TABLE(id, task_id, remind_at, state, created_at)` — minimal reminder **intent** only; `claim_token`/`claimed_at`/`attempts`/`last_error`/`dedupe_key`/`delivered_at` are never exposed (Open Decision #5 resolved: admin-readable safe intent, engine columns hidden).
 
 ---
 
@@ -537,6 +547,23 @@ Legend: **A+W** = admin AND workspace; **SR** = service-role only; **✗** = den
 | `TaskNotFound` | domain / persistence op |
 | `LegacyDataFound` | **migration preflight** (0035) |
 
+**As shipped — implemented SQLSTATE catalogue.** The persistence/read/trigger layers raise custom `BB…` SQLSTATEs the TS layer maps to typed errors:
+
+| SQLSTATE | Meaning | Raised by |
+|---|---|---|
+| `BB460` | `VersionConflict` | `apply_task_command` (version gate) |
+| `BB461` | `IdempotencyConflict` | `apply_task_command` (same key, different payload) |
+| `BB462` | `EventContractViolation` | `apply_task_command` (structural contract / envelope guards) |
+| `BB463` | `TaskNotFound` | `apply_task_command` (locked-row lookup) |
+| `BB465` | `ArchivedLabel` (new label association rejected) | `apply_task_command` (label_add guard) |
+| `BB471` / `BB472` / `BB473` | `NotAuthenticated` / `NotAuthorized` / `NoWorkspace` | `read_task_events` / `read_task_reminders` (fail-closed authz) |
+| `BB371` | `OneLevelHierarchy` | `tasks_subtask_guard` trigger |
+| `BB372` | `ActiveChildren` | `tasks_subtask_guard` trigger |
+| `BB390` | `DependencyCycle` | `task_dependencies_cycle_guard` trigger |
+| `BB43A` | append-only violation (UPDATE/DELETE) | `task_events`/`event_redactions` reject-mutation triggers |
+
+**Additional structural CHECKs implemented (beyond the §5 enumeration):** consolidated `tasks_completion_archive_consistency` (the five completion/archive cases as one CHECK); `task_dependencies_state_consistency` (active | resolved | removed+reason); `task_reminders` `claim_pairing` + `delivered_consistency`; `command_receipts` null-safe actor-kind consistency (`is not distinct from`, not `=`); `event_redactions` `addressing` (event-or-subject) + `subject_pairing` + `mode`/`replacement` pairing; `task_blockers_reference_matches_class`; `task_events.aggregate_version >= 1` (which fixes 1-based create versioning).
+
 ---
 
 ## 21. Verification & Test Matrix
@@ -584,6 +611,11 @@ Extends the existing real-Postgres RLS harness (meetings/soft-delete pattern) + 
 8. **Rollback:** flag-off is primary; absent prod data, destructive rollback (drop new objects, reverse order) is safe.
 9. **Enable criteria:** all gates green in staging + prod schema-parity + RLS proof + the atomic-op concurrency tests + at least the core lenses (My Tasks/Today/Inbox) implemented and reviewed.
 
+**Deployment security checks (must verify on every environment before enabling):**
+- **SECURITY DEFINER function owner must bypass RLS.** `read_task_events` / `read_task_reminders` read the `enable+force`-RLS engine tables (`task_events`, `event_redactions`, `task_reminders`) **as their owner**, relying on that owner bypassing RLS. On Supabase, migrations run as `postgres` (owns the functions, bypasses RLS) — correct. If migrations are ever applied under a non-superuser/non-`BYPASSRLS` role, these reads would return nothing; **verify function ownership + BYPASSRLS after each deploy** (`select proname, proowner::regrole, prosecdef from pg_proc where proname like 'read_task_%'`).
+- **`service_role` key stays server-only.** `apply_task_command` / `apply_event_redaction` are reachable only via a `service_role` connection; that key must live **only** in trusted backend infrastructure and never be shipped to the browser.
+- **Grants sanity:** confirm `anon` has zero grants on every Tasks-domain object; `authenticated` has SELECT only on the admin-RLS tables and `EXECUTE` only on the two safe-read functions; the two write ops are `service_role`-EXECUTE only.
+
 ---
 
 ## Technical Risks
@@ -599,11 +631,11 @@ Extends the existing real-Postgres RLS harness (meetings/soft-delete pattern) + 
 
 ## Open Implementation Decisions
 
-1. Internal op as **SECURITY DEFINER** (service-role grant) vs a dedicated **internal DB role** — *lean: SECURITY DEFINER + service-role grant, matching `soft_delete_meeting`.*
+1. Internal op as **SECURITY DEFINER** (service-role grant) vs a dedicated **internal DB role** — ~~*lean: SECURITY DEFINER + service-role grant*~~ → **RESOLVED (0046): `SECURITY INVOKER`, `EXECUTE` to `service_role` only.** `service_role` already bypasses RLS and holds the exact grants needed, so INVOKER is least-privilege and is itself bound by the append-only grants on the event tables. `apply_task_command(jsonb)` + `apply_event_redaction(jsonb)` (§16).
 2. `updated_at` via **DB trigger** vs stamped by the op — *lean: DB trigger (mechanical), op stamps the rest.*
 3. `occurrence_slot` as **`date`** vs **`text` token** — *lean: `text` canonical format to cover both date- and sequence-based rules.*
-4. Safe event read model as a **view** vs a **SECURITY DEFINER function** — *lean: function (explicit authz, keyset pagination, redaction join).*
-5. Should `task_reminders` intent be **admin-readable** via a safe view, or fully service-role? — *lean: safe read for admins (visibility), engine columns hidden.*
+4. Safe event read model as a **view** vs a **SECURITY DEFINER function** — **RESOLVED (0047): SECURITY DEFINER function** `read_task_events(...)` (explicit fail-closed authz, keyset pagination ≤200, redaction join) (§17).
+5. Should `task_reminders` intent be **admin-readable** via a safe view, or fully service-role? — **RESOLVED (0047): safe read** `read_task_reminders(...)` exposing intent only (id/task_id/remind_at/state/created_at); engine columns hidden (§17).
 6. `global_seq` on `task_events` — include as convenience or omit? — *lean: include, explicitly non-semantic.*
 7. Backfill scope for `profiles.workspace_id` — **admins only** vs all profiles — *lean: admins only; clients/reps null.*
 
