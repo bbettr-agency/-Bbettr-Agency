@@ -20,6 +20,15 @@ The Planner is part of the Portal, not a separate app. It reuses the Portal's
 identity model (`public.profiles`, `is_admin()`), its Supabase clients, its
 design system, and the shared integration primitives in `src/lib/net`.
 
+> **Execution model (product source of truth).** This document is the
+> *engineering* reference. The *product* behaviour of the Planner's execution
+> surfaces — the Planner-wide architectural principles ("pages are lenses, not
+> stores"), the one-question-per-page rule, the canonical task lifecycle, and the
+> Today page (Morning Planning, Current Focus, Waiting/Blocked, Quick Capture,
+> End-of-Day Review) — is defined in
+> [`docs/planner/execution-model.md`](./planner/execution-model.md). All future
+> **Tasks** and execution-surface work **must conform to the Execution Model**.
+
 **Why Google Calendar is an integration, not the primary system.** The Portal
 must remain fully usable when Google is disconnected, slow, expired, or down.
 If Google were the system of record, an outage would break scheduling — an

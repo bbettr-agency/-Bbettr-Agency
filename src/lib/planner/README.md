@@ -15,6 +15,16 @@ module for the internal team. Built phase by phase per
   `@/app/(admin)/admin/planner/*`, `@/app/api/google/*`.
 - **Never touches** the Client Portal, Rep Portal, or their auth/navigation.
 
+## Execution model (product source of truth)
+
+The product behaviour of the Planner's execution surfaces — the Planner-wide
+architectural principles ("pages are lenses, not stores"), the one-question-per-page
+rule, the canonical task lifecycle, and the Today page (Morning Planning, Current
+Focus, Waiting/Blocked, Quick Capture, End-of-Day Review) — is defined in
+[`docs/planner/execution-model.md`](../../../docs/planner/execution-model.md).
+All future **Tasks** and execution-surface work **must conform to the Execution
+Model**.
+
 ## Status
 
 Phase 0 — scaffolding only (dependencies, feature flag, this namespace, env
