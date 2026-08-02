@@ -18,6 +18,7 @@
     "test:tasks-0040": "node supabase/tests/tasks-0040-labels.test.mjs",
     "test:tasks-0041": "node supabase/tests/tasks-0041-recurrence.test.mjs",
     "test:tasks-0042": "node supabase/tests/tasks-0042-reminders.test.mjs",
+    "test:tasks-0043": "node supabase/tests/tasks-0043-events.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

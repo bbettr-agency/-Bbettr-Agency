@@ -334,7 +334,7 @@ Renames/splits vs 0027: `notes`→**`description`**; `client_or_project`→**`cl
 | `payload` | jsonb | ✓ | **sanitized** domain facts only |
 
 - **Uniqueness / ordering:** unique `(task_id, aggregate_version, event_sequence)`; per-task order `(aggregate_version, event_sequence)`; **no global order** (optional `global_seq bigserial` convenience only).
-- **Append-only enforcement:** no UPDATE/DELETE policy; `revoke` mutation; **reject-mutation trigger** raising on any UPDATE/DELETE.
+- **Append-only enforcement:** no UPDATE/DELETE policy; `revoke` mutation; a **reject-mutation trigger** that rejects **every content-altering UPDATE and every DELETE**, for every role. The **sole** permitted mutation is PostgreSQL's referential cleanup — the FK-driven `actor_user_id` transition from a non-null user id to `NULL` when the referenced profile is deleted — allowed **only** when every other event field is unchanged (changing `actor_user_id` to another value, or nulling it while altering any other field, is rejected). This is referential cleanup, not an editable event mutation; the `actor_display` snapshot and all other content remain immutable.
 - **Mutation access:** **service-role-only** (writes only via the internal op / service role).
 - **Raw access restriction:** admins **never** read the table directly — only via the safe read model (§17).
 - **Payload validation:** each `(event_type, event_schema_version)` has a **documented payload contract**; the op validates before append; consumers validate on read.
