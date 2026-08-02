@@ -10,7 +10,7 @@
 | **Implementation status** | Pre-implementation |
 | **Last updated** | 2026-08-02 |
 
-**Companion documents.** The [Planner Execution Model](./execution-model.md) defines **product behaviour** (how the Planner behaves for the user). This document defines **domain behaviour and invariants** (how the Tasks engine works with every page deleted). The [Persistence Architecture](./persistence-architecture.md) defines **how those rules must be represented and protected in storage**. Future migrations, repositories, services, APIs, automations, and UI must conform to **all three**.
+**Companion documents.** The [Planner Execution Model](./execution-model.md) defines **product behaviour** (how the Planner behaves for the user). This document defines **domain behaviour and invariants** (how the Tasks engine works with every page deleted). The [Persistence Architecture](./persistence-architecture.md) defines **storage principles and security boundaries**. The [Schema & Migration Specification](./schema-and-migration-spec.md) defines the **exact implementation blueprint**. Future migrations, repositories, services, APIs, automations, and UI must conform to **all four**.
 
 ---
 

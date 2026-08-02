@@ -21,7 +21,7 @@ identity model (`public.profiles`, `is_admin()`), its Supabase clients, its
 design system, and the shared integration primitives in `src/lib/net`.
 
 > **Planner sources of truth.** This document is the *engineering* reference for
-> the meetings/calendar Planner. Three companion documents govern the execution
+> the meetings/calendar Planner. Four companion documents govern the execution
 > side and must all be conformed to by future **Tasks**, migrations,
 > repositories, services, APIs, automations, and UI work:
 >
@@ -35,21 +35,32 @@ design system, and the shared integration primitives in `src/lib/net`.
 >   scheduling, assignment/priority, dependencies/subtasks, events, atomicity,
 >   authorization, and the tenant boundary.
 > - **Persistence & data model** — [`docs/planner/persistence-architecture.md`](./planner/persistence-architecture.md):
->   how those rules are represented and protected in storage — aggregate
->   persistence, the internal-only atomic write boundary, ordered immutable
->   events, optimistic concurrency, the workspace boundary, RLS/security, the
->   privacy-redaction overlay, and the migration/rollout strategy.
+>   storage principles and security boundaries — aggregate persistence, the
+>   internal-only atomic write boundary, ordered immutable events, optimistic
+>   concurrency, the workspace boundary, RLS/security, and the privacy-redaction
+>   overlay.
+> - **Schema & migration blueprint** — [`docs/planner/schema-and-migration-spec.md`](./planner/schema-and-migration-spec.md):
+>   the exact implementation blueprint — the `0035–0047` migration map, the
+>   concrete `tasks` and satellite tables, constraint catalogue, `blocker_key`
+>   identity, dependency-history semantics, the internal atomic-operation
+>   contract and structural command/event integrity catalogue, the RLS and
+>   index matrices, verification suite, and rollout plan.
 >
 > The Execution Model defines *how the Planner behaves*; the Task Domain
 > Architecture defines *how the Tasks engine works*; the Persistence Architecture
-> defines *how those rules must be represented and protected in storage*. Future
-> work must conform to **all three**.
+> defines *storage principles and security boundaries*; the Schema & Migration
+> Specification defines *the exact implementation blueprint*. Future work must
+> conform to **all four**.
 >
-> **Migration `0027_planner_tasks.sql` is superseded** by the approved future
-> Task Domain persistence model (see the Persistence Architecture, §19–§20). The
-> historical `0027` migration itself **remains completely untouched**; a later
-> superseding migration (numbered after `0034`) will safely converge clean/test
-> and production environments. **No migration implementation exists yet.**
+> **Migration `0027_planner_tasks.sql` is superseded** by the approved Task
+> Domain persistence model (see the Schema & Migration Specification, §1–§2, and
+> the Persistence Architecture, §19–§20). The historical `0027` migration itself
+> **remains completely untouched**. Migration `0035_planner_tasks_supersede_legacy`
+> (the first of the approved `0035–0047` map, after `0034`) will perform the
+> defensive preflight and empty-schema removal; **unexpected legacy rows abort
+> deployment** rather than being destroyed; clean/test and production converge
+> and are **proven by a schema-parity test**. **No migration implementation
+> exists yet.**
 
 **Why Google Calendar is an integration, not the primary system.** The Portal
 must remain fully usable when Google is disconnected, slow, expired, or down.

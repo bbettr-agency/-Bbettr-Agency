@@ -10,7 +10,7 @@
 | **Implementation status** | Pre-implementation |
 | **Last updated** | 2026-08-02 |
 
-**Companion documents.** The [Execution Model](./execution-model.md) defines **product behaviour**. The [Task Domain Architecture](./task-domain-architecture.md) defines **domain behaviour and invariants**. This document defines **how those rules must be represented and protected in storage**. Future migrations, repositories, services, APIs, automations, and UI must conform to **all three**.
+**Companion documents.** The [Execution Model](./execution-model.md) defines **product behaviour**. The [Task Domain Architecture](./task-domain-architecture.md) defines **domain behaviour and invariants**. This document defines **storage principles and security boundaries**. The [Schema & Migration Specification](./schema-and-migration-spec.md) defines the **exact implementation blueprint** built on these principles. Future migrations, repositories, services, APIs, automations, and UI must conform to **all four**.
 
 Field names/types below are **conceptual data-model** language, not DDL. No SQL, migrations, code, repositories, services, APIs, or UI are designed here.
 
