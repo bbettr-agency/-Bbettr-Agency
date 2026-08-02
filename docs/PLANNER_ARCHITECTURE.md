@@ -20,14 +20,24 @@ The Planner is part of the Portal, not a separate app. It reuses the Portal's
 identity model (`public.profiles`, `is_admin()`), its Supabase clients, its
 design system, and the shared integration primitives in `src/lib/net`.
 
-> **Execution model (product source of truth).** This document is the
-> *engineering* reference. The *product* behaviour of the Planner's execution
-> surfaces — the Planner-wide architectural principles ("pages are lenses, not
-> stores"), the one-question-per-page rule, the canonical task lifecycle, and the
-> Today page (Morning Planning, Current Focus, Waiting/Blocked, Quick Capture,
-> End-of-Day Review) — is defined in
-> [`docs/planner/execution-model.md`](./planner/execution-model.md). All future
-> **Tasks** and execution-surface work **must conform to the Execution Model**.
+> **Planner sources of truth.** This document is the *engineering* reference for
+> the meetings/calendar Planner. Two companion documents govern the execution
+> side and must both be conformed to by all future **Tasks**, persistence,
+> services, APIs, automations, and UI work:
+>
+> - **Product behaviour** — [`docs/planner/execution-model.md`](./planner/execution-model.md):
+>   the Planner-wide architectural principles ("pages are lenses, not stores"),
+>   the one-question-per-page rule, the canonical task lifecycle, and the Today
+>   page (Morning Planning, Current Focus, Waiting/Blocked, Quick Capture,
+>   End-of-Day Review).
+> - **Domain behaviour & invariants** — [`docs/planner/task-domain-architecture.md`](./planner/task-domain-architecture.md):
+>   the headless Task Domain — concepts, boundaries, lifecycle enforcement,
+>   scheduling, assignment/priority, dependencies/subtasks, events, atomicity,
+>   authorization, and the tenant boundary.
+>
+> The Execution Model defines *how the Planner behaves*; the Task Domain
+> Architecture defines *how the Tasks engine works*. Future work must conform to
+> **both**.
 
 **Why Google Calendar is an integration, not the primary system.** The Portal
 must remain fully usable when Google is disconnected, slow, expired, or down.

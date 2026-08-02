@@ -9,6 +9,8 @@
 | **Implementation status** | Pre-implementation |
 | **Last updated** | 2026-08-02 |
 
+**Companion document.** This document defines **product behaviour** (how the Planner behaves for the user). The [Task Domain Architecture](./task-domain-architecture.md) defines **domain behaviour and invariants** (how the Tasks engine works with every page deleted). Future persistence, services, APIs, automations, and UI must conform to **both**.
+
 ---
 
 **Scope note.** Part I (Architectural Principles, One-Question-Per-Page, the Canonical Task Lifecycle) is **Planner-wide** and governs every page. Part II specifies the **Today** page. Part III covers forward-compatibility, dependencies, and success. Nothing here is a database or code design — those follow in the separate Tasks-domain session.
@@ -92,32 +94,39 @@ One official lifecycle governs every task, everywhere. Today, My Tasks, Inbox, T
 
 | From ↓ / To → | Inbox | Planned | Scheduled | In&nbsp;Progress | Waiting | Completed | Archived |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| **Inbox** | — | ✓ triage | ✓ quick-schedule | ✗ | ✗ | ✗ | ✓ discard |
-| **Planned** | ✗ | — | ✓ add date | ✓ (auto-schedules today) | ✓ block | ✓ quick-done | ✓ drop |
-| **Scheduled** | ✗ | ✓ unschedule | ↻ reschedule | ✓ start | ✓ block | ✓ done | ✓ drop |
+| **Inbox** | — | ✓ triage | ✓ triage-and-schedule¹ | ✗ | ✗ | ✗ | ✓ discard |
+| **Planned** | ✗ | — | ✓ add date | ✓ (auto-schedules today)² | ✓ block | ✓ quick-done | ✓ drop |
+| **Scheduled** | ✗ | ✓ unschedule | ↻ reschedule | ✓ start² | ✓ block | ✓ done | ✓ drop |
 | **In Progress** | ✗ | ✓ backlog | ✓ pause/defer | — | ✓ block | ✓ done | ✓ cancel |
-| **Waiting** | ✗ | ✓ unblock→backlog | ✓ unblock→dated | ✓ resume | — | ✓ done | ✓ drop |
+| **Waiting** | ✗ | ✓ unblock→backlog | ✓ unblock→dated | ✗ (never direct) | — | ✓ done³ | ✓ drop |
 | **Completed** | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ auto-age |
 | **Archived** | ✗ | ✓ restore | ✗ | ✗ | ✗ | ✗ | — |
+
+¹ **Inbox → Scheduled** occurs **only** through the atomic *triage-and-schedule* command, which must supply every required post-Inbox field (owner, assignee policy, priority/default, and the scheduled date). A raw Inbox task can never become Scheduled with only a date. *(See Task Domain Architecture, Decision 1.)*
+
+² **Entering In Progress requires an individual assignee.** Starting a Planned task auto-schedules it to today. *(See Task Domain Architecture, Decision 6.)*
+
+³ **Waiting → Completed is an atomic unblock-then-complete flow:** the external blocker is recorded as resolved and the task is completed in one indivisible step, emitting *unblocked* immediately followed by *completed*. *(See Task Domain Architecture, Decision 3.)*
 
 **Key invalid transitions (and why):**
 - **Anything → Inbox.** Inbox is raw capture; processed work never regresses to unprocessed. (To "reset" a task, clear its date/details — it stays Planned.)
 - **Inbox → In Progress / Waiting / Completed.** You cannot actively work, block, or finish an untriaged item — it must first become Planned or Scheduled. (A trivial capture is *triaged then* completed, not completed raw.)
+- **Waiting → In Progress (direct).** A blocked task is never resumed straight into work. The only legal path is *Waiting → unblock → Planned/Scheduled → start → In Progress*.
 - **Completed → any active state**, except a controlled **Undo** within a grace window. Undo is a deliberate reversal, not a free-flowing transition.
 - **Archived → anything** except an explicit **Restore** (→ Planned). Archive is effectively terminal.
 
 ### 3.4 Where Overdue and Waiting "fit" (explicit answers)
 
 - **Overdue:** a flag layered on any active, past-due task. A task can be *Scheduled + Overdue*, *In Progress + Overdue*, or *Waiting + Overdue*. The last case is important — a blocked task can still be overdue; the UI frames it as *"overdue because blocked,"* directing the user to chase the blocker, not themselves.
-- **Waiting/Blocked:** a first-class state, entered from Planned/Scheduled/In Progress with a structured reason (waiting-on-person, -client, -approval, -assets, -dependency) and a `blocked_since`. It is **excluded from Current Focus and from realistic-completion math**. On unblock (manual, or a dependency completing), it auto-returns to its prior actionable state and becomes Focus-eligible again.
+- **Waiting/Blocked:** a first-class state, entered from Planned/Scheduled/In Progress with a structured reason (waiting-on-person, -client, -approval, -assets, -dependency) and a `blocked_since`. It is **excluded from Current Focus and from realistic-completion math**. On unblock (manual, or a dependency completing), it auto-returns to its **prior actionable state — Planned or Scheduled only, never In Progress** (a task blocked while In Progress resumes to Scheduled and must be explicitly started again) — and becomes Focus-eligible. *(See Task Domain Architecture, Decision 2.)*
 
 ### 3.5 Recurring tasks — where they regenerate
 
-A **recurring definition** is a template, not a lifecycle task. It **generates dated instances** directly into the **Scheduled** state; each instance then flows through the lifecycle independently. Regeneration happens at the **Completed** boundary (complete this instance → the next is generated per the recurrence rule) or on the calendar schedule for date-based recurrence. A **missed** instance follows the definition's policy — **skip** (don't carry) or **roll** (persist and become Overdue). Recurring tasks therefore *enter* at Scheduled and *regenerate* at Completed.
+A **recurring definition** is a template, not a lifecycle task. It **generates dated instances** directly into the **Scheduled** state; each instance then flows through the lifecycle independently. Generation is owned by the definition and happens in exactly one of two ways: **completion-driven** (completing an instance triggers generation of the next) or **schedule-driven** (a temporal evaluator generates the instance at the configured time; completing an existing instance never duplicates it). **Archiving never generates anything.** A **missed** instance follows the definition's policy — **skip** (don't carry) or **roll** (persist and become Overdue). Recurring tasks therefore *enter* at Scheduled and *regenerate* at the Completed boundary or on schedule. *(See Task Domain Architecture, Decision 4.)*
 
 ### 3.6 How Completed tasks archive
 
-A Completed task remains in **Completed Today** for the day, then **auto-archives** after a retention window (configurable). Archiving also fires the recurring-regeneration and any completion automations. Archived tasks leave all active surfaces but remain queryable for **Reporting**. Cancelled tasks archive with a *cancelled* reason to distinguish them from genuine completions in reporting.
+A Completed task remains in **Completed Today** for the day, then **auto-archives** after a retention window (configurable). **Archiving handles only retention and removal from active surfaces — it has no recurrence responsibility** (recurrence is completion- or schedule-driven, per §3.5). Archived tasks leave all active surfaces but remain queryable for **Reporting**. Cancelled tasks archive with a *cancelled* reason to distinguish them from genuine completions in reporting. *(See Task Domain Architecture, Decision 4.)*
 
 ### 3.7 How each surface reads the lifecycle
 

@@ -15,15 +15,26 @@ module for the internal team. Built phase by phase per
   `@/app/(admin)/admin/planner/*`, `@/app/api/google/*`.
 - **Never touches** the Client Portal, Rep Portal, or their auth/navigation.
 
-## Execution model (product source of truth)
+## Planner sources of truth (execution side)
 
-The product behaviour of the Planner's execution surfaces — the Planner-wide
-architectural principles ("pages are lenses, not stores"), the one-question-per-page
-rule, the canonical task lifecycle, and the Today page (Morning Planning, Current
-Focus, Waiting/Blocked, Quick Capture, End-of-Day Review) — is defined in
-[`docs/planner/execution-model.md`](../../../docs/planner/execution-model.md).
-All future **Tasks** and execution-surface work **must conform to the Execution
-Model**.
+Two permanent documents govern the Planner's execution surfaces. All future
+**Tasks**, persistence, services, APIs, automations, and UI work **must conform
+to both**:
+
+- **Product behaviour** —
+  [`docs/planner/execution-model.md`](../../../docs/planner/execution-model.md):
+  the Planner-wide architectural principles ("pages are lenses, not stores"), the
+  one-question-per-page rule, the canonical task lifecycle, and the Today page
+  (Morning Planning, Current Focus, Waiting/Blocked, Quick Capture, End-of-Day
+  Review).
+- **Domain behaviour & invariants** —
+  [`docs/planner/task-domain-architecture.md`](../../../docs/planner/task-domain-architecture.md):
+  the headless Task Domain — concepts, boundaries, lifecycle enforcement,
+  scheduling, assignment/priority, dependencies/subtasks, events, atomicity,
+  authorization, and the tenant boundary.
+
+The Execution Model defines *how the Planner behaves*; the Task Domain
+Architecture defines *how the Tasks engine works*.
 
 ## Status
 
