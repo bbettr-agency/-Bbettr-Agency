@@ -17,9 +17,9 @@ module for the internal team. Built phase by phase per
 
 ## Planner sources of truth (execution side)
 
-Two permanent documents govern the Planner's execution surfaces. All future
-**Tasks**, persistence, services, APIs, automations, and UI work **must conform
-to both**:
+Three permanent documents govern the Planner's execution surfaces. All future
+**Tasks**, migrations, repositories, services, APIs, automations, and UI work
+**must conform to all three**:
 
 - **Product behaviour** —
   [`docs/planner/execution-model.md`](../../../docs/planner/execution-model.md):
@@ -32,9 +32,22 @@ to both**:
   the headless Task Domain — concepts, boundaries, lifecycle enforcement,
   scheduling, assignment/priority, dependencies/subtasks, events, atomicity,
   authorization, and the tenant boundary.
+- **Persistence & data model** —
+  [`docs/planner/persistence-architecture.md`](../../../docs/planner/persistence-architecture.md):
+  how those rules are represented and protected in storage — aggregate
+  persistence, the internal-only atomic write boundary, ordered immutable events,
+  optimistic concurrency, the workspace boundary, RLS/security, the
+  privacy-redaction overlay, and the migration/rollout strategy.
 
 The Execution Model defines *how the Planner behaves*; the Task Domain
-Architecture defines *how the Tasks engine works*.
+Architecture defines *how the Tasks engine works*; the Persistence Architecture
+defines *how those rules must be represented and protected in storage*.
+
+**Migration `0027_planner_tasks.sql` is superseded** by the approved future Task
+Domain persistence model (see the Persistence Architecture, §19–§20). The
+historical `0027` migration itself **remains completely untouched**; a later
+superseding migration (numbered after `0034`) will safely converge clean/test and
+production. **No migration implementation exists yet.**
 
 ## Status
 

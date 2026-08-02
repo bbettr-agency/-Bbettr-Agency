@@ -21,9 +21,9 @@ identity model (`public.profiles`, `is_admin()`), its Supabase clients, its
 design system, and the shared integration primitives in `src/lib/net`.
 
 > **Planner sources of truth.** This document is the *engineering* reference for
-> the meetings/calendar Planner. Two companion documents govern the execution
-> side and must both be conformed to by all future **Tasks**, persistence,
-> services, APIs, automations, and UI work:
+> the meetings/calendar Planner. Three companion documents govern the execution
+> side and must all be conformed to by future **Tasks**, migrations,
+> repositories, services, APIs, automations, and UI work:
 >
 > - **Product behaviour** — [`docs/planner/execution-model.md`](./planner/execution-model.md):
 >   the Planner-wide architectural principles ("pages are lenses, not stores"),
@@ -34,10 +34,22 @@ design system, and the shared integration primitives in `src/lib/net`.
 >   the headless Task Domain — concepts, boundaries, lifecycle enforcement,
 >   scheduling, assignment/priority, dependencies/subtasks, events, atomicity,
 >   authorization, and the tenant boundary.
+> - **Persistence & data model** — [`docs/planner/persistence-architecture.md`](./planner/persistence-architecture.md):
+>   how those rules are represented and protected in storage — aggregate
+>   persistence, the internal-only atomic write boundary, ordered immutable
+>   events, optimistic concurrency, the workspace boundary, RLS/security, the
+>   privacy-redaction overlay, and the migration/rollout strategy.
 >
 > The Execution Model defines *how the Planner behaves*; the Task Domain
-> Architecture defines *how the Tasks engine works*. Future work must conform to
-> **both**.
+> Architecture defines *how the Tasks engine works*; the Persistence Architecture
+> defines *how those rules must be represented and protected in storage*. Future
+> work must conform to **all three**.
+>
+> **Migration `0027_planner_tasks.sql` is superseded** by the approved future
+> Task Domain persistence model (see the Persistence Architecture, §19–§20). The
+> historical `0027` migration itself **remains completely untouched**; a later
+> superseding migration (numbered after `0034`) will safely converge clean/test
+> and production environments. **No migration implementation exists yet.**
 
 **Why Google Calendar is an integration, not the primary system.** The Portal
 must remain fully usable when Google is disconnected, slow, expired, or down.

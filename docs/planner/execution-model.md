@@ -9,7 +9,7 @@
 | **Implementation status** | Pre-implementation |
 | **Last updated** | 2026-08-02 |
 
-**Companion document.** This document defines **product behaviour** (how the Planner behaves for the user). The [Task Domain Architecture](./task-domain-architecture.md) defines **domain behaviour and invariants** (how the Tasks engine works with every page deleted). Future persistence, services, APIs, automations, and UI must conform to **both**.
+**Companion documents.** This document defines **product behaviour** (how the Planner behaves for the user). The [Task Domain Architecture](./task-domain-architecture.md) defines **domain behaviour and invariants** (how the Tasks engine works with every page deleted). The [Persistence Architecture](./persistence-architecture.md) defines **how those rules must be represented and protected in storage**. Future migrations, repositories, services, APIs, automations, and UI must conform to **all three**.
 
 ---
 
