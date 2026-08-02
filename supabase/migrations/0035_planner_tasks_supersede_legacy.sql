@@ -45,10 +45,13 @@ declare
   v_is_legacy       boolean;
   v_row_count       bigint;
 begin
-  -- ── 1. Detect the presence of public.tasks ──────────────────────────────
+  -- ── 1. Detect the presence of the public.tasks BASE TABLE ───────────────
+  -- Restricted to base tables: a same-named view/foreign table is not the
+  -- legacy schema and must route straight to the no-op path (never cleanup).
   select exists (
     select 1 from information_schema.tables
     where table_schema = 'public' and table_name = 'tasks'
+      and table_type = 'BASE TABLE'
   ) into v_table_exists;
 
   if not v_table_exists then
