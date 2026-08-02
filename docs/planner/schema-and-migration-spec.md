@@ -380,11 +380,11 @@ Receipts persist **only outcomes that commit** — a receipt exists **iff** its 
 | `actor_kind`/`actor_user_id`/`actor_ref` | — | actor context |
 | `result_task_id` | uuid | — | outcome identity |
 | `result_aggregate_version` | int | — | resulting version |
-| `outcome` | text | ✓ | CHECK ∈ {applied, replayed, accepted_noop} |
+| `outcome` | text | ✓ | **stored** CHECK ∈ {applied, accepted_noop} (`replayed` is a return-only result, never a stored row) |
 | `created_at` | timestamptz | ✓ | — |
 | `expires_at` | timestamptz | ✓ | `created_at + retention` |
 
-- **Outcomes:** `applied` (committed change), `accepted_noop` (semantically idempotent no-op that committed), `replayed` (existing receipt returned — no new row inserted). The `error` outcome and `error_code` column are **removed**.
+- **Outcomes (stored):** a stored receipt's `outcome` is **only** `applied` (committed change) or `accepted_noop` (semantically idempotent no-op that committed). `replayed` is a **return-only** application result — a replay **returns the existing successful receipt and inserts no new row**. Failures, `VersionConflict`, and `IdempotencyConflict` **create no receipt**. The `error` outcome and `error_code` column are **removed**.
 - **Errors are never persisted here:** validation errors occur before persistence; `VersionConflict`/`IdempotencyConflict` are **returned but not inserted**; unexpected DB errors **roll back everything and leave no receipt**, so the **same key is retryable** after a transient failure.
 - **Conflict detection:** same-key/different-`payload_hash` is rejected (`IdempotencyConflict`) **when an existing successful receipt is found**.
 - **Operational error logging** belongs in sanitized application/observability logs, not the receipt.
