@@ -27,3 +27,18 @@ import "server-only";
 export function isPlannerEnabled(): boolean {
   return process.env.PLANNER_ENABLED === "true";
 }
+
+/**
+ * TASKS_ENABLED — the hidden Planner Tasks application layer (the state machine,
+ * command adapter and read adapters built in Phase C1). Read at request time,
+ * same as PLANNER_ENABLED, so the deployed runtime env is always authoritative.
+ *
+ * Default OFF. Every Tasks command and read entry point refuses while this is
+ * off, so the database functions/migrations stay present but no application
+ * surface activates them until a later approved phase flips this on. It is NOT a
+ * security boundary — admin-only access is enforced independently by
+ * requireAdmin()/RLS/grants. Absent or anything other than "true" ⇒ off.
+ */
+export function isTasksEnabled(): boolean {
+  return process.env.TASKS_ENABLED === "true";
+}
