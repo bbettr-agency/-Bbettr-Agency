@@ -354,6 +354,7 @@ async function main() {
   await c.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CompleteTask", { key: "cc1", task_id: cc.id, ver: 4, deltas: { status: "completed" }, events: [evt("TaskCompleted")] }))]);
   await c2.query("begin"); await c2.query("set role service_role");
   const pend = c2.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CompleteTask", { key: "cc2", task_id: cc.id, ver: 4, deltas: { status: "completed" }, events: [evt("TaskCompleted")] }))]);
+  pend.catch(() => {}); // register a handler at creation so the EXPECTED rejection is never momentarily "unhandled" while we await the commit below; `await pend` still observes the original outcome
   await c.query("commit"); await c.query("reset role");
   let ccErr = null; try { await pend; } catch (e) { ccErr = e; }
   await c2.query("rollback").catch(() => {}); await c2.query("reset role").catch(() => {});
@@ -365,6 +366,7 @@ async function main() {
   await c.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
   await c2.query("begin"); await c2.query("set role service_role");
   const pend2 = c2.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
+  pend2.catch(() => {}); // register a handler at creation (see note above); `await pend2` still observes the original outcome
   await c.query("commit"); await c.query("reset role");
   let dupErr = null; try { await pend2; } catch (e) { dupErr = e; }
   await c2.query("rollback").catch(() => {}); await c2.query("reset role").catch(() => {});
