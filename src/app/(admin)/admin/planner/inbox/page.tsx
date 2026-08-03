@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Inbox } from "lucide-react";
 import { requireTasksView } from "@/lib/planner/tasks/view-access";
 import { PlannerPlaceholder } from "@/components/planner/planner-placeholder";
 import { PageHeader } from "@/components/ui/page-header";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { QuickCapture } from "@/components/planner/tasks/quick-capture";
+import { InboxList } from "@/components/planner/tasks/inbox-list";
 
 export const metadata: Metadata = { title: "Inbox" };
 
@@ -23,9 +26,7 @@ export default async function InboxPage() {
     );
   }
 
-  // Flag ON ⇒ the real Inbox shell. Quick Capture is live; the queue list is the
-  // next slice (C2.1c), so the region below is an honest, temporary note that is
-  // replaced by the real list in C2.1c.
+  // Flag ON ⇒ the real Inbox shell: capture + the display-only triage queue.
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -33,10 +34,9 @@ export default async function InboxPage() {
         description="Untriaged agency work that still needs a decision. Capture it here, triage it next."
       />
       <QuickCapture />
-      <p className="text-sm text-ink-500">
-        Captured tasks are saved to the shared agency Inbox. The triage queue list
-        appears here next.
-      </p>
+      <Suspense fallback={<SkeletonList rows={4} height="h-12" />}>
+        <InboxList />
+      </Suspense>
     </div>
   );
 }
