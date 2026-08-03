@@ -73,6 +73,26 @@ export async function getTodayTaskSlice(now: Date = new Date()): Promise<TodayTa
   };
 }
 
+/**
+ * The SHARED agency Inbox: every `status='inbox'` task in the current workspace,
+ * newest capture first. This is the agency intake queue — it is intentionally
+ * NOT filtered by created_by, owner or assignee (Inbox tasks are ownerless until
+ * triaged). Workspace scoping and admin-only visibility come entirely from the
+ * tasks table's admin+workspace RLS (the authenticated client); deleted rows are
+ * excluded at the database.
+ */
+export async function getInboxTasks(): Promise<Task[]> {
+  const { supabase } = await authedContext();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("status", "inbox")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (error) throw new TaskError("PersistenceError");
+  return (data ?? []) as Task[];
+}
+
 /** Active (unresolved) blockers for the given tasks, RLS-scoped. */
 export async function getActiveBlockersFor(taskIds: string[]): Promise<TaskBlocker[]> {
   const { supabase } = await authedContext();
