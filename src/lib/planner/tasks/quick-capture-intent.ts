@@ -1,45 +1,65 @@
 /**
  * Quick Capture "capture-intent" state machine (pure, no I/O, no DOM).
  *
- * The idempotency key belongs to the user's CAPTURE SESSION, not the text. A
- * single key is minted when a capture intent begins and is kept for the whole
- * attempt — across edits and retries — because editing "Call supplier" into
- * "Call supplier tomorrow" and retrying is still the SAME logical capture. The
- * server computes the payload hash and detects genuine conflicts if needed; the
- * client never regenerates the key just because the draft changed.
+ * The idempotency key identifies one capture attempt. It is REUSED for a safe
+ * retry of the SAME submitted payload, but a payload change AFTER a submission
+ * attempt must mint a NEW key — because the client cannot distinguish "the
+ * request never reached the server" from "the request committed but its response
+ * was lost". The persistence op returns IdempotencyConflict on same-key +
+ * different-payload once a receipt exists, so reusing one key across two
+ * different submitted titles is unsafe.
  *
- *   Idle ──begin──▶ Draft(key)
- *   Draft ──edit/retry──▶ Draft(same key)
- *   Draft ──success──▶ Idle            (a brand-new capture mints a fresh key)
- *   Draft ──Escape (cancel)──▶ Idle    (the key is destroyed)
+ * A Draft therefore tracks the last SUBMITTED (trimmed) title:
  *
+ *   Idle ──begin──▶ Draft{ key, attemptedTitle: null }        (first interaction)
+ *   Draft ──edit before first submit──▶ same Draft            (key kept, not yet attempted)
+ *   Draft ──submit(t)──▶ Draft{ key, attemptedTitle: t }      (records the attempt)
+ *   Draft ──retry same t──▶ same key                          (safe replay)
+ *   Draft ──submit(t2 ≠ attemptedTitle)──▶ Draft{ NEW key, attemptedTitle: t2 }
+ *   Draft ──success (applied|accepted_noop|replayed)──▶ Idle
+ *   Draft ──Escape──▶ Idle
+ *
+ * Titles are compared TRIMMED, so whitespace-only edits never mint a new key.
  * These pure helpers hold the whole lifecycle so it is unit-testable without a
  * DOM; the client component is a thin shell over them.
  */
 
-/** null = Idle (no active capture). An object = Draft holding this session's key. */
-export type CaptureIntent = { key: string } | null;
+/** null = Idle. A Draft carries this attempt's key and the last submitted (trimmed) title. */
+export type CaptureIntent = { key: string; attemptedTitle: string | null } | null;
 
 export const IDLE: CaptureIntent = null;
 
 /**
- * Ensure an active capture intent exists. Idle → Draft (mints exactly one key);
- * Draft → the SAME Draft (never re-mints — an edit/retry keeps the key). `mint`
- * is only called when transitioning out of Idle.
+ * Begin a capture on first interaction: Idle → Draft (mints exactly one key, not
+ * yet attempted). An existing Draft is returned unchanged — editing BEFORE the
+ * first submit keeps the same key. `mint` is only called when leaving Idle.
  */
 export function beginIntent(current: CaptureIntent, mint: () => string): CaptureIntent {
-  return current ?? { key: mint() };
+  return current ?? { key: mint(), attemptedTitle: null };
 }
 
-/** Cancel the intent (Escape) or clear after success → Idle; the key is destroyed. */
+/**
+ * Resolve the intent to use for submitting `trimmedTitle`, recording it as the
+ * attempted title. Reuses the current key when this is the first attempt or a
+ * retry of the SAME submitted title; mints a NEW key when the title has changed
+ * after a prior submission attempt (never reuse one key with two payloads).
+ */
+export function prepareSubmit(current: CaptureIntent, trimmedTitle: string, mint: () => string): { key: string; attemptedTitle: string } {
+  if (current && (current.attemptedTitle === null || current.attemptedTitle === trimmedTitle)) {
+    return { key: current.key, attemptedTitle: trimmedTitle };
+  }
+  return { key: mint(), attemptedTitle: trimmedTitle };
+}
+
+/** Cancel (Escape) or clear after success → Idle; the key is destroyed. */
 export function clearIntent(): CaptureIntent {
   return IDLE;
 }
 
 /**
- * The intent after an action result: SUCCESS (any outcome — applied /
- * accepted_noop / replayed) destroys the key (→ Idle); a FAILURE keeps the same
- * key so the retry replays under the same session identity.
+ * The intent after an action result: SUCCESS (any outcome) destroys the key
+ * (→ Idle); a FAILURE keeps the current Draft so a same-title retry replays under
+ * the same key (and an edited retry mints a new one via prepareSubmit).
  */
 export function intentAfterResult(current: CaptureIntent, ok: boolean): CaptureIntent {
   return ok ? IDLE : current;

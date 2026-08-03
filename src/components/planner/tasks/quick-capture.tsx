@@ -19,7 +19,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { captureTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
-import { beginIntent, clearIntent, intentAfterResult, validateDraft, IDLE, type CaptureIntent } from "@/lib/planner/tasks/quick-capture-intent";
+import { beginIntent, clearIntent, intentAfterResult, prepareSubmit, validateDraft, IDLE, type CaptureIntent } from "@/lib/planner/tasks/quick-capture-intent";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, FieldHelp } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -56,20 +56,29 @@ export function QuickCapture() {
       return;
     }
     setError(null);
-    intentRef.current = beginIntent(intentRef.current, newIdempotencyKey);
-    const idempotencyKey = (intentRef.current as { key: string }).key;
+    // Reuse the key for a same-title retry; mint a NEW key if the title changed
+    // after a prior submission attempt (never reuse one key with two payloads).
+    intentRef.current = prepareSubmit(intentRef.current, draft.title, newIdempotencyKey);
+    const idempotencyKey = intentRef.current.key;
 
     startTransition(async () => {
-      const res = await captureTaskAction({ title: draft.title, idempotencyKey });
-      if (res.ok) {
-        // applied | accepted_noop | replayed all end this capture session.
-        intentRef.current = intentAfterResult(intentRef.current, true);
-        setTitle("");
-        inputRef.current?.focus(); // stay in the field for rapid capture
-        router.refresh();
-      } else {
-        // Keep the draft + the session key so a retry replays under the same key.
-        setError(res.error);
+      try {
+        const res = await captureTaskAction({ title: draft.title, idempotencyKey });
+        if (res.ok) {
+          // applied | accepted_noop | replayed all end this capture attempt.
+          intentRef.current = intentAfterResult(intentRef.current, true);
+          setTitle("");
+          inputRef.current?.focus(); // stay in the field for rapid capture
+          router.refresh();
+        } else {
+          // Keep the draft + this attempt's key; a same-title retry replays,
+          // an edited retry mints a new key via prepareSubmit.
+          setError(res.error);
+          inputRef.current?.focus();
+        }
+      } catch {
+        // Lost/failed response (network): retain the intent for a safe retry.
+        setError("Something went wrong. Press Enter to try again.");
         inputRef.current?.focus();
       }
     });
