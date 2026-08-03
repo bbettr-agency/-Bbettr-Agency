@@ -96,7 +96,12 @@ export function QuickCapture() {
               value={title}
               autoFocus
               autoComplete="off"
-              disabled={pending}
+              // NB: the input is intentionally NOT disabled while pending —
+              // disabling a focused input blurs it, and a later focus() on a
+              // disabled element is a no-op, so focus would be lost after each
+              // capture. Double-submit is prevented by the `if (pending) return`
+              // guard + the Button's disabled state + the op's idempotency.
+              aria-busy={pending || undefined}
               placeholder="Capture a task… (press Enter to save)"
               aria-invalid={error ? true : undefined}
               aria-describedby="quick-capture-help"
