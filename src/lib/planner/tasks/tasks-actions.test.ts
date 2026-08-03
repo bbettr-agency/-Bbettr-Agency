@@ -39,7 +39,7 @@ describe("captureTaskAction", () => {
 });
 
 describe("triageTaskAction", () => {
-  it("defaults owner to the current admin (one-click self-triage)", async () => {
+  it("owner is ALWAYS the authenticated admin (browser cannot choose an owner)", async () => {
     await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY });
     const [input] = lastCall();
     expect(input.command).toEqual({ type: "TriageTask", owner_user_id: "admin-1" });
@@ -47,11 +47,12 @@ describe("triageTaskAction", () => {
     expect(input.expected_aggregate_version).toBe(1);
     expect(input.idempotency_key).toBe(KEY);
   });
-  it("uses an explicit ownerUserId when provided (extensible to choose an owner)", async () => {
-    await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 2, idempotencyKey: KEY, ownerUserId: "someone-else" });
-    expect(lastCall()[0].command).toEqual({ type: "TriageTask", owner_user_id: "someone-else" });
+  it("IGNORES a caller-supplied ownerUserId spoof field (uses the session admin)", async () => {
+    // A malicious/extra field cannot select another owner.
+    await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 2, idempotencyKey: KEY, ownerUserId: "attacker-or-client-uuid" } as never);
+    expect(lastCall()[0].command).toEqual({ type: "TriageTask", owner_user_id: "admin-1" });
   });
-  it("returns NotAuthenticated (without calling the op) when no admin and no owner", async () => {
+  it("returns NotAuthenticated (without calling the op) when there is no admin session", async () => {
     vi.mocked(getCurrentProfile).mockResolvedValue(null);
     const res = await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY });
     expect(res).toMatchObject({ ok: false, code: "NotAuthenticated" });
@@ -60,17 +61,30 @@ describe("triageTaskAction", () => {
 });
 
 describe("triageAndScheduleTaskAction", () => {
-  it("builds the atomic Inbox→Scheduled command with owner default + unassigned policy", async () => {
+  it("owner = session admin, assignee ALWAYS null (no browser-selected assignment)", async () => {
     await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10" });
     const [input, opts] = lastCall();
     expect(input.command).toEqual({ type: "TriageAndScheduleTask", owner_user_id: "admin-1", scheduled_date: "2026-08-10", assignee_id: null });
     expect(opts).toEqual({ revalidate: REVALIDATE });
   });
-  it("uses an explicit assignee and owner when supplied", async () => {
-    await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10", ownerUserId: "o2", assigneeId: "a2" });
-    expect(lastCall()[0].command).toEqual({ type: "TriageAndScheduleTask", owner_user_id: "o2", scheduled_date: "2026-08-10", assignee_id: "a2" });
+  it("IGNORES caller-supplied ownerUserId/assigneeId spoof fields", async () => {
+    await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10", ownerUserId: "attacker", assigneeId: "client-uuid" } as never);
+    expect(lastCall()[0].command).toEqual({ type: "TriageAndScheduleTask", owner_user_id: "admin-1", scheduled_date: "2026-08-10", assignee_id: null });
   });
-  it("returns NotAuthenticated when no admin and no owner", async () => {
+  it("rejects a malformed scheduledDate before dispatch (InvalidCommand, op not called)", async () => {
+    for (const bad of ["2026-13-01", "2026-02-30", "2026-8-1", "08/10/2026", "", "notadate"]) {
+      vi.mocked(runTaskCommand).mockClear();
+      const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: bad });
+      expect(res).toMatchObject({ ok: false, code: "InvalidCommand" });
+      expect(runTaskCommand).not.toHaveBeenCalled();
+    }
+  });
+  it("accepts a valid agency date", async () => {
+    const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-02-28" });
+    expect(res).toEqual(OK);
+    expect(lastCall()[0].command).toMatchObject({ scheduled_date: "2026-02-28" });
+  });
+  it("returns NotAuthenticated when there is no admin session", async () => {
     vi.mocked(getCurrentProfile).mockResolvedValue(null);
     expect(await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10" })).toMatchObject({ ok: false, code: "NotAuthenticated" });
   });
