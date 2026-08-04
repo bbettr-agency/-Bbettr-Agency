@@ -25,12 +25,19 @@
  */
 import { getCurrentProfile } from "@/lib/auth";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
+import { getActiveBlockersFor } from "@/lib/planner/tasks/read-adapters";
 import { TaskError } from "@/lib/planner/tasks/errors";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
 import type { ApprovedPlannerPath, TaskActionResult } from "@/lib/planner/tasks/action-result";
 import type { TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
+const MY_TASKS_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/tasks", "/admin/planner"];
+
+/** The minimal target every My Tasks lifecycle action needs (never actor/owner/workspace). */
+type MyTaskTarget = { taskId: string; expectedAggregateVersion: number; idempotencyKey: string };
+const BLOCKER_CLASSES = ["person", "client", "approval", "asset", "dependency"] as const;
+type BlockerClassInput = (typeof BLOCKER_CLASSES)[number];
 
 const failWith = (code: "NotAuthenticated" | "InvalidCommand"): TaskActionResult => {
   const e = new TaskError(code);
@@ -111,4 +118,78 @@ export async function triageAndScheduleTaskAction(input: {
     },
     { revalidate: INBOX_REVALIDATE }
   );
+}
+
+// ── My Tasks lifecycle actions (C-My Tasks) ──────────────────────────────────
+// Each is a narrow wrapper: it accepts ONLY the target + command-specific input +
+// the caller-minted idempotency key, never actor/owner/workspace. Legality is the
+// state machine's authority (an illegal transition → a safe failure result); the
+// UI renders only server-computed legal actions but cannot force an illegal one.
+// All writes flow client → action → runTaskCommand → dispatchTaskCommand →
+// apply_task_command. No owner/assignee is browser-selected.
+
+const withTarget = (input: MyTaskTarget) => ({
+  task_id: input.taskId,
+  expected_aggregate_version: input.expectedAggregateVersion,
+  idempotency_key: input.idempotencyKey,
+});
+
+/** Start a task → in_progress. The starter claims it: assignee = the session admin (server-derived). */
+export async function startTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  const adminId = await currentAdminId();
+  if (!adminId) return failWith("NotAuthenticated");
+  return runTaskCommand({ command: { type: "StartTask", assignee_id: adminId }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Complete a task → completed. Legal from planned/scheduled/in_progress (and waiting, engine-side). */
+export async function completeTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  return runTaskCommand({ command: { type: "CompleteTask" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Schedule a planned task → scheduled. Date must be a real today-or-future agency day (re-validated server-side). */
+export async function scheduleTaskAction(input: MyTaskTarget & { scheduledDate: string }): Promise<TaskActionResult> {
+  if (!isValidScheduleDate(input.scheduledDate, agencyToday())) return failWith("InvalidCommand");
+  return runTaskCommand({ command: { type: "ScheduleTask", scheduled_date: input.scheduledDate }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Reschedule a scheduled task (stays scheduled; never touches due_date). Date re-validated server-side. */
+export async function rescheduleTaskAction(input: MyTaskTarget & { scheduledDate: string }): Promise<TaskActionResult> {
+  if (!isValidScheduleDate(input.scheduledDate, agencyToday())) return failWith("InvalidCommand");
+  return runTaskCommand({ command: { type: "RescheduleTask", scheduled_date: input.scheduledDate }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Unschedule a scheduled task → planned (clears the scheduled date). */
+export async function unscheduleTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  return runTaskCommand({ command: { type: "UnscheduleTask" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Defer an in-progress task → planned (stop working; no invented date). */
+export async function deferTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  return runTaskCommand({ command: { type: "DeferTask", to: "planned" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Block a task → waiting. Collects only the command-required class + an optional reason. */
+export async function blockTaskAction(input: MyTaskTarget & { blockerClass: BlockerClassInput; reason?: string }): Promise<TaskActionResult> {
+  if (!BLOCKER_CLASSES.includes(input.blockerClass)) return failWith("InvalidCommand");
+  const reason = typeof input.reason === "string" && input.reason.trim().length > 0 ? input.reason.trim() : null;
+  return runTaskCommand(
+    { command: { type: "BlockTask", blocker: { blocker_class: input.blockerClass, blocker_key: `manual:${input.idempotencyKey}`, reason } }, ...withTarget(input) },
+    { revalidate: MY_TASKS_REVALIDATE }
+  );
+}
+
+/** Unblock a waiting task → its resume target, resolving its active blockers (one targeted, best-effort read). */
+export async function unblockTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  let resolveKeys: string[] = [];
+  try {
+    resolveKeys = (await getActiveBlockersFor([input.taskId])).map((b) => b.blocker_key);
+  } catch {
+    resolveKeys = []; // degrade gracefully — the transition still proceeds via the command path
+  }
+  return runTaskCommand({ command: { type: "UnblockTask", resolve_blocker_keys: resolveKeys }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/** Drop an active task → archived (cancelled). Legal from planned/scheduled/in_progress/waiting. */
+export async function dropTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
+  return runTaskCommand({ command: { type: "DropTask" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
 }

@@ -2,15 +2,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/lib/auth", () => ({ getCurrentProfile: vi.fn() }));
 vi.mock("@/lib/planner/tasks/run-command", () => ({ runTaskCommand: vi.fn() }));
+vi.mock("@/lib/planner/tasks/read-adapters", () => ({ getActiveBlockersFor: vi.fn() }));
 // Pin "today" (agency) deterministically; keep the real schedule-date validation.
 vi.mock("@/lib/planner/tasks/schedule-date", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/planner/tasks/schedule-date")>();
   return { ...actual, agencyToday: () => "2026-08-04" };
 });
 
-import { captureTaskAction, triageTaskAction, triageAndScheduleTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
+import {
+  captureTaskAction, triageTaskAction, triageAndScheduleTaskAction,
+  startTaskAction, completeTaskAction, scheduleTaskAction, rescheduleTaskAction,
+  unscheduleTaskAction, deferTaskAction, blockTaskAction, unblockTaskAction, dropTaskAction,
+} from "@/app/(admin)/admin/planner/tasks/actions";
 import { getCurrentProfile } from "@/lib/auth";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
+import { getActiveBlockersFor } from "@/lib/planner/tasks/read-adapters";
 
 const KEY = "11111111-1111-1111-1111-111111111111";
 const OK = { ok: true, outcome: "applied", taskId: "task-1", aggregateVersion: 1 } as const;
@@ -18,10 +24,16 @@ const ADMIN = { id: "admin-1", role: "admin", full_name: "Eloff", email: "e@b.co
 const REVALIDATE = ["/admin/planner/inbox", "/admin/planner"];
 const lastCall = () => vi.mocked(runTaskCommand).mock.calls[0];
 
+const MY_REVALIDATE = ["/admin/planner/tasks", "/admin/planner"];
+const target = { taskId: "t9", expectedAggregateVersion: 4, idempotencyKey: KEY };
+const cmd = () => lastCall()[0].command;
+
 beforeEach(() => {
   vi.mocked(getCurrentProfile).mockResolvedValue(ADMIN as never);
   vi.mocked(runTaskCommand).mockReset();
   vi.mocked(runTaskCommand).mockResolvedValue({ ...OK });
+  vi.mocked(getActiveBlockersFor).mockReset();
+  vi.mocked(getActiveBlockersFor).mockResolvedValue([]);
 });
 
 describe("captureTaskAction", () => {
@@ -103,5 +115,79 @@ describe("triageAndScheduleTaskAction", () => {
   it("returns NotAuthenticated when there is no admin session", async () => {
     vi.mocked(getCurrentProfile).mockResolvedValue(null);
     expect(await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10" })).toMatchObject({ ok: false, code: "NotAuthenticated" });
+  });
+});
+
+describe("My Tasks lifecycle actions", () => {
+  it("startTaskAction: StartTask with assignee = session admin (server-derived), correct target + revalidate", async () => {
+    const res = await startTaskAction(target);
+    expect(res).toEqual(OK);
+    const [input, opts] = lastCall();
+    expect(input.command).toEqual({ type: "StartTask", assignee_id: "admin-1" });
+    expect(input.task_id).toBe("t9");
+    expect(input.expected_aggregate_version).toBe(4);
+    expect(input.idempotency_key).toBe(KEY);
+    expect(opts).toEqual({ revalidate: MY_REVALIDATE });
+  });
+  it("startTaskAction: NotAuthenticated without a session (op not called)", async () => {
+    vi.mocked(getCurrentProfile).mockResolvedValue(null);
+    expect(await startTaskAction(target)).toMatchObject({ ok: false, code: "NotAuthenticated" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("startTaskAction: IGNORES a caller-supplied assignee spoof (uses the session admin)", async () => {
+    await startTaskAction({ ...target, assigneeId: "attacker" } as never);
+    expect(cmd()).toEqual({ type: "StartTask", assignee_id: "admin-1" });
+  });
+  it("completeTaskAction → CompleteTask", async () => {
+    await completeTaskAction(target);
+    expect(cmd()).toEqual({ type: "CompleteTask" });
+  });
+  it("unscheduleTaskAction → UnscheduleTask; deferTaskAction → DeferTask(to=planned); dropTaskAction → DropTask", async () => {
+    await unscheduleTaskAction(target); expect(cmd()).toEqual({ type: "UnscheduleTask" });
+    vi.mocked(runTaskCommand).mockClear();
+    await deferTaskAction(target); expect(cmd()).toEqual({ type: "DeferTask", to: "planned" });
+    vi.mocked(runTaskCommand).mockClear();
+    await dropTaskAction(target); expect(cmd()).toEqual({ type: "DropTask" });
+  });
+  it("scheduleTaskAction: accepts today/future, rejects past/malformed BEFORE dispatch", async () => {
+    await scheduleTaskAction({ ...target, scheduledDate: "2026-08-10" });
+    expect(cmd()).toEqual({ type: "ScheduleTask", scheduled_date: "2026-08-10" });
+    for (const bad of ["2026-08-03", "2026-13-01", "nope", ""]) {
+      vi.mocked(runTaskCommand).mockClear();
+      expect(await scheduleTaskAction({ ...target, scheduledDate: bad })).toMatchObject({ ok: false, code: "InvalidCommand" });
+      expect(runTaskCommand).not.toHaveBeenCalled();
+    }
+  });
+  it("rescheduleTaskAction: RescheduleTask on a valid future date; rejects past", async () => {
+    await rescheduleTaskAction({ ...target, scheduledDate: "2026-12-31" });
+    expect(cmd()).toEqual({ type: "RescheduleTask", scheduled_date: "2026-12-31" });
+    vi.mocked(runTaskCommand).mockClear();
+    expect(await rescheduleTaskAction({ ...target, scheduledDate: "2000-01-01" })).toMatchObject({ ok: false, code: "InvalidCommand" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("blockTaskAction: BlockTask with class + derived manual key + trimmed reason; rejects an invalid class", async () => {
+    await blockTaskAction({ ...target, blockerClass: "approval", reason: "  waiting on copy  " });
+    expect(cmd()).toEqual({ type: "BlockTask", blocker: { blocker_class: "approval", blocker_key: `manual:${KEY}`, reason: "waiting on copy" } });
+    vi.mocked(runTaskCommand).mockClear();
+    await blockTaskAction({ ...target, blockerClass: "person", reason: "   " });
+    expect(cmd()).toEqual({ type: "BlockTask", blocker: { blocker_class: "person", blocker_key: `manual:${KEY}`, reason: null } });
+    vi.mocked(runTaskCommand).mockClear();
+    expect(await blockTaskAction({ ...target, blockerClass: "bogus" as never })).toMatchObject({ ok: false, code: "InvalidCommand" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("unblockTaskAction: resolves the task's active blocker keys via one batched read", async () => {
+    vi.mocked(getActiveBlockersFor).mockResolvedValue([{ blocker_key: "manual:a" }, { blocker_key: "person:x" }] as never);
+    await unblockTaskAction(target);
+    expect(getActiveBlockersFor).toHaveBeenCalledWith(["t9"]);
+    expect(cmd()).toEqual({ type: "UnblockTask", resolve_blocker_keys: ["manual:a", "person:x"] });
+  });
+  it("unblockTaskAction: still unblocks (empty resolve list) if the blocker read fails", async () => {
+    vi.mocked(getActiveBlockersFor).mockRejectedValue(new Error("read down"));
+    await unblockTaskAction(target);
+    expect(cmd()).toEqual({ type: "UnblockTask", resolve_blocker_keys: [] });
+  });
+  it("all My Tasks actions pass through a failure result unchanged", async () => {
+    vi.mocked(runTaskCommand).mockResolvedValue({ ok: false, code: "VersionConflict", error: "changed" });
+    expect(await completeTaskAction(target)).toEqual({ ok: false, code: "VersionConflict", error: "changed" });
   });
 });
