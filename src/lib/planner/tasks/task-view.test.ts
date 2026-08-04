@@ -23,7 +23,8 @@ describe("toTaskView", () => {
     expect(v).toEqual({
       id: "t1", title: "Alpha", status: "planned", priority: "normal", criticalReason: null,
       scheduledDate: "2026-08-04", dueDate: null, estimatedMinutes: 30, isOverdue: false,
-      isWaiting: false, blockedSince: null, ownerDisplay: "Eloff", assigneeDisplay: null, aggregateVersion: 3,
+      isWaiting: false, blockedSince: null, ownerDisplay: "Eloff", assigneeDisplay: null,
+      isCompleted: false, completedAt: null, aggregateVersion: 3,
     });
   });
   it("derives isOverdue (due date strictly before today, non-terminal)", () => {
