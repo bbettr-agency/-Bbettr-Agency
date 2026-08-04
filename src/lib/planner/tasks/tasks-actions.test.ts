@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/lib/auth", () => ({ getCurrentProfile: vi.fn() }));
 vi.mock("@/lib/planner/tasks/run-command", () => ({ runTaskCommand: vi.fn() }));
+// Pin "today" (agency) deterministically; keep the real schedule-date validation.
+vi.mock("@/lib/planner/tasks/schedule-date", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/planner/tasks/schedule-date")>();
+  return { ...actual, agencyToday: () => "2026-08-04" };
+});
 
 import { captureTaskAction, triageTaskAction, triageAndScheduleTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
 import { getCurrentProfile } from "@/lib/auth";
@@ -79,10 +84,21 @@ describe("triageAndScheduleTaskAction", () => {
       expect(runTaskCommand).not.toHaveBeenCalled();
     }
   });
-  it("accepts a valid agency date", async () => {
-    const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-02-28" });
-    expect(res).toEqual(OK);
-    expect(lastCall()[0].command).toMatchObject({ scheduled_date: "2026-02-28" });
+  it("accepts today and future agency dates", async () => {
+    for (const good of ["2026-08-04" /* today */, "2026-08-05", "2026-12-31"]) {
+      vi.mocked(runTaskCommand).mockClear();
+      const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: good });
+      expect(res).toEqual(OK);
+      expect(lastCall()[0].command).toMatchObject({ scheduled_date: good });
+    }
+  });
+  it("rejects a validly-formatted PAST date server-side (InvalidCommand, op not called)", async () => {
+    for (const past of ["2026-08-03", "2026-01-01", "2000-12-31"]) {
+      vi.mocked(runTaskCommand).mockClear();
+      const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: past });
+      expect(res).toMatchObject({ ok: false, code: "InvalidCommand" });
+      expect(runTaskCommand).not.toHaveBeenCalled(); // crafted request cannot bypass the today-or-future rule
+    }
   });
   it("returns NotAuthenticated when there is no admin session", async () => {
     vi.mocked(getCurrentProfile).mockResolvedValue(null);
