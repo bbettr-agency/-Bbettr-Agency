@@ -11,11 +11,12 @@
  * list picks up the new task. No toast, no offline queue.
  *
  * Behaviour: autofocus on load · Enter submits · Escape clears the draft and the
- * session key · trimmed, whitespace-only rejected client-side · pending disables
- * re-submission (duplicate Enter cannot double-create) · errors inline, draft +
- * key retained · success clears the draft and keeps focus.
+ * session key · trimmed, whitespace-only rejected client-side · a `submitting`
+ * flag (held across the awaited action) disables re-submission (duplicate Enter
+ * cannot double-create) · errors inline, draft + key retained · success clears
+ * the draft and keeps focus.
  */
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { captureTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
@@ -28,7 +29,10 @@ export function QuickCapture() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  // Explicit submit flag held across the awaited Server Action via try/finally.
+  // (React 18's useTransition does NOT keep isPending across the await, so it
+  // cannot drive a correct loading/disable affordance — see the C2.1d-2 hardening.)
+  const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const intentRef = useRef<CaptureIntent>(IDLE);
 
@@ -47,9 +51,9 @@ export function QuickCapture() {
     inputRef.current?.focus();
   }
 
-  function submit(e?: React.FormEvent) {
+  async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (pending) return; // block duplicate submissions while a capture is in flight
+    if (submitting) return; // block duplicate submissions while a capture is in flight
     const draft = validateDraft(title);
     if (!draft.ok) {
       setError("Enter a task title.");
@@ -61,27 +65,28 @@ export function QuickCapture() {
     intentRef.current = prepareSubmit(intentRef.current, draft.title, newIdempotencyKey);
     const idempotencyKey = intentRef.current.key;
 
-    startTransition(async () => {
-      try {
-        const res = await captureTaskAction({ title: draft.title, idempotencyKey });
-        if (res.ok) {
-          // applied | accepted_noop | replayed all end this capture attempt.
-          intentRef.current = intentAfterResult(intentRef.current, true);
-          setTitle("");
-          inputRef.current?.focus(); // stay in the field for rapid capture
-          router.refresh();
-        } else {
-          // Keep the draft + this attempt's key; a same-title retry replays,
-          // an edited retry mints a new key via prepareSubmit.
-          setError(res.error);
-          inputRef.current?.focus();
-        }
-      } catch {
-        // Lost/failed response (network): retain the intent for a safe retry.
-        setError("Something went wrong. Press Enter to try again.");
+    setSubmitting(true);
+    try {
+      const res = await captureTaskAction({ title: draft.title, idempotencyKey });
+      if (res.ok) {
+        // applied | accepted_noop | replayed all end this capture attempt.
+        intentRef.current = intentAfterResult(intentRef.current, true);
+        setTitle("");
+        inputRef.current?.focus(); // stay in the field for rapid capture
+        router.refresh();
+      } else {
+        // Keep the draft + this attempt's key; a same-title retry replays,
+        // an edited retry mints a new key via prepareSubmit.
+        setError(res.error);
         inputRef.current?.focus();
       }
-    });
+    } catch {
+      // Lost/failed response (network): retain the intent for a safe retry.
+      setError("Something went wrong. Press Enter to try again.");
+      inputRef.current?.focus();
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -96,12 +101,12 @@ export function QuickCapture() {
               value={title}
               autoFocus
               autoComplete="off"
-              // NB: the input is intentionally NOT disabled while pending —
+              // NB: the input is intentionally NOT disabled while submitting —
               // disabling a focused input blurs it, and a later focus() on a
               // disabled element is a no-op, so focus would be lost after each
-              // capture. Double-submit is prevented by the `if (pending) return`
+              // capture. Double-submit is prevented by the `if (submitting) return`
               // guard + the Button's disabled state + the op's idempotency.
-              aria-busy={pending || undefined}
+              aria-busy={submitting || undefined}
               placeholder="Capture a task… (press Enter to save)"
               aria-invalid={error ? true : undefined}
               aria-describedby="quick-capture-help"
@@ -114,8 +119,8 @@ export function QuickCapture() {
               }}
               className="sm:flex-1"
             />
-            <Button type="submit" disabled={pending} loading={pending} className="sm:w-auto">
-              {pending ? "Capturing…" : "Capture"}
+            <Button type="submit" disabled={submitting} loading={submitting} aria-busy={submitting || undefined} className="sm:w-auto">
+              {submitting ? "Capturing…" : "Capture"}
             </Button>
           </div>
           <div id="quick-capture-help" aria-live="polite">
