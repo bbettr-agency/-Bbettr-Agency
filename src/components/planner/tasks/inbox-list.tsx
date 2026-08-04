@@ -61,7 +61,11 @@ export async function InboxList() {
       <CardContent>
         <ul className="divide-y divide-ink-100">
           {tasks.map((t) => (
-            <InboxRow key={t.id} view={toInboxRowView(t, nameById.get(t.created_by) ?? null, now)} />
+            <InboxRow
+              key={t.id}
+              view={toInboxRowView(t, nameById.get(t.created_by) ?? null, now)}
+              target={{ taskId: t.id, aggregateVersion: t.aggregate_version, title: t.title }}
+            />
           ))}
         </ul>
       </CardContent>
