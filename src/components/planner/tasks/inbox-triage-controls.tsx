@@ -21,7 +21,7 @@
  * changing the date after a submission attempt mints a fresh key at the next
  * Confirm, and one key is never reused across two submitted dates.
  */
-import { useEffect, useRef, useState, useTransition, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useRouter } from "next/navigation";
 import { triageTaskAction, triageAndScheduleTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
@@ -48,7 +48,10 @@ const PAST_DATE_MESSAGE = "Choose today or a future date.";
 
 export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  // Explicit submit flag held across the awaited Server Action via try/finally.
+  // (React 18's useTransition does NOT keep isPending across the await, so it
+  // cannot drive a correct loading/disable affordance — see the C2.1d-2 hardening.)
+  const [submitting, setSubmitting] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -91,24 +94,25 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
     }
   }
 
-  function triage() {
-    if (pending) return;
+  async function triage() {
+    if (submitting) return;
     // Prepare the dedicated Triage intent (constant signature → key reused on retry).
     const prepared = prepareCommandSubmit(triageIntentRef.current, TRIAGE_SIGNATURE, newIdempotencyKey);
     triageIntentRef.current = prepared;
     setMessage(null);
-    startTransition(async () => {
-      try {
-        const res = await triageTaskAction({
-          taskId: target.taskId,
-          expectedAggregateVersion: target.aggregateVersion,
-          idempotencyKey: prepared.key,
-        });
-        applyResult(res, triageIntentRef);
-      } catch {
-        setMessage(NETWORK_MESSAGE); // retain intent for a safe retry
-      }
-    });
+    setSubmitting(true);
+    try {
+      const res = await triageTaskAction({
+        taskId: target.taskId,
+        expectedAggregateVersion: target.aggregateVersion,
+        idempotencyKey: prepared.key,
+      });
+      applyResult(res, triageIntentRef);
+    } catch {
+      setMessage(NETWORK_MESSAGE); // retain intent for a safe retry
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function openSchedule() {
@@ -131,8 +135,8 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
     scheduleButtonRef.current?.focus();
   }
 
-  function confirmSchedule() {
-    if (pending) return;
+  async function confirmSchedule() {
+    if (submitting) return;
     // Client-owned first boundary: reject empty/malformed/past before any call.
     if (!isValidScheduleDate(selectedDate, today)) {
       setMessage(PAST_DATE_MESSAGE);
@@ -143,19 +147,20 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
     const prepared = prepareCommandSubmit(scheduleIntentRef.current, selectedDate, newIdempotencyKey);
     scheduleIntentRef.current = prepared;
     setMessage(null);
-    startTransition(async () => {
-      try {
-        const res = await triageAndScheduleTaskAction({
-          taskId: target.taskId,
-          expectedAggregateVersion: target.aggregateVersion,
-          idempotencyKey: prepared.key,
-          scheduledDate: selectedDate,
-        });
-        applyResult(res, scheduleIntentRef); // failure keeps the area open + date intact
-      } catch {
-        setMessage(NETWORK_MESSAGE); // retain same-date intent, keep area open
-      }
-    });
+    setSubmitting(true);
+    try {
+      const res = await triageAndScheduleTaskAction({
+        taskId: target.taskId,
+        expectedAggregateVersion: target.aggregateVersion,
+        idempotencyKey: prepared.key,
+        scheduledDate: selectedDate,
+      });
+      applyResult(res, scheduleIntentRef); // failure keeps the area open + date intact
+    } catch {
+      setMessage(NETWORK_MESSAGE); // retain same-date intent, keep area open
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -166,8 +171,9 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
           variant="ghost"
           size="sm"
           onClick={triage}
-          disabled={pending}
-          aria-busy={pending || undefined}
+          disabled={submitting}
+          loading={submitting}
+          aria-busy={submitting || undefined}
           aria-label={`Triage “${target.title}”`}
         >
           Triage
@@ -178,7 +184,7 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
           variant="ghost"
           size="sm"
           onClick={openSchedule}
-          disabled={pending}
+          disabled={submitting}
           aria-expanded={scheduleOpen}
           aria-label={`Schedule “${target.title}”`}
         >
@@ -196,12 +202,12 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
               type="date"
               value={selectedDate}
               min={today}
-              // NB: intentionally NOT disabled while pending — disabling a focused
-              // input blurs it and a later focus() on a disabled element is a
-              // no-op (the Quick Capture focus lesson). Double-submit is blocked by
-              // `if (pending) return` + the Confirm button's disabled state + the
+              // NB: intentionally NOT disabled while submitting — disabling a
+              // focused input blurs it and a later focus() on a disabled element is
+              // a no-op (the Quick Capture focus lesson). Double-submit is blocked by
+              // `if (submitting) return` + the Confirm button's disabled state + the
               // op's idempotency.
-              aria-busy={pending || undefined}
+              aria-busy={submitting || undefined}
               aria-describedby={feedbackId}
               onChange={(e) => {
                 setSelectedDate(e.target.value);
@@ -220,8 +226,9 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
                 type="button"
                 size="sm"
                 onClick={confirmSchedule}
-                disabled={pending}
-                loading={pending}
+                disabled={submitting}
+                loading={submitting}
+                aria-busy={submitting || undefined}
                 aria-label={`Confirm schedule for “${target.title}”`}
               >
                 Confirm
