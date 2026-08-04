@@ -361,17 +361,30 @@ async function main() {
   check("concurrent completion: the second is blocked then VersionConflicts", ccErr && ccErr.code === "BB460");
   check("concurrent completion: task completed exactly once (v=5, one TaskCompleted)", (await scalar(c, `select aggregate_version from public.tasks where id='${cc.id}'`)) === 5 && (await scalar(c, `select count(*)::int from public.task_events where task_id='${cc.id}' and event_type='TaskCompleted'`)) === 1);
 
-  // (3) Concurrent duplicate-key create → exactly one task + one receipt.
+  // (3) Concurrent duplicate-key create → exactly one task + one receipt. The
+  // loser legitimately resolves EITHER way and both preserve exactly-once: its
+  // own receipt insert can race into the unique constraint (23505), OR — once the
+  // winner has committed its receipt — it observes that receipt and returns the
+  // committed result as 'replayed'. Which branch fires depends purely on
+  // scheduling, so asserting ONLY 23505 was an over-specification that flaked.
+  // When the loser replays it must hand back the WINNER's committed result (same
+  // task id, the stored receipt's version) — never a second task/receipt/event.
   await c.query("begin"); await c.query("set role service_role");
-  await c.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
+  const dupWin = await c.query("select public.apply_task_command($1::jsonb) res", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
+  const dupWinTask = dupWin.rows[0].res.result_task_id;
   await c2.query("begin"); await c2.query("set role service_role");
-  const pend2 = c2.query("select public.apply_task_command($1::jsonb)", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
+  const pend2 = c2.query("select public.apply_task_command($1::jsonb) res", [JSON.stringify(env("CaptureTask", { key: "dupcreate", deltas: { title: "DUPTAG", status: "inbox" }, events: [evt("TaskCaptured")] }))]);
   pend2.catch(() => {}); // register a handler at creation (see note above); `await pend2` still observes the original outcome
   await c.query("commit"); await c.query("reset role");
-  let dupErr = null; try { await pend2; } catch (e) { dupErr = e; }
+  let dupErr = null, dupLoser = null; try { const r = await pend2; dupLoser = r.rows[0].res; } catch (e) { dupErr = e; }
   await c2.query("rollback").catch(() => {}); await c2.query("reset role").catch(() => {});
-  check("concurrent duplicate-key create: second hits unique receipt (23505)", dupErr && dupErr.code === "23505");
-  check("concurrent duplicate-key create: exactly one task + one receipt", (await scalar(c, `select count(*)::int from public.tasks where title='DUPTAG'`)) === 1 && (await scalar(c, `select count(*)::int from public.command_receipts where idempotency_key='dupcreate'`)) === 1);
+  const dupReceiptTask = await scalar(c, `select result_task_id from public.command_receipts where idempotency_key='dupcreate'`);
+  const dupReceiptVer = await scalar(c, `select result_aggregate_version from public.command_receipts where idempotency_key='dupcreate'`);
+  const dupLostBy23505 = Boolean(dupErr) && dupErr.code === "23505";
+  const dupLostByReplay = !dupErr && Boolean(dupLoser) && dupLoser.outcome === "replayed";
+  check("concurrent duplicate-key create: loser resolves as unique-violation (23505) OR replays the committed result", dupLostBy23505 || dupLostByReplay, dupErr ? `err ${dupErr.code}` : `outcome ${dupLoser && dupLoser.outcome}`);
+  check("concurrent duplicate-key create: a replaying loser returns the winner's committed task + stored receipt version", !dupLostByReplay || (dupLoser.result_task_id === dupWinTask && dupLoser.result_task_id === dupReceiptTask && dupLoser.result_aggregate_version === dupReceiptVer));
+  check("concurrent duplicate-key create: exactly one task + one receipt + one event (both outcomes)", (await scalar(c, `select count(*)::int from public.tasks where title='DUPTAG'`)) === 1 && (await scalar(c, `select count(*)::int from public.command_receipts where idempotency_key='dupcreate'`)) === 1 && (await scalar(c, `select count(*)::int from public.task_events where task_id='${dupWinTask}'`)) === 1);
 
   // ── Cross-workspace reference is structurally impossible ───────────────────
   console.log("\n── Cross-workspace ──");
