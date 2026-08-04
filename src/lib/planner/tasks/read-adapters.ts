@@ -93,6 +93,30 @@ export async function getInboxTasks(): Promise<Task[]> {
   return (data ?? []) as Task[];
 }
 
+/** The active statuses that constitute the My Tasks workspace (Inbox is excluded — it is intake, not owned work). */
+const MY_TASKS_STATUSES: TaskStatus[] = ["planned", "scheduled", "in_progress", "waiting"];
+
+/**
+ * The current admin's personal active task workspace: every non-deleted task in
+ * an active status (planned/scheduled/in_progress/waiting) where the admin is the
+ * OWNER or the ASSIGNEE. Inbox/completed/archived are excluded at the database.
+ * RLS (admin + workspace) scopes the rows; no privileged client is used. Grouping,
+ * overdue derivation and ordering are applied by the pure kit, not here.
+ */
+export async function getMyTasks(): Promise<Task[]> {
+  const { supabase, adminId } = await authedContext();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .is("deleted_at", null)
+    .in("status", MY_TASKS_STATUSES)
+    .or(`owner_user_id.eq.${adminId},assignee_id.eq.${adminId}`)
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .order("scheduled_date", { ascending: true, nullsFirst: false });
+  if (error) throw new TaskError("PersistenceError");
+  return (data ?? []) as Task[];
+}
+
 /** Active (unresolved) blockers for the given tasks, RLS-scoped. */
 export async function getActiveBlockersFor(taskIds: string[]): Promise<TaskBlocker[]> {
   const { supabase } = await authedContext();
