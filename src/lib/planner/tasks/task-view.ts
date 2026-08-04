@@ -35,6 +35,10 @@ export interface TaskView {
   /** Best-effort resolved name; null when unavailable (never fabricated). */
   ownerDisplay: string | null;
   assigneeDisplay: string | null;
+  /** status === 'completed' — carried so Today can show a "Completed today" group. */
+  isCompleted: boolean;
+  /** When completed, the completion instant (ISO); else null. */
+  completedAt: string | null;
   aggregateVersion: number;
 }
 
@@ -66,6 +70,8 @@ export function toTaskView(task: Task, nameById: ReadonlyMap<string, string>, to
     blockedSince: task.blocked_since,
     ownerDisplay: displayName(task.owner_user_id, nameById),
     assigneeDisplay: displayName(task.assignee_id, nameById),
+    isCompleted: task.status === "completed",
+    completedAt: task.completed_at,
     aggregateVersion: task.aggregate_version,
   };
 }

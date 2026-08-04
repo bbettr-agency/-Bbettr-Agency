@@ -15,7 +15,7 @@ import "server-only";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isTasksEnabled } from "@/lib/flags";
-import { AGENCY_TZ, todayDate } from "@/lib/planner/meetings/date-views";
+import { AGENCY_TZ, localDate, todayDate } from "@/lib/planner/meetings/date-views";
 import type { SafeTaskEvent, SafeTaskReminder, Task, TaskBlocker, TaskStatus } from "@/lib/database.types";
 import { TaskError } from "./errors";
 import { isOverdue, isScheduledToday, partitionToday } from "./today-membership";
@@ -115,6 +115,53 @@ export async function getMyTasks(): Promise<Task[]> {
     .order("scheduled_date", { ascending: true, nullsFirst: false });
   if (error) throw new TaskError("PersistenceError");
   return (data ?? []) as Task[];
+}
+
+export interface TodayWorkspace {
+  today: string; // agency-local YYYY-MM-DD
+  active: Task[]; // owner|assignee · active status · scheduled today OR overdue
+  completedToday: Task[]; // owner|assignee · completed within today (agency)
+}
+
+/**
+ * The current admin's Today workspace: their (owner OR assignee) active tasks that
+ * are members of Today (`scheduled_date == today` OR overdue), plus the tasks they
+ * completed today (agency day). RLS-scoped; grouping/NBA/progress belong to the
+ * pure Today layer, not here. Completed rows are bounded (last 2 days) then filtered
+ * to the exact agency day.
+ */
+export async function getTodayWorkspace(now: Date = new Date()): Promise<TodayWorkspace> {
+  const { supabase, adminId } = await authedContext();
+  const today = todayDate(now, AGENCY_TZ);
+  const mine = `owner_user_id.eq.${adminId},assignee_id.eq.${adminId}`;
+  const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [activeRes, doneRes] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select("*")
+      .is("deleted_at", null)
+      .in("status", ["planned", "scheduled", "in_progress", "waiting"] as TaskStatus[])
+      .or(mine)
+      .or(`scheduled_date.eq.${today},due_date.lt.${today}`)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("scheduled_date", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("tasks")
+      .select("*")
+      .is("deleted_at", null)
+      .eq("status", "completed")
+      .or(mine)
+      .gte("completed_at", twoDaysAgo)
+      .order("completed_at", { ascending: false }),
+  ]);
+  if (activeRes.error || doneRes.error) throw new TaskError("PersistenceError");
+
+  const active = (activeRes.data ?? []) as Task[];
+  const completedToday = ((doneRes.data ?? []) as Task[]).filter(
+    (t) => t.completed_at != null && localDate(t.completed_at, AGENCY_TZ) === today
+  );
+  return { today, active, completedToday };
 }
 
 /** Active (unresolved) blockers for the given tasks, RLS-scoped. */
