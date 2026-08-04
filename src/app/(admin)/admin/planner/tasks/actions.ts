@@ -26,6 +26,7 @@
 import { getCurrentProfile } from "@/lib/auth";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
 import { TaskError } from "@/lib/planner/tasks/errors";
+import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
 import type { ApprovedPlannerPath, TaskActionResult } from "@/lib/planner/tasks/action-result";
 import type { TaskPriority } from "@/lib/database.types";
 
@@ -35,15 +36,6 @@ const failWith = (code: "NotAuthenticated" | "InvalidCommand"): TaskActionResult
   const e = new TaskError(code);
   return { ok: false, code: e.code, error: e.message };
 };
-
-/** Strict agency date: `YYYY-MM-DD` AND a real calendar day (rejects 2026-13-01, 2026-02-30). */
-function isValidAgencyDate(s: unknown): s is string {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const [y, m, d] = s.split("-").map(Number);
-  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
-}
 
 /** The workspace-scoped, admin authenticated actor performing the action. */
 async function currentAdminId(): Promise<string | null> {
@@ -90,7 +82,9 @@ export async function triageTaskAction(input: {
  * Triage-and-schedule an Inbox task → Scheduled (the only legal Inbox→Scheduled
  * path). Owner is ALWAYS the authenticated admin; assignee is ALWAYS null during
  * Inbox triage (no browser-selected assignment until an approved assignment UI +
- * authorization rule exists). `scheduledDate` is strictly validated first.
+ * authorization rule exists). `scheduledDate` must be a real calendar day that is
+ * TODAY OR IN THE FUTURE in the agency timezone — re-validated here so a crafted
+ * browser request cannot bypass the client's min-date rule.
  */
 export async function triageAndScheduleTaskAction(input: {
   taskId: string;
@@ -99,7 +93,7 @@ export async function triageAndScheduleTaskAction(input: {
   scheduledDate: string; // agency-local YYYY-MM-DD
   priority?: TaskPriority;
 }): Promise<TaskActionResult> {
-  if (!isValidAgencyDate(input.scheduledDate)) return failWith("InvalidCommand");
+  if (!isValidScheduleDate(input.scheduledDate, agencyToday())) return failWith("InvalidCommand");
   const ownerUserId = await currentAdminId();
   if (!ownerUserId) return failWith("NotAuthenticated");
   return runTaskCommand(
