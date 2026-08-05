@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/status-badge";
 import { getService } from "@/lib/services";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
+import { ClientServicesManager } from "@/components/admin/client-services-manager";
 import { StageManager } from "@/components/admin/stage-manager";
 import { ProjectSettingsManager } from "@/components/admin/project-settings-manager";
 import { ActivityManager } from "@/components/admin/activity-manager";
@@ -122,6 +123,9 @@ export function ClientDetail({
   // deep-linkable, reload-safe, back/forward walks section history).
   const [active, navigate] = useWorkspaceSection();
 
+  // Services that have a real onboarding submission → drives "View Onboarding".
+  const onboardingServices = onboarding.map((s) => s.service);
+
   const counts: SectionCounts = {
     onboarding: onboarding.length,
     progress: stages.length,
@@ -225,20 +229,13 @@ export function ClientDetail({
                     <p className="mb-1.5 text-xs font-medium text-ink-400">
                       Services
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {services.length > 0 ? (
-                        services.map((s) => (
-                          <span
-                            key={s.id}
-                            className="rounded-md bg-ink-100 px-2 py-1 text-xs font-medium text-ink-700"
-                          >
-                            {getService(s.service).name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-ink-400">None</span>
-                      )}
-                    </div>
+                    <ClientServicesManager
+                      clientId={client.id}
+                      clientName={client.name}
+                      services={services}
+                      onboardingServices={onboardingServices}
+                      onViewOnboarding={() => navigate("onboarding")}
+                    />
                   </div>
                 </CardContent>
               </Card>

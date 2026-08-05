@@ -20,6 +20,7 @@ import {
 import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { logActivity } from "@/lib/activity";
+import { SERVICE_LIST, getService } from "@/lib/services";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { STAGE_TO_JOURNEY } from "@/lib/journey";
 import { formatCurrency } from "@/lib/utils";
@@ -44,6 +45,8 @@ export interface ActionResult {
   clientId?: string;
   /** A freshly generated temporary password, returned once for the admin to copy. */
   password?: string;
+  /** True when an add-service request was a safe no-op (the service already existed). */
+  alreadyAdded?: boolean;
 }
 
 /**
@@ -333,6 +336,74 @@ export async function resetTempPasswordAction(
   if (error) return { error: error.message };
 
   return { ok: true, password };
+}
+
+/**
+ * Add a single additional service to an EXISTING client's account (additive only).
+ *
+ * Admin-only. The insert runs as the authenticated admin through the RLS server
+ * client (the `client_services` "Admins manage all" policy authorizes it) — no
+ * service-role path. It is idempotent: `client_services.unique(client_id, service)`
+ * is the final duplicate boundary, and a conflict-safe insert can never overwrite
+ * or reset an existing row. It touches ONLY `client_services` — never
+ * `onboarding_submissions` or `project_stages`, so completed onboarding and the
+ * roadmap are preserved. The client's Portal exposes the new onboarding form
+ * automatically (forms are derived from `client_services`).
+ */
+export async function addClientServiceAction(
+  clientId: string,
+  service: ServiceType
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  // Validate the service against the bounded catalogue (reject free-text/unknown).
+  if (!SERVICE_LIST.some((s) => s.id === service)) {
+    return { error: "Unsupported service." };
+  }
+
+  const supabase = await createClient();
+
+  // Validate the target client exists (server-derived; never trust the browser).
+  const { data: client, error: clientErr } = await supabase
+    .from("clients")
+    .select("id, name")
+    .eq("id", clientId)
+    .single();
+  if (clientErr || !client) return { error: "Client not found." };
+
+  // Idempotent: if the row already exists, leave it exactly as-is (no reset).
+  const { data: existing } = await supabase
+    .from("client_services")
+    .select("id")
+    .eq("client_id", clientId)
+    .eq("service", service)
+    .maybeSingle();
+  if (existing) return { ok: true, alreadyAdded: true };
+
+  // Insert ONLY the selected service at not_started. On a unique-violation race,
+  // treat it as an idempotent no-op rather than an error.
+  const { error: insErr } = await supabase
+    .from("client_services")
+    .insert({ client_id: clientId, service, onboarding_status: "not_started" });
+  if (insErr) {
+    if (insErr.code === "23505") return { ok: true, alreadyAdded: true };
+    return { error: "Could not add the service. Please try again." };
+  }
+
+  // Internal admin audit only (best-effort; never blocks). Captures client,
+  // service, admin actor + timestamp.
+  await logActivity({
+    clientId,
+    type: "service_added",
+    title: `${getService(service).name} added to ${client.name}`,
+    description: `Added by ${admin.full_name ?? "an admin"}`,
+    visibility: "internal",
+    createdBy: admin.id,
+    source: "manual",
+  });
+
+  revalidateClient(clientId);
+  return { ok: true };
 }
 
 export async function updateClientStatusAction(
