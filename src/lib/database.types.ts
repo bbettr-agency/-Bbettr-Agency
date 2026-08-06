@@ -1385,7 +1385,15 @@ export interface Database {
         Args: { p_meeting_id: string };
         Returns: string;
       };
-      // ── Planner Tasks domain (0036–0047) ────────────────────────────────
+      // ── Planner Tasks domain (0036–0048) ────────────────────────────────
+      // Admin-only permanent erase of a task (SECURITY DEFINER; re-checks
+      // is_admin(); workspace-scoped). Sets deleted_at so the task disappears
+      // from every view. Returns the id, or null when the task is missing /
+      // already erased / outside the workspace (idempotent no-op).
+      erase_task: {
+        Args: { p_task_id: string };
+        Returns: string | null;
+      };
       // Resolves the acting admin's workspace; NULL (fail-closed) when unset.
       current_workspace_id: {
         Args: Record<string, never>;

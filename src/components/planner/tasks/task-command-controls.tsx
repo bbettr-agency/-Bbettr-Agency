@@ -28,6 +28,7 @@ import {
   blockTaskAction,
   unblockTaskAction,
   dropTaskAction,
+  eraseTaskAction,
 } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
 import { clearCommandIntent, commandIntentAfterResult, intentDispositionFor, prepareCommandSubmit, IDLE, type CommandIntent } from "@/lib/planner/tasks/inbox-command-intent";
@@ -50,7 +51,7 @@ type Base = { taskId: string; expectedAggregateVersion: number };
 export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
-  const [openArea, setOpenArea] = useState<null | "date" | "block">(null);
+  const [openArea, setOpenArea] = useState<null | "date" | "block" | "delete">(null);
   const [dateKey, setDateKey] = useState<"schedule" | "reschedule">("schedule");
   const [selectedDate, setSelectedDate] = useState("");
   const [blockerClass, setBlockerClass] = useState<BlockerClassInput>("approval");
@@ -169,6 +170,39 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
     );
   }
 
+  function openDelete(trigger: HTMLButtonElement | null) {
+    areaTriggerRef.current = trigger;
+    setMessage(null);
+    setOpenArea("delete");
+  }
+
+  /**
+   * Permanent erase — a separate destructive path (NOT a state-machine command),
+   * so it bypasses the idempotency `run()` machinery. The action is idempotent
+   * server-side and the button is disabled while submitting, so no key is needed.
+   * On success the row is gone; `router.refresh()` removes it from the list.
+   */
+  async function confirmErase() {
+    if (submitting) return;
+    setMessage(null);
+    setActiveKey("confirm-delete");
+    setSubmitting(true);
+    try {
+      const res = await eraseTaskAction({ taskId: target.taskId });
+      if (res.ok) {
+        setOpenArea(null);
+        router.refresh();
+      } else {
+        setMessage(res.error); // keep the confirm area open; surface a safe message
+      }
+    } catch {
+      setMessage(NETWORK_MESSAGE);
+    } finally {
+      setSubmitting(false);
+      setActiveKey(null);
+    }
+  }
+
   function renderActionButton(a: TaskActionDescriptor) {
     const label = TASK_ACTION_LABEL[a.key];
     const common = { key: a.key, type: "button" as const, size: "sm" as const, variant: "ghost" as const, disabled: submitting };
@@ -184,6 +218,19 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
       const key = a.key === "reschedule" ? "reschedule" : "schedule";
       return (
         <Button {...common} aria-expanded={openArea === "date" && dateKey === key} onClick={(e) => openDate(key, e.currentTarget)} aria-label={`${label} “${target.title}”`}>
+          {label}
+        </Button>
+      );
+    }
+    if (a.kind === "delete") {
+      return (
+        <Button
+          {...common}
+          className="text-red-600 hover:bg-red-50 hover:text-red-700"
+          aria-expanded={openArea === "delete"}
+          onClick={(e) => openDelete(e.currentTarget)}
+          aria-label={`Delete “${target.title}” permanently`}
+        >
           {label}
         </Button>
       );
@@ -282,6 +329,33 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
                 Cancel
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {openArea === "delete" && (
+        <div className="mt-2 basis-full rounded-lg border border-red-200 bg-red-50/60 p-3">
+          <p className="text-sm font-semibold text-red-800">Permanently delete this task?</p>
+          <p className="mt-0.5 text-xs text-red-700">
+            This removes &ldquo;{target.title}&rdquo; from every view. It can&rsquo;t be undone.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              onClick={confirmErase}
+              disabled={submitting}
+              loading={submitting && activeKey === "confirm-delete"}
+              aria-busy={submitting || undefined}
+              aria-describedby={feedbackId}
+              aria-label={`Confirm permanent delete “${target.title}”`}
+            >
+              Delete permanently
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={closeArea} aria-label={`Cancel delete “${target.title}”`}>
+              Cancel
+            </Button>
           </div>
         </div>
       )}

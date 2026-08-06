@@ -31,6 +31,13 @@ export interface TaskActionFailure {
 export type TaskActionResult = TaskActionSuccess | TaskActionFailure;
 
 /**
+ * Result of the permanent-erase action. Erase is not a state-machine command
+ * (it removes a task from every view rather than transitioning it), so it does
+ * not carry an outcome/version — success is a bare `ok`, failure a safe message.
+ */
+export type EraseTaskResult = { ok: true } | { ok: false; error: string };
+
+/**
  * The ONLY Planner paths a task Server Action may revalidate. Callers pass a
  * subset of these; anything outside the whitelist is ignored (a caller can never
  * trigger an arbitrary revalidation). Kept intentionally small and explicit.
