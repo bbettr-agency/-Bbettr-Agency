@@ -136,6 +136,9 @@ export async function getTeamViewData(now: Date = new Date()): Promise<TeamViewD
   });
 
   const meetingsToday = meetingsTodayCount(meetings, now, AGENCY_TZ);
-  const summary = buildSummary(facets, members.length, completed.length, meetingsToday);
+  // Headline "Completed today" counts EVERY completed-today row, independent of
+  // member resolution (a completed task always has an owner per the
+  // owner-beyond-inbox constraint, but the summary must not silently drop one).
+  const summary = buildSummary(facets, members.length, completedToday.length, meetingsToday);
   return { today, summary, facets, completed, members };
 }

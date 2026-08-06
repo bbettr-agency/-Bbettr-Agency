@@ -39,29 +39,31 @@ export function MemberBand({
   const detailId = `team-member-detail-${workload.id}`;
   return (
     <Card className="overflow-hidden">
+      {/* Disclosure button holds only phrasing content (spans) so it stays valid
+          HTML while remaining a native, keyboard-accessible <button>. */}
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        aria-controls={detailId}
+        aria-controls={expanded ? detailId : undefined}
         className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-ink-50/50"
       >
         <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-ink-400 transition-transform", expanded && "rotate-180")} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-sm font-semibold text-ink-900">{workload.name}</p>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold text-ink-900">{workload.name}</span>
             {workload.active === 0 ? <Badge tone="success">Available</Badge> : null}
-          </div>
+          </span>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <Stat label="active" value={workload.active} />
             <Stat label="due today" value={workload.scheduledToday} />
             <Stat label="overdue" value={workload.overdue} danger />
             <Stat label="waiting" value={workload.waiting} />
             <Stat label="clients" value={workload.clients} />
-          </div>
+          </span>
 
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <span className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span className="text-ink-400">Focus:</span>
             {currentFocus ? (
               <>
@@ -77,9 +79,9 @@ export function MemberBand({
             ) : (
               <span className="text-ink-400">No active work</span>
             )}
-          </div>
+          </span>
 
-          <p className="mt-1 text-xs text-ink-500">
+          <span className="mt-1 block text-xs text-ink-500">
             {estimate.estimatedMinutes != null ? (
               <>
                 Workload: <span className="font-medium text-ink-700">{formatWorkload(estimate.estimatedMinutes)}</span>
@@ -89,8 +91,8 @@ export function MemberBand({
             )}
             {estimate.noEstimateCount > 0 ? <span className="text-ink-400"> · {estimate.noEstimateCount} without estimate</span> : null}
             {workload.nextMeeting ? <span className="text-ink-400"> · Next meeting {workload.nextMeeting.whenLabel}</span> : null}
-          </p>
-        </div>
+          </span>
+        </span>
       </button>
 
       {expanded && detail ? (
