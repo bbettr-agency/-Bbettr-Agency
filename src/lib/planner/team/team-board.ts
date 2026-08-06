@@ -25,6 +25,8 @@ export type ActiveTaskStatus = "planned" | "scheduled" | "in_progress" | "waitin
 const ACTIVE_STATUS_ORDER: ActiveTaskStatus[] = ["planned", "scheduled", "in_progress", "waiting"];
 
 export const INTERNAL_CLIENT_LABEL = "Internal / No client";
+/** A real client_id whose name could not be resolved (theoretical; FK keeps it live). */
+export const UNKNOWN_CLIENT_LABEL = "Unknown client";
 
 /**
  * Presentation-safe per-task facet — the Team view model the client filter island
@@ -226,7 +228,9 @@ export function buildClientWorkloads(facets: readonly TeamTaskFacet[]): ClientWo
     const isInternal = key === "__internal__";
     out.push({
       clientId: isInternal ? null : key,
-      name: isInternal ? INTERNAL_CLIENT_LABEL : list[0].clientName ?? INTERNAL_CLIENT_LABEL,
+      // Real client with an unresolved name → "Unknown client", never conflated
+      // with the null-client Internal bucket.
+      name: isInternal ? INTERNAL_CLIENT_LABEL : list[0].clientName ?? UNKNOWN_CLIENT_LABEL,
       active: list.length,
       overdue: list.filter((f) => f.isOverdue).length,
       assignees: [...new Set(list.map((f) => f.memberName))].sort((a, b) => a.localeCompare(b)),
@@ -272,32 +276,51 @@ export function applyFilter(facets: readonly TeamTaskFacet[], filter: TeamBoardF
 }
 
 /**
- * Compute the filtered board (member cards + client groups). Member visibility:
- * under the default Active view (no member filter, no search) EVERY member card is
- * shown — including those with zero active tasks, so "who has capacity" is visible.
- * Under a narrowing filter (overdue/today/this-week, a search term) only members
- * with matching work are shown. An explicit member selection always shows that one
- * card. Members sort busiest-first (active desc, overdue desc, name).
+ * Compute the filtered board (member cards + client groups).
+ *
+ * HONESTY INVARIANT: every displayed number is a TRUE total. The team-member
+ * filter is a hard data scope (whose world you are looking at); the work slice
+ * (overdue/today/this-week) and search are VISIBILITY-ONLY — they decide which
+ * cards/groups appear, never recompute a card's counts. So a member card under
+ * the Overdue filter still shows the member's real active/in-progress/etc. totals
+ * (their full load), not just their overdue count — which is what "who is
+ * overloaded / who has capacity" actually needs.
+ *
+ * Visibility: under the default Active view (Everyone, no search) EVERY member
+ * card shows — including zero-task members, so capacity is visible. Under a
+ * narrowing slice or a search term, only members/clients WITH matching work show.
+ * An explicit member selection always shows that one card. Members sort
+ * busiest-first (active desc, overdue desc, name).
  */
 export function computeBoard(facets: readonly TeamTaskFacet[], members: readonly MemberMeta[], filter: TeamBoardFilter): TeamBoard {
-  const filtered = applyFilter(facets, filter);
-  const byMember = new Map<string, TeamTaskFacet[]>();
-  for (const f of filtered) {
-    const list = byMember.get(f.memberId);
+  // Member filter = hard data scope; stats/focus are computed from this set.
+  const scoped = filter.memberId === "all" ? facets : facets.filter((f) => f.memberId === filter.memberId);
+  // Visibility set = scoped ∩ (work + search). Used ONLY to decide what appears.
+  const visible = applyFilter(facets, filter);
+  const visibleMemberIds = new Set(visible.map((f) => f.memberId));
+  const visibleClientKeys = new Set(visible.map((f) => f.clientId ?? "__internal__"));
+
+  const scopedByMember = new Map<string, TeamTaskFacet[]>();
+  for (const f of scoped) {
+    const list = scopedByMember.get(f.memberId);
     if (list) list.push(f);
-    else byMember.set(f.memberId, [f]);
+    else scopedByMember.set(f.memberId, [f]);
   }
 
-  const showEmpty = filter.memberId !== "all" || (filter.work === "active" && filter.search.trim() === "");
+  const showAll = filter.work === "active" && filter.search.trim() === "";
   const selected = filter.memberId === "all" ? members : members.filter((m) => m.id === filter.memberId);
 
   const memberCards = selected
-    .map((m) => ({ m, facets: byMember.get(m.id) ?? [] }))
-    .filter((x) => showEmpty || x.facets.length > 0)
-    .map((x) => buildMemberWorkload(x.m, x.facets))
+    // An explicit member selection always shows; otherwise show-all (Active view)
+    // or only members that have work matching the narrowing filter.
+    .filter((m) => filter.memberId !== "all" || showAll || visibleMemberIds.has(m.id))
+    .map((m) => buildMemberWorkload(m, scopedByMember.get(m.id) ?? [])) // TRUE totals
     .sort((a, b) => b.active - a.active || b.overdue - a.overdue || a.name.localeCompare(b.name));
 
-  return { members: memberCards, clients: buildClientWorkloads(filtered) };
+  const allClients = buildClientWorkloads(scoped); // TRUE per-client totals (member-scoped)
+  const clients = showAll ? allClients : allClients.filter((c) => visibleClientKeys.has(c.clientId ?? "__internal__"));
+
+  return { members: memberCards, clients };
 }
 
 /** Static workspace summary (unaffected by filters — a fixed operational snapshot). */

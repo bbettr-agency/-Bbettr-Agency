@@ -62,7 +62,9 @@ export async function getTeamViewData(now: Date = new Date()): Promise<TeamViewD
       .is("deleted_at", null)
       .eq("status", "completed")
       .gte("completed_at", twoDaysAgo),
-    listAdminTeam(),
+    // Pass the workspace we already hold (profile is React-cached) so team
+    // resolution is a single profiles query — no redundant current_workspace_id RPC.
+    listAdminTeam(profile.workspace_id),
     listMeetings(),
   ]);
   if (activeRes.error || doneRes.error) throw new TaskError("PersistenceError");

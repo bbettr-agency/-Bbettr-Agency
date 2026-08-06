@@ -9,6 +9,7 @@ import {
   buildSummary,
   formatWorkload,
   INTERNAL_CLIENT_LABEL,
+  UNKNOWN_CLIENT_LABEL,
   type TeamTaskFacet,
   type MemberMeta,
   type ActiveTaskStatus,
@@ -157,6 +158,12 @@ describe("buildClientWorkloads", () => {
     expect(groups[0].overdue).toBe(1);
     expect(groups[groups.length - 1].clientId).toBeNull();
   });
+  it("labels a real client whose name did not resolve as 'Unknown client' (never Internal)", () => {
+    const groups = buildClientWorkloads([facet({ clientId: "c9", clientName: null })]);
+    expect(groups[0].clientId).toBe("c9");
+    expect(groups[0].name).toBe(UNKNOWN_CLIENT_LABEL);
+    expect(groups[0].name).not.toBe(INTERNAL_CLIENT_LABEL);
+  });
   it("collects distinct assignees (sorted) and distinct statuses (canonical order)", () => {
     const g = buildClientWorkloads([
       facet({ clientId: "c1", clientName: "Acme", memberName: "Zed", status: "in_progress" }),
@@ -202,6 +209,30 @@ describe("computeBoard", () => {
     const facets = [facet({ memberId: "m1", isOverdue: true }), facet({ memberId: "m2" })];
     const board = computeBoard(facets, members, { memberId: "all", work: "overdue", search: "" });
     expect(board.members.map((m) => m.id)).toEqual(["m1"]);
+  });
+  it("HONESTY: a visible card under a narrowing filter shows TRUE totals, not the filtered slice", () => {
+    // m1 has 3 active tasks, only 1 overdue. Under the Overdue filter the card must
+    // still report active=3 (its real load) — not active=1 (the filtered count).
+    const facets = [
+      facet({ memberId: "m1", isOverdue: true }),
+      facet({ memberId: "m1", status: "in_progress" }),
+      facet({ memberId: "m1", status: "planned" }),
+      facet({ memberId: "m2" }),
+    ];
+    const board = computeBoard(facets, members, { memberId: "all", work: "overdue", search: "" });
+    expect(board.members.map((m) => m.id)).toEqual(["m1"]);
+    expect(board.members[0].active).toBe(3); // TRUE total, not 1
+    expect(board.members[0].overdue).toBe(1);
+    expect(board.members[0].inProgress).toBe(1);
+  });
+  it("member filter is a hard scope: client groups reflect only that member's tasks (true totals)", () => {
+    const facets = [
+      facet({ memberId: "m1", clientId: "c1", clientName: "Acme" }),
+      facet({ memberId: "m2", clientId: "c1", clientName: "Acme" }),
+    ];
+    const board = computeBoard(facets, members, { memberId: "m1", work: "active", search: "" });
+    expect(board.clients).toHaveLength(1);
+    expect(board.clients[0].active).toBe(1); // only m1's Acme task
   });
   it("an explicit member selection always shows that one card, even with zero tasks", () => {
     const board = computeBoard([], members, { memberId: "m2", work: "overdue", search: "" });
