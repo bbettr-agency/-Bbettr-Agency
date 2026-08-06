@@ -17,7 +17,10 @@ import { WeekDaySection } from "./week-day-section";
  * (owner|assignee) work only — distinct from Team View (everyone, read-only).
  */
 export async function WeekDashboard() {
-  const [weekRes, teamRes] = await Promise.allSettled([getWeekTasks(), listAdminTeam()]);
+  // One `now` instant threaded into the read AND the labels, so the query's
+  // `today` and formatDayLabel's "Today"/"Tomorrow" can never straddle midnight.
+  const now = new Date();
+  const [weekRes, teamRes] = await Promise.allSettled([getWeekTasks(now), listAdminTeam()]);
 
   if (weekRes.status === "rejected") {
     return (
@@ -30,7 +33,6 @@ export async function WeekDashboard() {
     );
   }
 
-  const now = new Date();
   const { today, weekStart, tasks } = weekRes.value;
 
   const nameById = new Map<string, string>();
