@@ -229,7 +229,7 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
           className="text-red-600 hover:bg-red-50 hover:text-red-700"
           aria-expanded={openArea === "delete"}
           onClick={(e) => openDelete(e.currentTarget)}
-          aria-label={`Delete “${target.title}” permanently`}
+          aria-label={`Delete “${target.title}”`}
         >
           {label}
         </Button>
@@ -335,9 +335,9 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
 
       {openArea === "delete" && (
         <div className="mt-2 basis-full rounded-lg border border-red-200 bg-red-50/60 p-3">
-          <p className="text-sm font-semibold text-red-800">Permanently delete this task?</p>
+          <p className="text-sm font-semibold text-red-800">Delete task?</p>
           <p className="mt-0.5 text-xs text-red-700">
-            This removes &ldquo;{target.title}&rdquo; from every view. It can&rsquo;t be undone.
+            This task will be removed from all Planner views. Its history will remain stored for recovery.
           </p>
           <div className="mt-2 flex gap-2">
             <Button
@@ -349,9 +349,9 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
               loading={submitting && activeKey === "confirm-delete"}
               aria-busy={submitting || undefined}
               aria-describedby={feedbackId}
-              aria-label={`Confirm permanent delete “${target.title}”`}
+              aria-label={`Delete task “${target.title}”`}
             >
-              Delete permanently
+              Delete Task
             </Button>
             <Button type="button" size="sm" variant="outline" onClick={closeArea} aria-label={`Cancel delete “${target.title}”`}>
               Cancel
