@@ -62,7 +62,7 @@ create table public.profiles (
 -- End-user roles carry Supabase's default table grants (RLS is the separate first
 -- gate; this test isolates the TRIGGER, so it grants directly and skips RLS).
 grant select, insert, update, delete on public.profiles to anon, authenticated, service_role;
-grant select, insert on public.clients to anon, authenticated, service_role;
+grant select, insert, delete on public.clients to anon, authenticated, service_role;
 create or replace function public.is_admin() returns boolean
   language sql security definer set search_path=public stable as $fn$
   select exists (select 1 from profiles where id = auth.uid() and role = 'admin'); $fn$;
@@ -189,6 +189,75 @@ async function main() {
     (await scalar(c, `select role::text||':'||coalesce(client_id::text,'-') from public.profiles where id='${U.client}'`)) === `client:${CLIENT_A}`);
   check("(13c) rep onboarding intact — rep profile exists with role='rep'",
     (await scalar(c, `select role from public.profiles where id='${U.rep}'`)) === "rep");
+
+  // ── Bypass hardening: multi-row, upsert, FK cascade ─────────────────────────
+  console.log("\n── Bypass hardening ──");
+  // (15) multi-row UPDATE by a non-admin: the BEFORE UPDATE trigger fires per row,
+  // so NO non-admin row is promoted (admins keep their pre-existing role).
+  {
+    await c.query("begin");
+    await c.query(`set local role authenticated`);
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ sub: U.client, role: "authenticated" })]);
+    await c.query(`update public.profiles set role='admin'`); // no WHERE — every row
+    const admins = (await c.query(`select id from public.profiles where role='admin' order by id`)).rows.map((r) => r.id);
+    await c.query("rollback");
+    check("(15) multi-row UPDATE by non-admin promotes NOBODY (admin set unchanged)",
+      JSON.stringify(admins) === JSON.stringify([U.admin, U.newAdmin].sort()));
+  }
+  // (16) UPSERT: the DO UPDATE branch of INSERT..ON CONFLICT fires the guard.
+  {
+    await c.query("begin");
+    await c.query(`set local role authenticated`);
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ sub: U.client, role: "authenticated" })]);
+    await c.query(`insert into public.profiles (id, role, full_name) values ('${U.client}','admin','UP')
+                   on conflict (id) do update set role='admin', full_name='UP'`);
+    const row = (await c.query(`select role, full_name from public.profiles where id='${U.client}'`)).rows[0];
+    await c.query("rollback");
+    check("(16) UPSERT DO UPDATE by non-admin: role held to 'client', name still applies", row.role === "client" && row.full_name === "UP");
+  }
+  // (17) client delete → ON DELETE SET NULL cascade (as service_role): must NOT be
+  // blocked by the guard, or client deletion would break with an FK violation.
+  {
+    await c.query("begin");
+    await c.query(`set local role service_role`);
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ role: "service_role" })]);
+    let err = null;
+    try { await c.query(`delete from public.clients where id='${CLIENT_A}'`); } catch (e) { err = e; }
+    const cid = err ? "(delete failed)" : (await c.query(`select client_id from public.profiles where id='${U.client}'`)).rows[0].client_id;
+    await c.query("rollback");
+    check("(17) client delete cascade succeeds + profile.client_id set NULL (guard never blocks the RI action)", err === null && cid === null, err?.message);
+  }
+
+  // ── RLS-on: the real-world composition (RLS is the gate, the trigger the guard) ─
+  console.log("\n── RLS-on composition ──");
+  await c.query(`alter table public.profiles enable row level security`);
+  await c.query(`create policy p_sel on public.profiles for select to authenticated using (id = auth.uid())`);
+  await c.query(`create policy p_upd on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid())`);
+  await c.query(`create policy p_admin on public.profiles for all to authenticated using (public.is_admin()) with check (public.is_admin())`);
+  // (18a) RLS ALLOWS a user to update their own row, but the trigger neutralises
+  // the escalation — role stays 'client', no error (this is the production path).
+  {
+    await c.query("begin");
+    await c.query(`set local role authenticated`);
+    await c.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ sub: U.client, role: "authenticated" })]);
+    let err = null;
+    try { await c.query(`update public.profiles set role='admin' where id=auth.uid()`); } catch (e) { err = e; }
+    const role = err ? "(err)" : (await c.query(`select role from public.profiles where id='${U.client}'`)).rows[0].role;
+    await c.query("rollback");
+    check("(18a) RLS-on: non-admin self-update succeeds but role held to 'client' (defense-in-depth)", err === null && role === "client");
+  }
+  // (18b) The INSERT/upsert escalation vector is closed by RLS (no non-admin INSERT
+  // policy) — so an attacker can't sidestep the UPDATE-only guard via INSERT.
+  {
+    const r = await c.query("begin")
+      .then(() => c.query(`set local role authenticated`))
+      .then(() => c.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ sub: U.client, role: "authenticated" })]))
+      .then(() => c.query(`insert into public.profiles (id, role) values ('${U.client}','admin') on conflict (id) do update set role='admin'`))
+      .then(() => ({ error: null }))
+      .catch((e) => ({ error: e }));
+    await c.query("rollback").catch(() => {});
+    check("(18b) non-admin INSERT/upsert of an admin row is REJECTED by RLS (no insert policy)", r.error !== null);
+  }
 
   // ── 0049 compatibility ───────────────────────────────────────────────────────
   console.log("\n── 0049 compatibility ──");

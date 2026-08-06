@@ -53,6 +53,18 @@ begin
   -- no-ops on them rather than being rejected — legitimate edits still succeed.
   -- Admins (is_admin()), the service role, and the migration/dashboard superuser
   -- are NOT end-user roles and retain full control.
+  --
+  -- WHY THE UNTRUSTED SET {authenticated, anon} IS EXHAUSTIVE: a browser/JWT
+  -- caller reaches the DB only through PostgREST's `authenticator`, which SET
+  -- ROLEs to exactly one of anon / authenticated / service_role based on the
+  -- SIGNED (unforgeable) JWT `role` claim. service_role is trusted; every other
+  -- role (postgres, supabase_admin, authenticator, …) is internal/privileged.
+  -- So an untrusted external caller is ALWAYS current_user='authenticated' or
+  -- 'anon'. An allowlist is used deliberately — a deny-by-default list would have
+  -- to enumerate every internal role and would fail-CLOSED (break migrations / RI
+  -- cascades) if one were missed. ⚠️ MAINTENANCE: if a future custom DB role that
+  -- a JWT can assume AND that holds UPDATE on public.profiles is ever added, add
+  -- it here.
   if current_user in ('authenticated', 'anon') and not public.is_admin() then
     new.role         := old.role;
     new.client_id    := old.client_id;
