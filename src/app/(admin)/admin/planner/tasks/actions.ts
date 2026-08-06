@@ -23,12 +23,15 @@
  * underlying command/state-machine still supports owner/assignee for a LATER,
  * separately-approved team-assignment UI with its own authorization rule.
  */
+import { revalidatePath } from "next/cache";
 import { getCurrentProfile } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
+import { isTasksEnabled } from "@/lib/flags";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
 import { getActiveBlockersFor } from "@/lib/planner/tasks/read-adapters";
-import { TaskError } from "@/lib/planner/tasks/errors";
+import { TaskError, mapDbError } from "@/lib/planner/tasks/errors";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
-import type { ApprovedPlannerPath, TaskActionResult } from "@/lib/planner/tasks/action-result";
+import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
 import type { TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
@@ -192,4 +195,39 @@ export async function unblockTaskAction(input: MyTaskTarget): Promise<TaskAction
 /** Drop an active task → archived (cancelled). Legal from planned/scheduled/in_progress/waiting. */
 export async function dropTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
   return runTaskCommand({ command: { type: "DropTask" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/**
+ * Permanently ERASE a task → gone from every view (sets `deleted_at` via the
+ * guarded `erase_task` RPC). This is NOT Drop/archive (a dropped task stays in
+ * history as 'archived'); it is the exceptional erasure the schema reserves
+ * `deleted_at` for. It deliberately does NOT flow through the command path
+ * (no state transition, no event, no version): the RPC is SECURITY DEFINER and
+ * re-checks `is_admin()` + scopes the target to the caller's workspace, so
+ * authorization is enforced in the database as well as here. Idempotent —
+ * erasing a missing / already-erased / other-workspace task is a safe no-op.
+ *
+ * No `expectedAggregateVersion` is taken: erasure is terminal and always wins;
+ * a stale row version never changes the intent ("make it gone"). The append-only
+ * audit trail is left intact (an invisible forensic row remains; no Portal read
+ * surfaces it).
+ */
+export async function eraseTaskAction(input: { taskId: string }): Promise<EraseTaskResult> {
+  if (!isTasksEnabled()) return { ok: false, error: new TaskError("TasksDisabled").message };
+  if (typeof input.taskId !== "string" || input.taskId.trim().length === 0) {
+    return { ok: false, error: new TaskError("InvalidCommand").message };
+  }
+  const profile = await getCurrentProfile();
+  if (!profile) return { ok: false, error: new TaskError("NotAuthenticated").message };
+  if (profile.role !== "admin") return { ok: false, error: new TaskError("NotAuthorized").message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("erase_task", { p_task_id: input.taskId });
+  if (error) return { ok: false, error: mapDbError(error).message };
+
+  // Revalidate only approved Planner paths, only after a committed erase.
+  for (const path of MY_TASKS_REVALIDATE) {
+    if (isApprovedPlannerPath(path)) revalidatePath(path);
+  }
+  return { ok: true };
 }

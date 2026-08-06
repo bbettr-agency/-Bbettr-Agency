@@ -15,10 +15,13 @@
 import type { TaskStatus } from "@/lib/database.types";
 
 export type TaskActionKey =
-  | "start" | "complete" | "schedule" | "reschedule" | "unschedule" | "defer" | "block" | "unblock" | "drop";
+  | "start" | "complete" | "schedule" | "reschedule" | "unschedule" | "defer" | "block" | "unblock" | "drop" | "delete";
 
-/** How the control renders: a single-click command, an inline date, or an inline block form. */
-export type TaskActionKind = "instant" | "date" | "block";
+/**
+ * How the control renders: a single-click command, an inline date, an inline
+ * block form, or a destructive delete guarded by an inline confirm.
+ */
+export type TaskActionKind = "instant" | "date" | "block" | "delete";
 
 export interface TaskActionDescriptor {
   key: TaskActionKey;
@@ -29,23 +32,29 @@ const A = (key: TaskActionKey, kind: TaskActionKind): TaskActionDescriptor => ({
 
 /**
  * The ordered legal V1 actions for a status. Order is the intended button order.
- * Mirrors the state-machine allowed-from sets:
- *   planned      → Start, Schedule, Complete, Block, Drop
- *   scheduled    → Start, Reschedule, Unschedule, Complete, Block, Drop
- *   in_progress  → Complete, Defer, Block, Drop
- *   waiting      → Unblock, Drop   (Complete-from-waiting is engine-legal but not
- *                                   surfaced: waiting is not actionable work)
+ * Mirrors the state-machine allowed-from sets, then appends Delete last:
+ *   planned      → Start, Schedule, Complete, Block, Drop, Delete
+ *   scheduled    → Start, Reschedule, Unschedule, Complete, Block, Drop, Delete
+ *   in_progress  → Complete, Defer, Block, Drop, Delete
+ *   waiting      → Unblock, Drop, Delete   (Complete-from-waiting is engine-legal
+ *                                   but not surfaced: waiting is not actionable work)
+ *
+ * Delete is NOT a state-machine transition: it permanently erases the task
+ * (removes it from every view) rather than moving it to another status. It is
+ * offered last, visually separated as a destructive action, on every ACTIVE
+ * status. inbox/completed/archived intentionally expose no My Tasks controls at
+ * all (capture/reopen/restore live elsewhere), so erase is not surfaced there.
  */
 export function legalActionsFor(status: TaskStatus): TaskActionDescriptor[] {
   switch (status) {
     case "planned":
-      return [A("start", "instant"), A("schedule", "date"), A("complete", "instant"), A("block", "block"), A("drop", "instant")];
+      return [A("start", "instant"), A("schedule", "date"), A("complete", "instant"), A("block", "block"), A("drop", "instant"), A("delete", "delete")];
     case "scheduled":
-      return [A("start", "instant"), A("reschedule", "date"), A("unschedule", "instant"), A("complete", "instant"), A("block", "block"), A("drop", "instant")];
+      return [A("start", "instant"), A("reschedule", "date"), A("unschedule", "instant"), A("complete", "instant"), A("block", "block"), A("drop", "instant"), A("delete", "delete")];
     case "in_progress":
-      return [A("complete", "instant"), A("defer", "instant"), A("block", "block"), A("drop", "instant")];
+      return [A("complete", "instant"), A("defer", "instant"), A("block", "block"), A("drop", "instant"), A("delete", "delete")];
     case "waiting":
-      return [A("unblock", "instant"), A("drop", "instant")];
+      return [A("unblock", "instant"), A("drop", "instant"), A("delete", "delete")];
     default:
       return []; // inbox | completed | archived: no My Tasks V1 controls
   }
@@ -62,4 +71,5 @@ export const TASK_ACTION_LABEL: Record<TaskActionKey, string> = {
   block: "Block",
   unblock: "Unblock",
   drop: "Drop",
+  delete: "Delete",
 };
