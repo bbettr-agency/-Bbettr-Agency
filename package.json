@@ -23,6 +23,7 @@
     "test:tasks-0045": "node supabase/tests/tasks-0045-command-receipts.test.mjs",
     "test:tasks-0046": "node supabase/tests/tasks-0046-internal-persistence.test.mjs",
     "test:tasks-0047": "node supabase/tests/tasks-0047-safe-read-models.test.mjs",
+    "test:tasks-0050": "node supabase/tests/tasks-0050-profiles-guard.test.mjs",
     "test:parity": "node supabase/tests/schema-parity.test.mjs",
     "test:tasks-c1": "node supabase/tests/tasks-command-adapter.test.mjs",
     "test:tasks-inbox-read": "node supabase/tests/tasks-inbox-read.test.mjs",
