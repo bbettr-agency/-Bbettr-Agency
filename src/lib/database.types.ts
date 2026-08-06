@@ -218,6 +218,10 @@ export interface Database {
           id: string;
           role: UserRole;
           client_id: string | null;
+          // Planner workspace binding (added in migration 0036; nullable FK to
+          // public.workspaces). Admins are backfilled to the seeded agency
+          // workspace; clients/reps stay null.
+          workspace_id: string | null;
           full_name: string | null;
           email: string | null;
           avatar_url: string | null;
@@ -227,6 +231,7 @@ export interface Database {
           id: string;
           role?: UserRole;
           client_id?: string | null;
+          workspace_id?: string | null;
           full_name?: string | null;
           email?: string | null;
           avatar_url?: string | null;
