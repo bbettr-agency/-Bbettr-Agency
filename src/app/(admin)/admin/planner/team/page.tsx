@@ -44,7 +44,7 @@ async function TeamViewContent() {
         description="Cross-team operational visibility — who is busy, who has capacity, and where client work is at risk."
       />
       <TeamSummaryTiles summary={data.summary} />
-      <TeamBoard facets={data.facets} members={data.members} />
+      <TeamBoard facets={data.facets} completed={data.completed} members={data.members} />
     </div>
   );
 }

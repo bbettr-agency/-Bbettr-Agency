@@ -42,6 +42,8 @@ export interface TeamTaskFacet {
   memberName: string;
   clientId: string | null;
   clientName: string | null; // null → grouped under Internal / No client
+  scheduledDate: string | null; // 'YYYY-MM-DD' — for detail lists (Today/Upcoming) + ordering
+  dueDate: string | null; // 'YYYY-MM-DD'
   isOverdue: boolean;
   isScheduledToday: boolean;
   isThisWeek: boolean; // scheduled within the agency week (overdue handled by filter)
@@ -49,11 +51,20 @@ export interface TeamTaskFacet {
   estimatedMinutes: number | null;
 }
 
-/** Per-member meta the facets can't carry (next scheduled meeting). */
+/** A member's upcoming scheduled meeting (created_by = scheduler, NOT attendance). */
+export interface MemberMeetingLite {
+  title: string;
+  whenLabel: string; // pre-formatted agency-local label (client stays tz-free)
+}
+
+/** Per-member meta the facets can't carry (scheduled meetings). */
 export interface MemberMeta {
   id: string;
   name: string;
-  nextMeeting: { title: string; whenLabel: string } | null;
+  /** First upcoming scheduled meeting — the collapsed-band hint. Derived from `meetings[0]`. */
+  nextMeeting: MemberMeetingLite | null;
+  /** Upcoming scheduled meetings for the Level-2 Meetings section (bounded). */
+  meetings: MemberMeetingLite[];
 }
 
 /** Estimate rollup. `estimatedMinutes` is null when NO in-scope task has an estimate. */
@@ -79,9 +90,11 @@ export interface MemberWorkload {
   overdue: number;
   inProgress: number;
   waiting: number;
+  /** Distinct real clients this member has active work for (Level-1 "Clients" count). */
+  clients: number;
   estimate: EstimateSummary;
   currentFocus: FocusTask | null;
-  nextMeeting: { title: string; whenLabel: string } | null;
+  nextMeeting: MemberMeetingLite | null;
 }
 
 export interface ClientWorkload {
@@ -149,6 +162,8 @@ export function toFacet(
     memberName: nameById.get(memberId) ?? "Unknown",
     clientId: task.client_id,
     clientName,
+    scheduledDate: scheduled,
+    dueDate: task.due_date,
     isOverdue: deriveOverdue(task, today),
     isScheduledToday: scheduled === today,
     isThisWeek: scheduled != null && scheduled >= weekStart && scheduled <= weekEnd,
@@ -197,6 +212,7 @@ function buildMemberWorkload(member: MemberMeta, facets: readonly TeamTaskFacet[
     overdue: facets.filter((f) => f.isOverdue).length,
     inProgress: facets.filter((f) => f.status === "in_progress").length,
     waiting: facets.filter((f) => f.status === "waiting").length,
+    clients: new Set(facets.filter((f) => f.clientId != null).map((f) => f.clientId)).size,
     estimate: summarizeEstimates(facets),
     currentFocus: pickCurrentFocus(facets),
     nextMeeting: member.nextMeeting,
@@ -337,6 +353,21 @@ export function buildSummary(
     completedToday,
     meetingsToday,
   };
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Format a plain 'YYYY-MM-DD' calendar string as "8 Aug" — pure string math, no
+ * clock and no timezone, so it is hydration-stable. Returns the input unchanged if
+ * it is not a well-formed date string.
+ */
+export function formatShortDate(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) return ymd;
+  return `${Number(m[3])} ${SHORT_MONTHS[month - 1]}`;
 }
 
 /** Format estimated workload minutes as a compact "Xh Ym" / "Ym" label. Pure. */
