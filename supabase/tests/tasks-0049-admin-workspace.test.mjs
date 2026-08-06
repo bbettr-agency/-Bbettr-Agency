@@ -38,6 +38,7 @@ const U = {
   newAdminPreset: "00000000-0000-0000-0000-0000000000a4",
   newClient: "00000000-0000-0000-0000-0000000000c2",
   newRep: "00000000-0000-0000-0000-0000000000d1",
+  directAdmin: "00000000-0000-0000-0000-0000000000a5",
   failClosedAdmin: "00000000-0000-0000-0000-0000000000a9",
 };
 
@@ -51,9 +52,12 @@ function assertDisposableTarget() {
     throw new Error("tasks-0049: refusing non-local host without PLANNER_RLS_ALLOW_REMOTE=1.");
 }
 
-// Minimal 0001-style baseline: auth.users (+ metadata), user_role, clients,
-// profiles, is_admin(), and the REAL handle_new_user() trigger (role/client_id
-// from raw_user_meta_data) so tests drive the true production insert path.
+// Minimal 0001-STYLE baseline: auth.users (+ metadata), user_role, clients,
+// profiles, is_admin(), and a handle_new_user() trigger that MIRRORS 0001's logic
+// (role/client_id from raw_user_meta_data; workspace_id NOT set) so tests drive
+// the real production insert path. It reimplements — rather than executes — 0001
+// to keep the harness minimal; the property under test is that 0049 binds the
+// workspace regardless of who inserts the profile.
 const SCAFFOLD = `
 create schema if not exists auth;
 create table if not exists auth.users (id uuid primary key, email text, raw_user_meta_data jsonb);
@@ -133,6 +137,8 @@ async function main() {
   console.log("\n── Structure ──");
   check("assign_admin_workspace() exists", (await scalar(c, `select count(*)::int from pg_proc where proname='assign_admin_workspace'`)) === 1);
   check("assign_admin_workspace is SECURITY DEFINER", (await scalar(c, `select prosecdef from pg_proc where proname='assign_admin_workspace'`)) === true);
+  check("assign_admin_workspace pins search_path=public (definer hardening)",
+    (await scalar(c, `select coalesce('search_path=public' = any(proconfig), false) from pg_proc where proname='assign_admin_workspace'`)) === true);
   check("BEFORE INSERT trigger present on profiles",
     (await scalar(c, `select count(*)::int from pg_trigger t join pg_class r on r.oid=t.tgrelid
        where r.relname='profiles' and t.tgname='profiles_assign_admin_workspace' and not t.tgisinternal`)) === 1);
@@ -160,6 +166,14 @@ async function main() {
   await c.query(`insert into public.profiles (id,role,workspace_id) values ('${U.newAdminPreset}','admin','${WS2}')
                  on conflict (id) do update set role='admin', workspace_id='${WS2}'`);
   check("NEW admin inserted WITH a workspace preset is not overwritten (null-guard)", (await wsOf(c, U.newAdminPreset)) === WS2);
+
+  // DIRECT profile insert (bypassing the auth trigger) must ALSO bind — proves the
+  // BEFORE INSERT trigger fires for EVERY insert path, not just handle_new_user.
+  await c.query(`drop trigger on_auth_user_created on auth.users`);
+  await c.query(`insert into auth.users (id,email) values ('${U.directAdmin}','direct@t')`);
+  await c.query(`insert into public.profiles (id,role) values ('${U.directAdmin}','admin')`);
+  check("DIRECT admin profile insert (no auth trigger) is auto-bound to agency workspace", (await wsOf(c, U.directAdmin)) === WS);
+  await c.query(`create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user()`);
 
   // ── Fail-closed: agency workspace absent ─────────────────────────────────────
   console.log("\n── Fail-closed (agency workspace missing) ──");
