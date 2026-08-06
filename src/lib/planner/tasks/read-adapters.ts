@@ -15,7 +15,7 @@ import "server-only";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isTasksEnabled } from "@/lib/flags";
-import { AGENCY_TZ, localDate, todayDate } from "@/lib/planner/meetings/date-views";
+import { AGENCY_TZ, localDate, todayDate, weekRange } from "@/lib/planner/meetings/date-views";
 import type { SafeTaskEvent, SafeTaskReminder, Task, TaskBlocker, TaskStatus } from "@/lib/database.types";
 import { TaskError } from "./errors";
 import { isOverdue, isScheduledToday, partitionToday } from "./today-membership";
@@ -162,6 +162,43 @@ export async function getTodayWorkspace(now: Date = new Date()): Promise<TodayWo
     (t) => t.completed_at != null && localDate(t.completed_at, AGENCY_TZ) === today
   );
   return { today, active, completedToday };
+}
+
+export interface WeekTasks {
+  today: string; // agency-local YYYY-MM-DD
+  weekStart: string; // Monday (agency-local YYYY-MM-DD)
+  weekEnd: string; // Sunday (agency-local YYYY-MM-DD)
+  tasks: Task[]; // my active tasks scheduled this week OR overdue
+}
+
+/**
+ * The current admin's THIS WEEK planning slice: their (owner OR assignee) active
+ * tasks whose `scheduled_date` falls in the current agency week (Mon–Sun) OR that
+ * are overdue (`due_date < today`). Personal (like My Tasks/Today), RLS-scoped, one
+ * query. Inbox/completed/archived/deleted are excluded at the database. Undated
+ * tasks that are not overdue are intentionally NOT fetched (This Week has no
+ * unscheduled backlog — that lives in My Tasks). Day-bucketing + the overdue split
+ * are applied by the pure week-grouping layer, not here.
+ */
+export async function getWeekTasks(now: Date = new Date()): Promise<WeekTasks> {
+  const { supabase, adminId } = await authedContext();
+  const today = todayDate(now, AGENCY_TZ);
+  const { start: weekStart, end: weekEnd } = weekRange(now, AGENCY_TZ);
+  const mine = `owner_user_id.eq.${adminId},assignee_id.eq.${adminId}`;
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .is("deleted_at", null)
+    .in("status", MY_TASKS_STATUSES)
+    .or(mine)
+    // scheduled within this agency week, OR overdue (due strictly before today)
+    .or(`and(scheduled_date.gte.${weekStart},scheduled_date.lte.${weekEnd}),due_date.lt.${today}`)
+    .order("scheduled_date", { ascending: true, nullsFirst: false })
+    .order("due_date", { ascending: true, nullsFirst: false });
+  if (error) throw new TaskError("PersistenceError");
+
+  return { today, weekStart, weekEnd, tasks: (data ?? []) as Task[] };
 }
 
 /** Active (unresolved) blockers for the given tasks, RLS-scoped. */
