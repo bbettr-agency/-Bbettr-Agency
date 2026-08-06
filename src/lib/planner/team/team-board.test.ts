@@ -8,6 +8,7 @@ import {
   computeBoard,
   buildSummary,
   formatWorkload,
+  formatShortDate,
   INTERNAL_CLIENT_LABEL,
   UNKNOWN_CLIENT_LABEL,
   type TeamTaskFacet,
@@ -34,6 +35,8 @@ function facet(o: Partial<TeamTaskFacet> = {}): TeamTaskFacet {
     memberName: o.memberName ?? "Eloff",
     clientId: o.clientId ?? null,
     clientName: o.clientName ?? null,
+    scheduledDate: o.scheduledDate ?? null,
+    dueDate: o.dueDate ?? null,
     isOverdue: o.isOverdue ?? false,
     isScheduledToday: o.isScheduledToday ?? false,
     isThisWeek: o.isThisWeek ?? false,
@@ -43,8 +46,8 @@ function facet(o: Partial<TeamTaskFacet> = {}): TeamTaskFacet {
 }
 
 const members: MemberMeta[] = [
-  { id: "m1", name: "Eloff", nextMeeting: null },
-  { id: "m2", name: "Ashwin", nextMeeting: { title: "Client sync", whenLabel: "Today · 14:00" } },
+  { id: "m1", name: "Eloff", nextMeeting: null, meetings: [] },
+  { id: "m2", name: "Ashwin", nextMeeting: { title: "Client sync", whenLabel: "Today · 14:00" }, meetings: [{ title: "Client sync", whenLabel: "Today · 14:00" }] },
 ];
 
 // ── toFacet ────────────────────────────────────────────────────────────────
@@ -258,6 +261,17 @@ describe("formatWorkload", () => {
     expect(formatWorkload(45)).toBe("45m");
     expect(formatWorkload(60)).toBe("1h");
     expect(formatWorkload(150)).toBe("2h 30m");
+  });
+});
+
+describe("formatShortDate", () => {
+  it("formats a calendar string as 'D Mon' (pure, no clock/tz)", () => {
+    expect(formatShortDate("2026-08-08")).toBe("8 Aug");
+    expect(formatShortDate("2026-12-31")).toBe("31 Dec");
+  });
+  it("returns the input unchanged when not a valid date string", () => {
+    expect(formatShortDate("nope")).toBe("nope");
+    expect(formatShortDate("2026-13-01")).toBe("2026-13-01");
   });
 });
 
