@@ -26,6 +26,7 @@ describe("adminNavSections", () => {
       "Calendar",
       "My Tasks",
       "Team View",
+      "Weekly Updates",
       "Inbox",
     ]);
     expect(PLANNER_SECTION.items[0].href).toBe("/admin/planner");
