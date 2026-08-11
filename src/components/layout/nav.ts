@@ -21,6 +21,7 @@ import {
   ListChecks,
   UsersRound,
   CalendarCheck,
+  Repeat,
   Inbox,
 } from "lucide-react";
 
@@ -88,6 +89,7 @@ export const PLANNER_SECTION: NavSection = {
     { label: "My Tasks", href: "/admin/planner/tasks", icon: ListChecks },
     { label: "Team View", href: "/admin/planner/team", icon: UsersRound },
     { label: "Weekly Updates", href: "/admin/planner/weekly-updates", icon: CalendarCheck },
+    { label: "Recurring Reminders", href: "/admin/planner/recurrences", icon: Repeat },
     { label: "Inbox", href: "/admin/planner/inbox", icon: Inbox },
   ],
 };

@@ -24,8 +24,18 @@ describe("toTaskView", () => {
       id: "t1", title: "Alpha", status: "planned", priority: "normal", criticalReason: null,
       scheduledDate: "2026-08-04", dueDate: null, estimatedMinutes: 30, isOverdue: false,
       isWaiting: false, blockedSince: null, ownerDisplay: "Eloff", assigneeDisplay: null,
-      isCompleted: false, completedAt: null, aggregateVersion: 3,
+      isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 3,
     });
+  });
+  it("flags recurring occurrences and resolves the cadence label", () => {
+    const labels = new Map<string, string>([["def-1", "Monthly"]]);
+    const v = toTaskView(task({ recurrence_definition_id: "def-1", occurrence_slot: "2026-08-25" }), names, TODAY, labels);
+    expect(v.isRecurring).toBe(true);
+    expect(v.recurrenceLabel).toBe("Monthly");
+    // A recurring task with no label map still flags isRecurring but yields a null label.
+    const noMap = toTaskView(task({ recurrence_definition_id: "def-1", occurrence_slot: "2026-08-25" }), names, TODAY);
+    expect(noMap.isRecurring).toBe(true);
+    expect(noMap.recurrenceLabel).toBe(null);
   });
   it("derives isOverdue (due date strictly before today, non-terminal)", () => {
     expect(toTaskView(task({ due_date: "2026-08-03" }), names, TODAY).isOverdue).toBe(true);

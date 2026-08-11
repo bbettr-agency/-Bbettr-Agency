@@ -1132,13 +1132,39 @@ export interface Database {
           missed_policy: MissedPolicy;
           due_offset_days: number | null;
           next_occurrence: string | null;
+          anchor_day: number | null; // 1..31 intended day-of-month for monthly rules (0052)
           active: boolean;
           archived_at: string | null;
           created_at: string;
           updated_at: string;
         };
-        Insert: never;
-        Update: never;
+        // Written ONLY by the trusted service-role recurrence path (RLS blocks
+        // authenticated writes); id/created_at/updated_at are DB/trigger-managed.
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          owner_user_id: string;
+          default_assignee_id?: string | null;
+          template_title: string;
+          template_description?: string | null;
+          template_priority: TaskPriority;
+          template_estimated_minutes?: number | null;
+          template_client_id?: string | null;
+          rule_interval: number;
+          rule_unit: RecurrenceRuleUnit;
+          mode: RecurrenceMode;
+          timezone?: string;
+          missed_policy: MissedPolicy;
+          due_offset_days?: number | null;
+          next_occurrence?: string | null;
+          anchor_day?: number | null;
+          active?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["recurring_definitions"]["Insert"]> & {
+          active?: boolean;
+          next_occurrence?: string | null;
+          archived_at?: string | null;
+        };
         Relationships: [];
       };
       task_reminders: {

@@ -1,3 +1,4 @@
+import { Repeat } from "lucide-react";
 import { formatDayLabel } from "@/lib/planner/meetings/date-views";
 import type { TaskView } from "@/lib/planner/tasks/task-view";
 import { TaskStatusBadge } from "./task-status-badge";
@@ -31,6 +32,12 @@ export function TaskRow({ view, now, assign }: { view: TaskView; now: Date; assi
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink-900">{view.title}</p>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
+            {view.isRecurring ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600">
+                <Repeat className="h-3 w-3" aria-hidden />
+                Reminder{view.recurrenceLabel ? ` · ${view.recurrenceLabel}` : ""}
+              </span>
+            ) : null}
             <TaskStatusBadge status={view.status} />
             <TaskPriorityBadge priority={view.priority} />
             {view.isOverdue && view.dueDate ? (

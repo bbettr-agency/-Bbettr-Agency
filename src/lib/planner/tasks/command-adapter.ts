@@ -59,6 +59,11 @@ export async function dispatchTaskCommand(input: DispatchTaskCommandInput): Prom
   // 8 (validated early) — retry identity, treated as untrusted opaque input.
   assertIdempotencyKey(input.idempotency_key);
 
+  // RecurringInstanceGenerated is SYSTEM-ONLY (the recurrence generator dispatches
+  // it via the dedicated service-role path). It must never be reachable from an
+  // authenticated/user request, even though it shares the pure state machine.
+  if (input.command.type === "RecurringInstanceGenerated") throw new TaskError("NotAuthorized");
+
   // 2–3 — resolve the authenticated actor from the real request context; confirm admin.
   const profile = await getCurrentProfile();
   if (!profile) throw new TaskError("NotAuthenticated");

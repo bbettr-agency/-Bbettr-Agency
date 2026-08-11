@@ -39,6 +39,10 @@ export interface TaskView {
   isCompleted: boolean;
   /** When completed, the completion instant (ISO); else null. */
   completedAt: string | null;
+  /** True when this task is a generated recurring occurrence (recurrence_definition_id set). */
+  isRecurring: boolean;
+  /** Cadence label (e.g. "Monthly") when resolvable; else null. Drives the "REMINDER · Monthly" tag. */
+  recurrenceLabel: string | null;
   aggregateVersion: number;
 }
 
@@ -55,7 +59,12 @@ function displayName(id: string | null, nameById: ReadonlyMap<string, string>): 
  * and never blocks rendering. `today` (agency-local YYYY-MM-DD) is injected so
  * overdue is deterministic and testable.
  */
-export function toTaskView(task: Task, nameById: ReadonlyMap<string, string>, today: string): TaskView {
+export function toTaskView(
+  task: Task,
+  nameById: ReadonlyMap<string, string>,
+  today: string,
+  recurrenceLabelById?: ReadonlyMap<string, string>
+): TaskView {
   return {
     id: task.id,
     title: task.title,
@@ -72,6 +81,8 @@ export function toTaskView(task: Task, nameById: ReadonlyMap<string, string>, to
     assigneeDisplay: displayName(task.assignee_id, nameById),
     isCompleted: task.status === "completed",
     completedAt: task.completed_at,
+    isRecurring: task.recurrence_definition_id != null,
+    recurrenceLabel: task.recurrence_definition_id != null ? recurrenceLabelById?.get(task.recurrence_definition_id) ?? null : null,
     aggregateVersion: task.aggregate_version,
   };
 }

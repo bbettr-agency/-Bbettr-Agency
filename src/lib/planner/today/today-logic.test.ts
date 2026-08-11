@@ -12,7 +12,7 @@ function v(o: Partial<TaskView> & Pick<TaskView, "id" | "status">): TaskView {
     title: o.title ?? `${o.status}-${o.id}`, priority: "normal", criticalReason: null, scheduledDate: null,
     dueDate: null, estimatedMinutes: null, isOverdue: false, isWaiting: o.status === "waiting",
     blockedSince: null, ownerDisplay: null, assigneeDisplay: null, isCompleted: o.status === "completed",
-    completedAt: null, aggregateVersion: 1, ...o,
+    completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 1, ...o,
   };
 }
 const mtg = (o: Partial<TodayMeeting> & Pick<TodayMeeting, "id" | "startsAt" | "endsAt">): TodayMeeting => ({

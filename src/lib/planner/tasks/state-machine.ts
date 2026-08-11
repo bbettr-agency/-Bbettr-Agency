@@ -50,8 +50,37 @@ export interface BlockerInput {
 /** The bounded command union C1 supports (lifecycle + attribute + label + dependency). */
 export type TaskCommand =
   | { type: "CaptureTask"; title: string; priority?: TaskPriority }
+  | {
+      // SYSTEM-ONLY (recurrence generator). Never issued by a user/Server Action;
+      // the authenticated adapter rejects it. Materialises one recurring occurrence
+      // as a real, already-scheduled task. Idempotent per (definition, slot) at the op.
+      type: "RecurringInstanceGenerated";
+      title: string;
+      owner_user_id: string;
+      assignee_id?: string | null;
+      client_id?: string | null;
+      scheduled_date: string;
+      due_date?: string | null;
+      priority?: TaskPriority;
+      recurrence_definition_id: string;
+      occurrence_slot: string;
+    }
   | { type: "TriageTask"; owner_user_id: string; priority?: TaskPriority }
-  | { type: "TriageAndScheduleTask"; owner_user_id: string; scheduled_date: string; assignee_id?: string | null; priority?: TaskPriority }
+  | {
+      type: "TriageAndScheduleTask";
+      owner_user_id: string;
+      scheduled_date: string;
+      assignee_id?: string | null;
+      priority?: TaskPriority;
+      /**
+       * OPTIONAL recurrence linkage (recurring-reminder creation only): binds this
+       * inbox task as the FIRST occurrence of a just-created definition. When absent
+       * the command is byte-identical to a normal triage-and-schedule. The op applies
+       * these whitelisted field deltas under the unchanged TaskTriaged+TaskScheduled
+       * contract — no new event/status/op.
+       */
+      recurrence?: { recurrence_definition_id: string; occurrence_slot: string; client_id?: string | null; due_date?: string | null };
+    }
   | { type: "ScheduleTask"; scheduled_date: string }
   | { type: "RescheduleTask"; scheduled_date: string }
   | { type: "UnscheduleTask" }
@@ -137,6 +166,35 @@ export function evaluate(
       if (command.priority) deltas.priority = command.priority;
       return { ...base, command_type: command.type, is_create: true, resulting_status: "inbox", task_field_deltas: deltas, ordered_events: [ev("TaskCaptured", { title: command.title })], satellite_changes: [] };
     }
+    case "RecurringInstanceGenerated": {
+      // System-generated occurrence: created straight into 'scheduled'. Every field
+      // is derived from the (server-trusted) recurring definition, never a browser.
+      if (!nonEmpty(command.title)) throw new TaskError("InvalidCommand");
+      if (!nonEmpty(command.owner_user_id)) throw new TaskError("MissingOwner");
+      if (!nonEmpty(command.scheduled_date)) throw new TaskError("InvalidCommand");
+      if (!nonEmpty(command.recurrence_definition_id) || !nonEmpty(command.occurrence_slot)) throw new TaskError("InvalidCommand");
+      const deltas: TaskFieldDeltas = {
+        status: "scheduled",
+        title: command.title,
+        owner_user_id: command.owner_user_id,
+        assignee_id: command.assignee_id ?? null,
+        client_id: command.client_id ?? null,
+        scheduled_date: command.scheduled_date,
+        due_date: command.due_date ?? command.scheduled_date,
+        recurrence_definition_id: command.recurrence_definition_id,
+        occurrence_slot: command.occurrence_slot,
+      };
+      if (command.priority) deltas.priority = command.priority;
+      return {
+        ...base,
+        command_type: command.type,
+        is_create: true,
+        resulting_status: "scheduled",
+        task_field_deltas: deltas,
+        ordered_events: [ev("RecurringInstanceGenerated", { occurrence_slot: command.occurrence_slot, scheduled_date: command.scheduled_date })],
+        satellite_changes: [],
+      };
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
     case "TriageTask": {
@@ -159,6 +217,14 @@ export function evaluate(
         assignee_id: command.assignee_id ?? null, // explicit assignee policy
       };
       if (command.priority) deltas.priority = command.priority;
+      if (command.recurrence) {
+        // Bind this task as the first occurrence of a recurring definition.
+        if (!nonEmpty(command.recurrence.recurrence_definition_id) || !nonEmpty(command.recurrence.occurrence_slot)) throw new TaskError("InvalidCommand");
+        deltas.recurrence_definition_id = command.recurrence.recurrence_definition_id;
+        deltas.occurrence_slot = command.recurrence.occurrence_slot;
+        deltas.client_id = command.recurrence.client_id ?? null;
+        deltas.due_date = command.recurrence.due_date ?? command.scheduled_date;
+      }
       return { ...base, command_type: command.type, is_create: false, resulting_status: "scheduled", task_field_deltas: deltas, ordered_events: [ev("TaskTriaged"), ev("TaskScheduled", { scheduled_date: command.scheduled_date })], satellite_changes: [] };
     }
     case "ScheduleTask": {

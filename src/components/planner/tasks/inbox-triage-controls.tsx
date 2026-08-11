@@ -23,7 +23,7 @@
  */
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useRouter } from "next/navigation";
-import { triageTaskAction, triageAndScheduleTaskAction } from "@/app/(admin)/admin/planner/tasks/actions";
+import { triageTaskAction, triageAndScheduleTaskAction, triageAndScheduleRecurringAction } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
 import {
   beginCommandIntent,
@@ -47,7 +47,23 @@ const CONFLICT_MESSAGE = "This item was already updated. Refreshing…";
 const NETWORK_MESSAGE = "Something went wrong. Try again.";
 const PAST_DATE_MESSAGE = "Choose today or a future date.";
 
-export function InboxTriageControls({ target, assign }: { target: InboxRowTarget; assign?: AssignChoices }) {
+type RepeatChoice = "none" | "day" | "week" | "month";
+const REPEAT_OPTIONS: { value: RepeatChoice; label: string }[] = [
+  { value: "none", label: "Does not repeat" },
+  { value: "day", label: "Daily" },
+  { value: "week", label: "Weekly" },
+  { value: "month", label: "Monthly" },
+];
+
+export function InboxTriageControls({
+  target,
+  assign,
+  clients = [],
+}: {
+  target: InboxRowTarget;
+  assign?: AssignChoices;
+  clients?: { id: string; name: string }[];
+}) {
   const router = useRouter();
   // "Assigned to" for this triage — defaults to the acting admin ("Me"). The
   // server re-validates this id as a current-workspace admin; the browser value
@@ -61,6 +77,9 @@ export function InboxTriageControls({ target, assign }: { target: InboxRowTarget
   const [submitting, setSubmitting] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState("");
+  // Recurrence config (only used when repeat !== "none"; None keeps the normal flow).
+  const [repeat, setRepeat] = useState<RepeatChoice>("none");
+  const [clientId, setClientId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const triageIntentRef = useRef<CommandIntent>(IDLE);
@@ -138,6 +157,8 @@ export function InboxTriageControls({ target, assign }: { target: InboxRowTarget
   function cancelSchedule() {
     setScheduleOpen(false);
     setSelectedDate("");
+    setRepeat("none");
+    setClientId("");
     setMessage(null);
     scheduleIntentRef.current = clearCommandIntent();
     scheduleButtonRef.current?.focus();
@@ -150,23 +171,35 @@ export function InboxTriageControls({ target, assign }: { target: InboxRowTarget
       setMessage(PAST_DATE_MESSAGE);
       return;
     }
-    // Signature is the selected date: a same-date retry reuses the key; a date
-    // change after a submitted attempt mints a fresh one (never one key, two dates).
-    const prepared = prepareCommandSubmit(scheduleIntentRef.current, selectedDate, newIdempotencyKey);
+    // Signature covers date + repeat + client: a same-config retry reuses the key;
+    // any change after a submitted attempt mints a fresh one (never one key, two configs).
+    const signature = `${selectedDate}|${repeat}|${clientId}`;
+    const prepared = prepareCommandSubmit(scheduleIntentRef.current, signature, newIdempotencyKey);
     scheduleIntentRef.current = prepared;
     setMessage(null);
     setSubmitting(true);
     try {
-      const res = await triageAndScheduleTaskAction({
-        taskId: target.taskId,
-        expectedAggregateVersion: target.aggregateVersion,
-        idempotencyKey: prepared.key,
-        scheduledDate: selectedDate,
-        assignedToId: assignedToId || undefined,
-      });
-      applyResult(res, scheduleIntentRef); // failure keeps the area open + date intact
+      const res =
+        repeat === "none"
+          ? await triageAndScheduleTaskAction({
+              taskId: target.taskId,
+              expectedAggregateVersion: target.aggregateVersion,
+              idempotencyKey: prepared.key,
+              scheduledDate: selectedDate,
+              assignedToId: assignedToId || undefined,
+            })
+          : await triageAndScheduleRecurringAction({
+              taskId: target.taskId,
+              expectedAggregateVersion: target.aggregateVersion,
+              idempotencyKey: prepared.key,
+              scheduledDate: selectedDate,
+              unit: repeat,
+              assignedToId: assignedToId || undefined,
+              clientId: clientId || null,
+            });
+      applyResult(res, scheduleIntentRef); // failure keeps the area open + config intact
     } catch {
-      setMessage(NETWORK_MESSAGE); // retain same-date intent, keep area open
+      setMessage(NETWORK_MESSAGE); // retain same-config intent, keep area open
     } finally {
       setSubmitting(false);
     }
@@ -256,7 +289,7 @@ export function InboxTriageControls({ target, assign }: { target: InboxRowTarget
                 aria-busy={submitting || undefined}
                 aria-label={`Confirm schedule for “${target.title}”`}
               >
-                Confirm
+                {repeat === "none" ? "Confirm" : "Save reminder"}
               </Button>
               <Button
                 type="button"
@@ -268,6 +301,46 @@ export function InboxTriageControls({ target, assign }: { target: InboxRowTarget
                 Cancel
               </Button>
             </div>
+          </div>
+
+          {/* Repeat (+ optional client when repeating). "Does not repeat" keeps the normal flow. */}
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <div className="sm:w-44">
+              <Label htmlFor={`inbox-repeat-${target.taskId}`}>Repeat</Label>
+              <Select
+                id={`inbox-repeat-${target.taskId}`}
+                value={repeat}
+                onChange={(e) => {
+                  setRepeat(e.target.value as RepeatChoice);
+                  if (message) setMessage(null);
+                }}
+                aria-label={`Repeat “${target.title}”`}
+              >
+                {REPEAT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {repeat !== "none" ? (
+              <div className="sm:flex-1">
+                <Label htmlFor={`inbox-client-${target.taskId}`}>Client (optional)</Label>
+                <Select
+                  id={`inbox-client-${target.taskId}`}
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  aria-label={`Client for “${target.title}”`}
+                >
+                  <option value="">Internal / No client</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile } from "@/lib/auth";
 import { getTodayWorkspace, getInboxTasks } from "@/lib/planner/tasks/read-adapters";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
+import { getRecurrenceLabels } from "@/lib/planner/recurrence/recurrence-read";
 import { listAdminTeam } from "@/lib/planner/team";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
 import { meetingsOnDate } from "@/lib/planner/meetings/date-views";
@@ -68,8 +69,10 @@ export async function TodayDashboard() {
       ? { admins: teamRes.value.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id }
       : undefined;
 
-  const activeViews = ws.active.map((t) => toTaskView(t, nameById, today));
-  const completedViews = ws.completedToday.map((t) => toTaskView(t, nameById, today));
+  // Cadence labels for the subtle "REMINDER · Monthly" tag (one batched, RLS-scoped read).
+  const recurrenceLabels = await getRecurrenceLabels([...ws.active, ...ws.completedToday].map((t) => t.recurrence_definition_id)).catch(() => new Map<string, string>());
+  const activeViews = ws.active.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
+  const completedViews = ws.completedToday.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
   const groups = groupToday(activeViews, completedViews);
   const actionable = actionableToday(activeViews);
 
