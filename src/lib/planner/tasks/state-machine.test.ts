@@ -186,6 +186,21 @@ describe("state machine — attribute-only (status never changes)", () => {
     expectCode(() => evaluate({ type: "UnassignTask" }, snap({ status: "in_progress" })), "MissingAssignee");
     expect(evaluate({ type: "UnassignTask" }, snap({ status: "planned" })).task_field_deltas.assignee_id).toBeNull();
   });
+  it("ChangeOwner ALIGNS assignee to the new owner when assignee is set (no personal-view divergence)", () => {
+    const p = evaluate({ type: "ChangeOwner", owner_user_id: "ashwin" }, snap({ status: "in_progress", owner_user_id: "eloff", assignee_id: "eloff" }));
+    expect(p.task_field_deltas.owner_user_id).toBe("ashwin");
+    expect(p.task_field_deltas.assignee_id).toBe("ashwin"); // aligned → moves wholesale to Ashwin
+    expect(p.resulting_status).toBe("unchanged");
+    expect(types(p)).toEqual(["TaskOwnerChanged"]); // single event — the accepted v1 history tradeoff
+  });
+  it("ChangeOwner leaves assignee NULL when it was null (StartTask sets it later)", () => {
+    const p = evaluate({ type: "ChangeOwner", owner_user_id: "ashwin" }, snap({ status: "planned", owner_user_id: "eloff", assignee_id: null }));
+    expect(p.task_field_deltas.owner_user_id).toBe("ashwin");
+    expect("assignee_id" in p.task_field_deltas).toBe(false);
+  });
+  it("ChangeOwner requires a non-empty owner", () => {
+    expectCode(() => evaluate({ type: "ChangeOwner", owner_user_id: "" }, snap()), "MissingOwner");
+  });
   it("ChangeEstimate rejects non-positive", () => {
     expectCode(() => evaluate({ type: "ChangeEstimate", estimated_minutes: 0 }, snap()), "InvalidCommand");
   });

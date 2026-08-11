@@ -37,8 +37,9 @@ import {
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
 import type { TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { Button } from "@/components/ui/button";
-import { Input, Label, FieldHelp } from "@/components/ui/input";
+import { Input, Label, FieldHelp, Select } from "@/components/ui/input";
 import type { InboxRowTarget } from "./inbox-row-target";
+import type { AssignChoices } from "./task-command-target";
 
 /** Triage carries no variable payload → a constant signature ⇒ retries reuse the key. */
 const TRIAGE_SIGNATURE = "triage";
@@ -46,8 +47,14 @@ const CONFLICT_MESSAGE = "This item was already updated. Refreshing…";
 const NETWORK_MESSAGE = "Something went wrong. Try again.";
 const PAST_DATE_MESSAGE = "Choose today or a future date.";
 
-export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
+export function InboxTriageControls({ target, assign }: { target: InboxRowTarget; assign?: AssignChoices }) {
   const router = useRouter();
+  // "Assigned to" for this triage — defaults to the acting admin ("Me"). The
+  // server re-validates this id as a current-workspace admin; the browser value
+  // is never trusted. Only offered when there's more than one admin to choose.
+  const [assignedToId, setAssignedToId] = useState(assign?.currentAdminId ?? "");
+  const showAssign = !!assign && assign.admins.length > 1;
+  const assignSelectId = `inbox-assign-${target.taskId}`;
   // Explicit submit flag held across the awaited Server Action via try/finally.
   // (React 18's useTransition does NOT keep isPending across the await, so it
   // cannot drive a correct loading/disable affordance — see the C2.1d-2 hardening.)
@@ -106,6 +113,7 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
         taskId: target.taskId,
         expectedAggregateVersion: target.aggregateVersion,
         idempotencyKey: prepared.key,
+        assignedToId: assignedToId || undefined,
       });
       applyResult(res, triageIntentRef);
     } catch {
@@ -154,6 +162,7 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
         expectedAggregateVersion: target.aggregateVersion,
         idempotencyKey: prepared.key,
         scheduledDate: selectedDate,
+        assignedToId: assignedToId || undefined,
       });
       applyResult(res, scheduleIntentRef); // failure keeps the area open + date intact
     } catch {
@@ -165,7 +174,23 @@ export function InboxTriageControls({ target }: { target: InboxRowTarget }) {
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+        {showAssign && assign ? (
+          <Select
+            id={assignSelectId}
+            value={assignedToId}
+            onChange={(e) => setAssignedToId(e.target.value)}
+            disabled={submitting}
+            aria-label={`Assign “${target.title}” to`}
+            className="h-9 w-auto min-w-[6.5rem] text-sm"
+          >
+            {assign.admins.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.id === assign.currentAdminId ? "Me" : a.name}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         <Button
           type="button"
           variant="ghost"

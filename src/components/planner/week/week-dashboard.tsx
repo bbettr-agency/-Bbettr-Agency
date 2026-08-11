@@ -1,6 +1,7 @@
 import { AlertCircle, CalendarRange } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getCurrentProfile } from "@/lib/auth";
 import { getWeekTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
@@ -20,7 +21,11 @@ export async function WeekDashboard() {
   // One `now` instant threaded into the read AND the labels, so the query's
   // `today` and formatDayLabel's "Today"/"Tomorrow" can never straddle midnight.
   const now = new Date();
-  const [weekRes, teamRes] = await Promise.allSettled([getWeekTasks(now), listAdminTeam()]);
+  const [weekRes, teamRes, profile] = await Promise.all([
+    getWeekTasks(now).then((v) => ({ status: "fulfilled" as const, value: v })).catch((e) => ({ status: "rejected" as const, reason: e })),
+    listAdminTeam().catch(() => []),
+    getCurrentProfile(),
+  ]);
 
   if (weekRes.status === "rejected") {
     return (
@@ -35,8 +40,8 @@ export async function WeekDashboard() {
 
   const { today, weekStart, tasks } = weekRes.value;
 
-  const nameById = new Map<string, string>();
-  if (teamRes.status === "fulfilled") for (const m of teamRes.value) nameById.set(m.id, m.fullName);
+  const nameById = new Map(teamRes.map((m) => [m.id, m.fullName]));
+  const assign = profile ? { admins: teamRes.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id } : undefined;
 
   const views = tasks.map((t) => toTaskView(t, nameById, today));
   const { overdue, days } = groupWeek(views, weekStart);
@@ -64,7 +69,7 @@ export async function WeekDashboard() {
           <CardContent>
             <ul className="divide-y divide-ink-100">
               {overdue.map((v) => (
-                <TaskRow key={v.id} view={v} now={now} />
+                <TaskRow key={v.id} view={v} now={now} assign={assign} />
               ))}
             </ul>
           </CardContent>
@@ -73,7 +78,7 @@ export async function WeekDashboard() {
 
       <div className="space-y-4">
         {days.map((d) => (
-          <WeekDaySection key={d.date} day={d} now={now} today={today} />
+          <WeekDaySection key={d.date} day={d} now={now} today={today} assign={assign} />
         ))}
       </div>
     </div>

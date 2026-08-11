@@ -3,7 +3,7 @@ import type { TaskView } from "@/lib/planner/tasks/task-view";
 import { TaskStatusBadge } from "./task-status-badge";
 import { TaskPriorityBadge } from "./task-priority-badge";
 import { TaskCommandControls } from "./task-command-controls";
-import type { TaskCommandTarget } from "./task-command-target";
+import type { AssignChoices, TaskCommandTarget } from "./task-command-target";
 
 /**
  * Shared Task Kit row (server-rendered, presentational). Consumes a `TaskView`
@@ -23,7 +23,7 @@ function formatEstimate(minutes: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
-export function TaskRow({ view, now }: { view: TaskView; now: Date }) {
+export function TaskRow({ view, now, assign }: { view: TaskView; now: Date; assign?: AssignChoices }) {
   const target: TaskCommandTarget = { taskId: view.id, aggregateVersion: view.aggregateVersion, status: view.status, title: view.title };
   return (
     <li className="py-2.5">
@@ -44,7 +44,7 @@ export function TaskRow({ view, now }: { view: TaskView; now: Date }) {
           </div>
           {view.criticalReason ? <p className="mt-1 text-xs text-red-600">Critical: {view.criticalReason}</p> : null}
         </div>
-        <TaskCommandControls target={target} />
+        <TaskCommandControls target={target} assign={assign} />
       </div>
     </li>
   );

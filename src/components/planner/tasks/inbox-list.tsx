@@ -1,10 +1,12 @@
 import { AlertCircle, Inbox } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getCurrentProfile } from "@/lib/auth";
 import { getInboxTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { InboxRow } from "./inbox-row";
 import { toInboxRowView } from "./inbox-row-view";
+import type { AssignChoices } from "./task-command-target";
 
 /**
  * The shared agency Inbox list — display only, server-rendered.
@@ -15,7 +17,11 @@ import { toInboxRowView } from "./inbox-row-view";
  * database details are exposed; no client JS, no mutation path.
  */
 export async function InboxList() {
-  const [tasksResult, teamResult] = await Promise.allSettled([getInboxTasks(), listAdminTeam()]);
+  const [tasksResult, teamResult, profile] = await Promise.all([
+    getInboxTasks().then((v) => ({ status: "fulfilled" as const, value: v })).catch((e) => ({ status: "rejected" as const, reason: e })),
+    listAdminTeam().catch(() => []),
+    getCurrentProfile(),
+  ]);
 
   // Authoritative failure only: tasks could not be read.
   if (tasksResult.status === "rejected") {
@@ -32,10 +38,11 @@ export async function InboxList() {
   const tasks = tasksResult.value;
 
   // Best-effort name resolution; a failure just means no attribution.
-  const nameById = new Map<string, string>();
-  if (teamResult.status === "fulfilled") {
-    for (const m of teamResult.value) nameById.set(m.id, m.fullName);
-  }
+  const nameById = new Map(teamResult.map((m) => [m.id, m.fullName]));
+  // "Assign to" choices for triage (workspace admins + me); omitted if unavailable.
+  const assign: AssignChoices | undefined = profile
+    ? { admins: teamResult.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id }
+    : undefined;
 
   if (tasks.length === 0) {
     return (
@@ -65,6 +72,7 @@ export async function InboxList() {
               key={t.id}
               view={toInboxRowView(t, nameById.get(t.created_by) ?? null, now)}
               target={{ taskId: t.id, aggregateVersion: t.aggregate_version, title: t.title }}
+              assign={assign}
             />
           ))}
         </ul>

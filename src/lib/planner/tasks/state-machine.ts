@@ -301,7 +301,17 @@ export function evaluate(
       const s = requireSnapshot(snapshot);
       assertNotArchived(s.status);
       if (!nonEmpty(command.owner_user_id)) throw new TaskError("MissingOwner");
-      return { ...base, command_type: command.type, is_create: false, resulting_status: "unchanged", task_field_deltas: { owner_user_id: command.owner_user_id }, ordered_events: [ev("TaskOwnerChanged")], satellite_changes: [] };
+      // Responsibility model (Slice B): owner is the single source of truth for
+      // "assigned to". When an assignee is already set (e.g. an in-progress task
+      // that was Started), align it to the new owner so the personal views
+      // (owner OR assignee) never diverge — the task moves wholesale to the new
+      // admin and leaves the previous admin's active views. When assignee is null
+      // it stays null until the normal StartTask flow sets it. This emits only
+      // TaskOwnerChanged (the op contract for ChangeOwner) — the accepted v1
+      // history tradeoff; the op applies both fields from the deltas generically.
+      const deltas: TaskFieldDeltas = { owner_user_id: command.owner_user_id };
+      if (nonEmpty(s.assignee_id)) deltas.assignee_id = command.owner_user_id;
+      return { ...base, command_type: command.type, is_create: false, resulting_status: "unchanged", task_field_deltas: deltas, ordered_events: [ev("TaskOwnerChanged")], satellite_changes: [] };
     }
     case "AssignTask": {
       const s = requireSnapshot(snapshot);

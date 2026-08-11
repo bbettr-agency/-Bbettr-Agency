@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { formatDayLabel } from "@/lib/planner/meetings/date-views";
 import { TaskRow } from "@/components/planner/tasks/task-row";
+import type { AssignChoices } from "@/components/planner/tasks/task-command-target";
 import type { WeekDay } from "@/lib/planner/week/week-grouping";
 
 /**
@@ -9,7 +10,7 @@ import type { WeekDay } from "@/lib/planner/week/week-grouping";
  * all seven days so empty days read as available capacity to plan into. Light
  * section treatment (not a card each) keeps seven days scannable and mobile-clean.
  */
-export function WeekDaySection({ day, now, today }: { day: WeekDay; now: Date; today: string }) {
+export function WeekDaySection({ day, now, today, assign }: { day: WeekDay; now: Date; today: string; assign?: AssignChoices }) {
   const isToday = day.date === today;
   return (
     <section>
@@ -20,7 +21,7 @@ export function WeekDaySection({ day, now, today }: { day: WeekDay; now: Date; t
       {day.tasks.length > 0 ? (
         <ul className="divide-y divide-ink-100">
           {day.tasks.map((v) => (
-            <TaskRow key={v.id} view={v} now={now} />
+            <TaskRow key={v.id} view={v} now={now} assign={assign} />
           ))}
         </ul>
       ) : (

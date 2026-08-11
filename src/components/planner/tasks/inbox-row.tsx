@@ -1,5 +1,6 @@
 import type { InboxRowView } from "./inbox-row-view";
 import type { InboxRowTarget } from "./inbox-row-target";
+import type { AssignChoices } from "./task-command-target";
 import { InboxTriageControls } from "./inbox-triage-controls";
 
 /**
@@ -16,7 +17,7 @@ import { InboxTriageControls } from "./inbox-triage-controls";
  * feedback wrap to their own full-width line (`basis-full`) beneath, so a
  * collapsed row keeps its compact height.
  */
-export function InboxRow({ view, target }: { view: InboxRowView; target: InboxRowTarget }) {
+export function InboxRow({ view, target, assign }: { view: InboxRowView; target: InboxRowTarget; assign?: AssignChoices }) {
   return (
     <li className="py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -30,7 +31,7 @@ export function InboxRow({ view, target }: { view: InboxRowView; target: InboxRo
             {view.capturedBy ? <> · by {view.capturedBy}</> : null}
           </p>
         </div>
-        <InboxTriageControls target={target} />
+        <InboxTriageControls target={target} assign={assign} />
       </div>
     </li>
   );

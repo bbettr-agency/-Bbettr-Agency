@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("@/lib/auth", () => ({ getCurrentProfile: vi.fn() }));
 vi.mock("@/lib/planner/tasks/run-command", () => ({ runTaskCommand: vi.fn() }));
 vi.mock("@/lib/planner/tasks/read-adapters", () => ({ getActiveBlockersFor: vi.fn() }));
+vi.mock("@/lib/planner/team", () => ({ listAdminTeam: vi.fn() }));
 // Pin "today" (agency) deterministically; keep the real schedule-date validation.
 vi.mock("@/lib/planner/tasks/schedule-date", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/planner/tasks/schedule-date")>();
@@ -13,14 +14,16 @@ import {
   captureTaskAction, triageTaskAction, triageAndScheduleTaskAction,
   startTaskAction, completeTaskAction, scheduleTaskAction, rescheduleTaskAction,
   unscheduleTaskAction, deferTaskAction, blockTaskAction, unblockTaskAction, dropTaskAction,
+  reassignTaskAction,
 } from "@/app/(admin)/admin/planner/tasks/actions";
 import { getCurrentProfile } from "@/lib/auth";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
 import { getActiveBlockersFor } from "@/lib/planner/tasks/read-adapters";
+import { listAdminTeam } from "@/lib/planner/team";
 
 const KEY = "11111111-1111-1111-1111-111111111111";
 const OK = { ok: true, outcome: "applied", taskId: "task-1", aggregateVersion: 1 } as const;
-const ADMIN = { id: "admin-1", role: "admin", full_name: "Eloff", email: "e@b.com", client_id: null };
+const ADMIN = { id: "admin-1", role: "admin", full_name: "Eloff", email: "e@b.com", client_id: null, workspace_id: "ws1" };
 const REVALIDATE = ["/admin/planner/inbox", "/admin/planner"];
 const lastCall = () => vi.mocked(runTaskCommand).mock.calls[0];
 
@@ -34,6 +37,9 @@ beforeEach(() => {
   vi.mocked(runTaskCommand).mockResolvedValue({ ...OK });
   vi.mocked(getActiveBlockersFor).mockReset();
   vi.mocked(getActiveBlockersFor).mockResolvedValue([]);
+  // Workspace admins for assignment validation (Eloff = self, Ashwin = peer).
+  vi.mocked(listAdminTeam).mockReset();
+  vi.mocked(listAdminTeam).mockResolvedValue([{ id: "admin-1", fullName: "Eloff" }, { id: "ashwin", fullName: "Ashwin" }] as never);
 });
 
 describe("captureTaskAction", () => {
@@ -115,6 +121,62 @@ describe("triageAndScheduleTaskAction", () => {
   it("returns NotAuthenticated when there is no admin session", async () => {
     vi.mocked(getCurrentProfile).mockResolvedValue(null);
     expect(await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10" })).toMatchObject({ ok: false, code: "NotAuthenticated" });
+  });
+});
+
+describe("task assignment — Slice B (Assign to / reassign)", () => {
+  it("triage with a valid workspace-admin assignedToId sets that owner", async () => {
+    await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, assignedToId: "ashwin" });
+    expect(lastCall()[0].command).toEqual({ type: "TriageTask", owner_user_id: "ashwin" });
+  });
+  it("triage defaults the owner to the acting admin ('Me') without a team lookup", async () => {
+    await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY });
+    expect(lastCall()[0].command).toEqual({ type: "TriageTask", owner_user_id: "admin-1" });
+    expect(listAdminTeam).not.toHaveBeenCalled();
+  });
+  it("triage REJECTS an assignedToId that is NOT a current-workspace admin (no dispatch)", async () => {
+    const res = await triageTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, assignedToId: "outsider-or-client" });
+    expect(res).toMatchObject({ ok: false, code: "NotAuthorized" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("triage-and-schedule accepts a validated owner; assignee stays null", async () => {
+    await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10", assignedToId: "ashwin" });
+    expect(lastCall()[0].command).toEqual({ type: "TriageAndScheduleTask", owner_user_id: "ashwin", scheduled_date: "2026-08-10", assignee_id: null });
+  });
+  it("triage-and-schedule REJECTS a non-workspace assignedToId (no dispatch)", async () => {
+    const res = await triageAndScheduleTaskAction({ taskId: "t1", expectedAggregateVersion: 1, idempotencyKey: KEY, scheduledDate: "2026-08-10", assignedToId: "attacker" });
+    expect(res).toMatchObject({ ok: false, code: "NotAuthorized" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("reassignTaskAction → ChangeOwner with the validated owner + My Tasks revalidate", async () => {
+    const res = await reassignTaskAction({ ...target, assignedToId: "ashwin" });
+    expect(res).toEqual(OK);
+    const [input, opts] = lastCall();
+    expect(input.command).toEqual({ type: "ChangeOwner", owner_user_id: "ashwin" });
+    expect(input.task_id).toBe("t9");
+    expect(input.expected_aggregate_version).toBe(4);
+    expect(input.idempotency_key).toBe(KEY);
+    expect(opts).toEqual({ revalidate: MY_REVALIDATE });
+  });
+  it("reassign to me (self id) is allowed without a team lookup", async () => {
+    await reassignTaskAction({ ...target, assignedToId: "admin-1" });
+    expect(cmd()).toEqual({ type: "ChangeOwner", owner_user_id: "admin-1" });
+    expect(listAdminTeam).not.toHaveBeenCalled();
+  });
+  it("reassign REJECTS an arbitrary / cross-workspace profile id (no dispatch)", async () => {
+    const res = await reassignTaskAction({ ...target, assignedToId: "attacker-uuid" });
+    expect(res).toMatchObject({ ok: false, code: "NotAuthorized" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("reassign REJECTS a non-admin session (no dispatch)", async () => {
+    vi.mocked(getCurrentProfile).mockResolvedValue({ ...ADMIN, role: "client" } as never);
+    const res = await reassignTaskAction({ ...target, assignedToId: "ashwin" });
+    expect(res).toMatchObject({ ok: false, code: "NotAuthorized" });
+    expect(runTaskCommand).not.toHaveBeenCalled();
+  });
+  it("reassign returns NotAuthenticated without a session", async () => {
+    vi.mocked(getCurrentProfile).mockResolvedValue(null);
+    expect(await reassignTaskAction({ ...target, assignedToId: "ashwin" })).toMatchObject({ ok: false, code: "NotAuthenticated" });
   });
 });
 

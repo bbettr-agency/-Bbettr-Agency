@@ -31,8 +31,9 @@ import { runTaskCommand } from "@/lib/planner/tasks/run-command";
 import { getActiveBlockersFor } from "@/lib/planner/tasks/read-adapters";
 import { TaskError, mapDbError } from "@/lib/planner/tasks/errors";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
+import { listAdminTeam } from "@/lib/planner/team";
 import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
-import type { TaskPriority } from "@/lib/database.types";
+import type { Profile, TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
 const MY_TASKS_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/tasks", "/admin/planner"];
@@ -42,7 +43,7 @@ type MyTaskTarget = { taskId: string; expectedAggregateVersion: number; idempote
 const BLOCKER_CLASSES = ["person", "client", "approval", "asset", "dependency"] as const;
 type BlockerClassInput = (typeof BLOCKER_CLASSES)[number];
 
-const failWith = (code: "NotAuthenticated" | "InvalidCommand"): TaskActionResult => {
+const failWith = (code: "NotAuthenticated" | "NotAuthorized" | "InvalidCommand"): TaskActionResult => {
   const e = new TaskError(code);
   return { ok: false, code: e.code, error: e.message };
 };
@@ -50,6 +51,25 @@ const failWith = (code: "NotAuthenticated" | "InvalidCommand"): TaskActionResult
 /** The workspace-scoped, admin authenticated actor performing the action. */
 async function currentAdminId(): Promise<string | null> {
   return (await getCurrentProfile())?.id ?? null;
+}
+
+/**
+ * Resolve the "Assigned to" target to a validated owner id. The browser may name
+ * an admin, but the server NEVER trusts that id directly: a non-self candidate
+ * must be an admin IN THE CALLER'S WORKSPACE (validated against listAdminTeam,
+ * itself workspace-scoped + RLS-safe). The acting admin is always a valid target
+ * for their own work; an absent/blank target defaults to the acting admin ("Me").
+ * Rejects client/rep ids, cross-workspace admins, and arbitrary profile ids.
+ */
+async function resolveAssignedOwner(
+  profile: Profile,
+  assignedToId: string | undefined
+): Promise<{ ok: true; ownerId: string } | { ok: false; result: TaskActionResult }> {
+  const candidate = typeof assignedToId === "string" && assignedToId.trim().length > 0 ? assignedToId.trim() : profile.id;
+  if (candidate === profile.id) return { ok: true, ownerId: profile.id };
+  const team = await listAdminTeam(profile.workspace_id);
+  if (!team.some((m) => m.id === candidate)) return { ok: false, result: failWith("NotAuthorized") };
+  return { ok: true, ownerId: candidate };
 }
 
 /** Quick Capture → a new Inbox task. task_id/version are null (create). */
@@ -65,21 +85,26 @@ export async function captureTaskAction(input: {
 }
 
 /**
- * Triage an Inbox task → Planned. The owner is ALWAYS the authenticated admin
- * performing the triage (the browser cannot choose an owner). Choosing another
- * owner is a later, separately-approved team-assignment feature.
+ * Triage an Inbox task → Planned. "Assigned to" (Slice B): the owner is the
+ * acting admin by default ("Me"), OR a chosen admin — `assignedToId` — which the
+ * server RE-VALIDATES as a current-workspace admin (never trusting the browser id).
+ * A task must have a valid workspace-admin owner before leaving the Inbox.
  */
 export async function triageTaskAction(input: {
   taskId: string;
   expectedAggregateVersion: number;
   idempotencyKey: string;
+  assignedToId?: string; // the admin the work is assigned to; defaults to the actor
   priority?: TaskPriority;
 }): Promise<TaskActionResult> {
-  const ownerUserId = await currentAdminId();
-  if (!ownerUserId) return failWith("NotAuthenticated");
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  const owner = await resolveAssignedOwner(profile, input.assignedToId);
+  if (!owner.ok) return owner.result;
   return runTaskCommand(
     {
-      command: { type: "TriageTask", owner_user_id: ownerUserId, ...(input.priority ? { priority: input.priority } : {}) },
+      command: { type: "TriageTask", owner_user_id: owner.ownerId, ...(input.priority ? { priority: input.priority } : {}) },
       task_id: input.taskId,
       expected_aggregate_version: input.expectedAggregateVersion,
       idempotency_key: input.idempotencyKey,
@@ -90,29 +115,33 @@ export async function triageTaskAction(input: {
 
 /**
  * Triage-and-schedule an Inbox task → Scheduled (the only legal Inbox→Scheduled
- * path). Owner is ALWAYS the authenticated admin; assignee is ALWAYS null during
- * Inbox triage (no browser-selected assignment until an approved assignment UI +
- * authorization rule exists). `scheduledDate` must be a real calendar day that is
- * TODAY OR IN THE FUTURE in the agency timezone — re-validated here so a crafted
- * browser request cannot bypass the client's min-date rule.
+ * path). "Assigned to" is the acting admin by default or a server-validated
+ * workspace admin (`assignedToId`). assignee stays null at triage — the personal
+ * views resolve via owner, and StartTask sets assignee later. `scheduledDate` must
+ * be a real TODAY-OR-FUTURE agency day (re-validated so a crafted request cannot
+ * bypass the client's min-date rule).
  */
 export async function triageAndScheduleTaskAction(input: {
   taskId: string;
   expectedAggregateVersion: number;
   idempotencyKey: string;
   scheduledDate: string; // agency-local YYYY-MM-DD
+  assignedToId?: string;
   priority?: TaskPriority;
 }): Promise<TaskActionResult> {
   if (!isValidScheduleDate(input.scheduledDate, agencyToday())) return failWith("InvalidCommand");
-  const ownerUserId = await currentAdminId();
-  if (!ownerUserId) return failWith("NotAuthenticated");
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  const owner = await resolveAssignedOwner(profile, input.assignedToId);
+  if (!owner.ok) return owner.result;
   return runTaskCommand(
     {
       command: {
         type: "TriageAndScheduleTask",
-        owner_user_id: ownerUserId,
+        owner_user_id: owner.ownerId,
         scheduled_date: input.scheduledDate,
-        assignee_id: null, // never browser-selected during Inbox triage
+        assignee_id: null, // assignee is set by StartTask, not at triage
         ...(input.priority ? { priority: input.priority } : {}),
       },
       task_id: input.taskId,
@@ -195,6 +224,25 @@ export async function unblockTaskAction(input: MyTaskTarget): Promise<TaskAction
 /** Drop an active task → archived (cancelled). Legal from planned/scheduled/in_progress/waiting. */
 export async function dropTaskAction(input: MyTaskTarget): Promise<TaskActionResult> {
   return runTaskCommand({ command: { type: "DropTask" }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
+}
+
+/**
+ * Reassign an existing task's responsibility to a workspace admin ("Assign to X").
+ * One user concept ("Assigned to") over the ChangeOwner command: owner is the
+ * responsibility source of truth, and the state machine aligns assignee when one
+ * is set so the task moves wholesale to the new admin (and leaves the old admin's
+ * personal views). The target is SERVER-validated as a current-workspace admin —
+ * never trusted from the browser. expectedAggregateVersion guards concurrency;
+ * actor/workspace are derived internally (no service-role shortcut). Legal on any
+ * non-archived task (planned/scheduled/in_progress/waiting).
+ */
+export async function reassignTaskAction(input: MyTaskTarget & { assignedToId: string }): Promise<TaskActionResult> {
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  const owner = await resolveAssignedOwner(profile, input.assignedToId);
+  if (!owner.ok) return owner.result;
+  return runTaskCommand({ command: { type: "ChangeOwner", owner_user_id: owner.ownerId }, ...withTarget(input) }, { revalidate: MY_TASKS_REVALIDATE });
 }
 
 /**
