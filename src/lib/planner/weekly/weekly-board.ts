@@ -75,7 +75,14 @@ export function computeWeekly(items: readonly WeeklyUpdateItem[], filter: Weekly
     g.items.sort(byRecencyThenStable);
     g.count = g.items.length;
   }
-  return groups.sort((a, b) => b.count - a.count || a.memberName.localeCompare(b.memberName) || (a.memberId < b.memberId ? -1 : 1));
+  // Code-unit compares (not locale-aware localeCompare) so SSR and client agree:
+  // computeWeekly runs in both, and ICU collation can differ across runtimes.
+  return groups.sort(
+    (a, b) =>
+      b.count - a.count ||
+      (a.memberName < b.memberName ? -1 : a.memberName > b.memberName ? 1 : 0) ||
+      (a.memberId < b.memberId ? -1 : 1)
+  );
 }
 
 /** Total items across all groups (for the header count). */

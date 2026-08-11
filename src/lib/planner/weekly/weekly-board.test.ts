@@ -74,6 +74,19 @@ describe("computeWeekly", () => {
     expect(INTERNAL_CLIENT_LABEL).toBe("Internal / No client");
   });
 
+  it("equal-count members tie-break by name deterministically (code-unit, hydration-stable)", () => {
+    const groups = computeWeekly(
+      [
+        item({ memberId: "z", memberName: "Zara" }),
+        item({ memberId: "a", memberName: "Amy" }),
+        item({ memberId: "e", memberName: "Ángela" }), // diacritic: ordering must not depend on ICU locale
+      ],
+      all
+    );
+    // Pure code-unit order: "Amy" < "Zara" < "Ángela" (Á = U+00C1, after ASCII).
+    expect(groups.map((g) => g.memberName)).toEqual(["Amy", "Zara", "Ángela"]);
+  });
+
   it("totalItems sums across groups", () => {
     const groups = computeWeekly([item({ memberId: "e" }), item({ memberId: "a" }), item({ memberId: "e" })], all);
     expect(totalItems(groups)).toBe(3);

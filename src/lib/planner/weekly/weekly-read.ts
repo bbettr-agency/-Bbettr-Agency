@@ -59,7 +59,10 @@ export async function getWeeklyUpdates(weekParam?: string, now: Date = new Date(
 
   // Resolve the target week (Mon–Sun). A ?week=YYYY-MM-DD selects that week; else
   // the current agency week. Anchored at UTC-noon so the agency date is stable.
-  const ref = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? new Date(`${weekParam}T12:00:00Z`) : now;
+  // A ?week must be well-formatted AND a real date; e.g. "2026-13-45" passes the
+  // regex but is Invalid Date — fall back to the current week instead of throwing.
+  const parsed = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? new Date(`${weekParam}T12:00:00Z`) : null;
+  const ref = parsed && !Number.isNaN(parsed.getTime()) ? parsed : now;
   const { start: weekStart, end: weekEnd } = weekRange(ref, AGENCY_TZ);
   const currentWeekStart = weekRange(now, AGENCY_TZ).start;
 
