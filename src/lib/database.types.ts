@@ -213,6 +213,30 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["clients"]["Row"]>;
         Relationships: [];
       };
+      weekly_updates: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          author_user_id: string;
+          summary: string;
+          client_id: string | null;
+          update_date: string; // agency-local YYYY-MM-DD
+          created_at: string;
+          updated_at: string;
+        };
+        // workspace_id + author_user_id are derived server-side; the audit trigger
+        // stamps created_at/updated_at — callers supply summary/client_id/update_date.
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          author_user_id: string;
+          summary: string;
+          client_id?: string | null;
+          update_date: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["weekly_updates"]["Row"]>;
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -1473,6 +1497,7 @@ export type TaskDependency = Database["public"]["Tables"]["task_dependencies"]["
 export type Label = Database["public"]["Tables"]["labels"]["Row"];
 export type TaskLabel = Database["public"]["Tables"]["task_labels"]["Row"];
 export type RecurringDefinition = Database["public"]["Tables"]["recurring_definitions"]["Row"];
+export type WeeklyUpdate = Database["public"]["Tables"]["weekly_updates"]["Row"];
 export type TaskReminder = Database["public"]["Tables"]["task_reminders"]["Row"];
 export type TaskEvent = Database["public"]["Tables"]["task_events"]["Row"];
 export type EventRedaction = Database["public"]["Tables"]["event_redactions"]["Row"];

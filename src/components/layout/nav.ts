@@ -20,6 +20,7 @@ import {
   Sun,
   ListChecks,
   UsersRound,
+  CalendarCheck,
   Inbox,
 } from "lucide-react";
 
@@ -86,6 +87,7 @@ export const PLANNER_SECTION: NavSection = {
     { label: "Calendar", href: "/admin/planner/meetings", icon: CalendarDays },
     { label: "My Tasks", href: "/admin/planner/tasks", icon: ListChecks },
     { label: "Team View", href: "/admin/planner/team", icon: UsersRound },
+    { label: "Weekly Updates", href: "/admin/planner/weekly-updates", icon: CalendarCheck },
     { label: "Inbox", href: "/admin/planner/inbox", icon: Inbox },
   ],
 };
