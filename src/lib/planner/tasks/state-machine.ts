@@ -299,7 +299,11 @@ export function evaluate(
     }
     case "ChangeOwner": {
       const s = requireSnapshot(snapshot);
-      assertNotArchived(s.status);
+      // Reassignment applies to ACTIVE work only — never to inbox (assign via
+      // triage), completed, or archived tasks. This is the sole caller's scope and
+      // a defense-in-depth guard: a crafted request cannot re-own a completed task
+      // (which would shift its "completed today"/history attribution).
+      assertFrom(s.status, ["planned", "scheduled", "in_progress", "waiting"]);
       if (!nonEmpty(command.owner_user_id)) throw new TaskError("MissingOwner");
       // Responsibility model (Slice B): owner is the single source of truth for
       // "assigned to". When an assignee is already set (e.g. an in-progress task

@@ -201,6 +201,15 @@ describe("state machine — attribute-only (status never changes)", () => {
   it("ChangeOwner requires a non-empty owner", () => {
     expectCode(() => evaluate({ type: "ChangeOwner", owner_user_id: "" }, snap()), "MissingOwner");
   });
+  it("ChangeOwner is ACTIVE-only — rejected on completed/inbox/archived (defense-in-depth)", () => {
+    for (const status of ["completed", "inbox", "archived"] as const) {
+      expectCode(() => evaluate({ type: "ChangeOwner", owner_user_id: "ashwin" }, snap({ status })), "IllegalTransition");
+    }
+    // still legal across the active set
+    for (const status of ["planned", "scheduled", "in_progress", "waiting"] as const) {
+      expect(evaluate({ type: "ChangeOwner", owner_user_id: "ashwin" }, snap({ status, assignee_id: null })).task_field_deltas.owner_user_id).toBe("ashwin");
+    }
+  });
   it("ChangeEstimate rejects non-positive", () => {
     expectCode(() => evaluate({ type: "ChangeEstimate", estimated_minutes: 0 }, snap()), "InvalidCommand");
   });
