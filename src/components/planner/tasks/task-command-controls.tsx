@@ -29,6 +29,7 @@ import {
   unblockTaskAction,
   dropTaskAction,
   eraseTaskAction,
+  reassignTaskAction,
 } from "@/app/(admin)/admin/planner/tasks/actions";
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
 import { clearCommandIntent, commandIntentAfterResult, intentDispositionFor, prepareCommandSubmit, IDLE, type CommandIntent } from "@/lib/planner/tasks/inbox-command-intent";
@@ -37,7 +38,7 @@ import { legalActionsFor, TASK_ACTION_LABEL, type TaskActionDescriptor, type Tas
 import type { TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FieldHelp, Select } from "@/components/ui/input";
-import type { TaskCommandTarget } from "./task-command-target";
+import type { AssignChoices, TaskCommandTarget } from "./task-command-target";
 
 const CONFLICT_MESSAGE = "This item was already updated. Refreshing…";
 const NETWORK_MESSAGE = "Something went wrong. Try again.";
@@ -48,10 +49,10 @@ type BlockerClassInput = (typeof BLOCKER_CLASSES)[number];
 /** Server Actions never receive actor/owner/workspace — only the target + command input + the key. */
 type Base = { taskId: string; expectedAggregateVersion: number };
 
-export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
+export function TaskCommandControls({ target, assign }: { target: TaskCommandTarget; assign?: AssignChoices }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
-  const [openArea, setOpenArea] = useState<null | "date" | "block" | "delete">(null);
+  const [openArea, setOpenArea] = useState<null | "date" | "block" | "delete" | "assign">(null);
   const [dateKey, setDateKey] = useState<"schedule" | "reschedule">("schedule");
   const [selectedDate, setSelectedDate] = useState("");
   const [blockerClass, setBlockerClass] = useState<BlockerClassInput>("approval");
@@ -176,6 +177,22 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
     setOpenArea("delete");
   }
 
+  function openAssign(trigger: HTMLButtonElement | null) {
+    areaTriggerRef.current = trigger;
+    setMessage(null);
+    setOpenArea("assign");
+  }
+
+  /**
+   * Reassign to a chosen workspace admin ("Assign to X"). Reuses the idempotency
+   * `run()` path (reassign returns the standard TaskActionResult, so VersionConflict
+   * → refresh is handled). On success the task may leave this view (reassigned to
+   * someone else) — applyResult's router.refresh() re-renders it away.
+   */
+  function confirmAssign(adminId: string) {
+    void run(`assign-${adminId}`, `assign:${adminId}`, (k) => reassignTaskAction({ ...base, idempotencyKey: k, assignedToId: adminId }));
+  }
+
   /**
    * Permanent erase — a separate destructive path (NOT a state-machine command),
    * so it bypasses the idempotency `run()` machinery. The action is idempotent
@@ -248,7 +265,22 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
     <>
       {/* Grows beside the title on desktop; wraps to a full-width line and flows
           across the row on narrow screens (up to six actions must never overflow). */}
-      <div className="flex min-w-0 basis-full flex-wrap items-center justify-end gap-1 sm:basis-auto">{actions.map(renderActionButton)}</div>
+      <div className="flex min-w-0 basis-full flex-wrap items-center justify-end gap-1 sm:basis-auto">
+        {actions.map(renderActionButton)}
+        {assign && assign.admins.length > 1 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={submitting}
+            aria-expanded={openArea === "assign"}
+            onClick={(e) => openAssign(e.currentTarget)}
+            aria-label={`Assign “${target.title}”`}
+          >
+            Assign
+          </Button>
+        ) : null}
+      </div>
 
       {openArea === "date" && (
         <div className="mt-2 basis-full rounded-lg border border-ink-100 bg-ink-50/60 p-3">
@@ -329,6 +361,36 @@ export function TaskCommandControls({ target }: { target: TaskCommandTarget }) {
                 Cancel
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {openArea === "assign" && assign && (
+        <div className="mt-2 basis-full rounded-lg border border-ink-100 bg-ink-50/60 p-3">
+          <p className="mb-2 text-xs font-medium text-ink-600">Assign to</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {assign.admins.map((a) => {
+              const isMe = a.id === assign.currentAdminId;
+              const active = submitting && activeKey === `assign-${a.id}`;
+              return (
+                <Button
+                  key={a.id}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={submitting}
+                  loading={active}
+                  aria-busy={active || undefined}
+                  onClick={() => confirmAssign(a.id)}
+                  aria-label={`Assign “${target.title}” to ${isMe ? "me" : a.name}`}
+                >
+                  {isMe ? "Me" : a.name}
+                </Button>
+              );
+            })}
+            <Button type="button" size="sm" variant="ghost" onClick={closeArea} aria-label={`Cancel assigning “${target.title}”`}>
+              Cancel
+            </Button>
           </div>
         </div>
       )}

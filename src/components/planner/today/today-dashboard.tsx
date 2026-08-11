@@ -62,6 +62,11 @@ export async function TodayDashboard() {
 
   const nameById = new Map<string, string>();
   if (teamRes.status === "fulfilled") for (const m of teamRes.value) nameById.set(m.id, m.fullName);
+  // Assign choices for the per-row "Assign to" control (workspace admins + me).
+  const assign =
+    profile && teamRes.status === "fulfilled"
+      ? { admins: teamRes.value.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id }
+      : undefined;
 
   const activeViews = ws.active.map((t) => toTaskView(t, nameById, today));
   const completedViews = ws.completedToday.map((t) => toTaskView(t, nameById, today));
@@ -107,7 +112,7 @@ export async function TodayDashboard() {
               <TodayMeetings meetings={todayMeetings} views={meetViews} soon={soon} />
             </div>
             <div className="lg:col-span-2">
-              <TodayTasks groups={groups} now={now} />
+              <TodayTasks groups={groups} now={now} assign={assign} />
             </div>
           </div>
           <TodayActionableInbox items={feed.items} inboxCount={inboxCount} />

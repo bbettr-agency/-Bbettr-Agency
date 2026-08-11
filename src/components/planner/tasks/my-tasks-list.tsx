@@ -1,12 +1,14 @@
 import { AlertCircle, ListChecks } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getCurrentProfile } from "@/lib/auth";
 import { getMyTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
 import { groupMyTasks } from "@/lib/planner/tasks/my-tasks-grouping";
 import { AGENCY_TZ, todayDate } from "@/lib/planner/meetings/date-views";
 import { TaskRow } from "./task-row";
+import type { AssignChoices } from "./task-command-target";
 
 /**
  * My Tasks — the admin's canonical personal task workspace (first consumer of the
@@ -17,7 +19,11 @@ import { TaskRow } from "./task-row";
  * Waiting/Blocked); overdue is derived. Only the per-row command controls hydrate.
  */
 export async function MyTasksList() {
-  const [tasksResult, teamResult] = await Promise.allSettled([getMyTasks(), listAdminTeam()]);
+  const [tasksResult, teamResult, profile] = await Promise.all([
+    getMyTasks().then((v) => ({ status: "fulfilled" as const, value: v })).catch((e) => ({ status: "rejected" as const, reason: e })),
+    listAdminTeam().then((v) => v).catch(() => []),
+    getCurrentProfile(),
+  ]);
 
   if (tasksResult.status === "rejected") {
     return (
@@ -34,10 +40,11 @@ export async function MyTasksList() {
   const today = todayDate(now, AGENCY_TZ);
 
   // Best-effort id→name map (one lookup, not per-task); a failure just omits names.
-  const nameById = new Map<string, string>();
-  if (teamResult.status === "fulfilled") {
-    for (const m of teamResult.value) nameById.set(m.id, m.fullName);
-  }
+  const nameById = new Map(teamResult.map((m) => [m.id, m.fullName]));
+  // Assign choices — the workspace admins + the acting admin (for the "Me" label).
+  const assign: AssignChoices | undefined = profile
+    ? { admins: teamResult.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id }
+    : undefined;
 
   const views = tasksResult.value.map((t) => toTaskView(t, nameById, today));
   const groups = groupMyTasks(views);
@@ -63,7 +70,7 @@ export async function MyTasksList() {
           <CardContent>
             <ul className="divide-y divide-ink-100">
               {g.tasks.map((v) => (
-                <TaskRow key={v.id} view={v} now={now} />
+                <TaskRow key={v.id} view={v} now={now} assign={assign} />
               ))}
             </ul>
           </CardContent>

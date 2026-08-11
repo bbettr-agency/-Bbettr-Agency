@@ -14,3 +14,14 @@ export type TaskCommandTarget = {
   status: TaskStatus;
   title: string;
 };
+
+/**
+ * The workspace admins a task may be assigned to, plus the acting admin's id (so
+ * the picker can label one option "Me"). Names are safe display strings; ids are
+ * re-validated server-side on every assignment — the browser id is never trusted.
+ * Passed from the server page (via listAdminTeam) into the row controls.
+ */
+export type AssignChoices = {
+  admins: { id: string; name: string }[];
+  currentAdminId: string;
+};
