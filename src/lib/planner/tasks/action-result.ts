@@ -45,6 +45,7 @@ export type EraseTaskResult = { ok: true } | { ok: false; error: string };
 export const APPROVED_PLANNER_PATHS = [
   "/admin/planner",
   "/admin/planner/today",
+  "/admin/planner/week",
   "/admin/planner/tasks",
   "/admin/planner/inbox",
   "/admin/planner/team",

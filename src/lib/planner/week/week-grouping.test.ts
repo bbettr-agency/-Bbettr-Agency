@@ -25,6 +25,8 @@ function view(o: Partial<TaskView> = {}): TaskView {
     assigneeDisplay: null,
     isCompleted: false,
     completedAt: null,
+    isRecurring: o.isRecurring ?? false,
+    recurrenceLabel: o.recurrenceLabel ?? null,
     aggregateVersion: 1,
   };
 }

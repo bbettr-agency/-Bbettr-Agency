@@ -2,6 +2,7 @@ import { AlertCircle, Inbox } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getCurrentProfile } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { getInboxTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { InboxRow } from "./inbox-row";
@@ -17,11 +18,15 @@ import type { AssignChoices } from "./task-command-target";
  * database details are exposed; no client JS, no mutation path.
  */
 export async function InboxList() {
-  const [tasksResult, teamResult, profile] = await Promise.all([
+  const supabase = await createClient();
+  const [tasksResult, teamResult, profile, clientsResult] = await Promise.all([
     getInboxTasks().then((v) => ({ status: "fulfilled" as const, value: v })).catch((e) => ({ status: "rejected" as const, reason: e })),
     listAdminTeam().catch(() => []),
     getCurrentProfile(),
+    supabase.from("clients").select("id, name").order("name", { ascending: true }),
   ]);
+  // Client picker for the "Repeat" (recurring) triage path; best-effort.
+  const clients = (clientsResult.data ?? []).map((c) => ({ id: c.id, name: c.name }));
 
   // Authoritative failure only: tasks could not be read.
   if (tasksResult.status === "rejected") {
@@ -73,6 +78,7 @@ export async function InboxList() {
               view={toInboxRowView(t, nameById.get(t.created_by) ?? null, now)}
               target={{ taskId: t.id, aggregateVersion: t.aggregate_version, title: t.title }}
               assign={assign}
+              clients={clients}
             />
           ))}
         </ul>

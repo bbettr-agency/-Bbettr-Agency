@@ -36,6 +36,48 @@ describe("state machine — create", () => {
   it("CaptureTask empty title → InvalidCommand", () => {
     expectCode(() => evaluate({ type: "CaptureTask", title: "  " }), "InvalidCommand");
   });
+  it("RecurringInstanceGenerated → scheduled create with full deltas + event", () => {
+    const p = evaluate({
+      type: "RecurringInstanceGenerated",
+      title: "Send Vision Motors invoice",
+      owner_user_id: "eloff",
+      assignee_id: null,
+      client_id: "client-vm",
+      scheduled_date: "2026-08-25",
+      due_date: "2026-08-25",
+      priority: "normal",
+      recurrence_definition_id: "def-1",
+      occurrence_slot: "2026-08-25",
+    });
+    expect(p.is_create).toBe(true);
+    expect(p.resulting_status).toBe("scheduled");
+    expect(p.task_field_deltas).toMatchObject({
+      status: "scheduled",
+      title: "Send Vision Motors invoice",
+      owner_user_id: "eloff",
+      client_id: "client-vm",
+      scheduled_date: "2026-08-25",
+      due_date: "2026-08-25",
+      recurrence_definition_id: "def-1",
+      occurrence_slot: "2026-08-25",
+    });
+    expect(types(p)).toEqual(["RecurringInstanceGenerated"]);
+  });
+  it("RecurringInstanceGenerated defaults due_date to scheduled_date", () => {
+    const p = evaluate({
+      type: "RecurringInstanceGenerated",
+      title: "T",
+      owner_user_id: "o",
+      scheduled_date: "2026-09-25",
+      recurrence_definition_id: "def-1",
+      occurrence_slot: "2026-09-25",
+    });
+    expect(p.task_field_deltas.due_date).toBe("2026-09-25");
+  });
+  it("RecurringInstanceGenerated requires owner + slot + definition", () => {
+    expectCode(() => evaluate({ type: "RecurringInstanceGenerated", title: "T", owner_user_id: "", scheduled_date: "2026-09-25", recurrence_definition_id: "d", occurrence_slot: "2026-09-25" }), "MissingOwner");
+    expectCode(() => evaluate({ type: "RecurringInstanceGenerated", title: "T", owner_user_id: "o", scheduled_date: "2026-09-25", recurrence_definition_id: "", occurrence_slot: "2026-09-25" }), "InvalidCommand");
+  });
   it("non-create without snapshot → TaskNotFound", () => {
     expectCode(() => evaluate({ type: "TriageTask", owner_user_id: "o" }), "TaskNotFound");
   });
@@ -61,6 +103,31 @@ describe("state machine — triage / schedule", () => {
   });
   it("TriageAndScheduleTask missing date → InvalidCommand", () => {
     expectCode(() => evaluate({ type: "TriageAndScheduleTask", owner_user_id: "o", scheduled_date: "" }, snap({ status: "inbox" })), "InvalidCommand");
+  });
+  it("TriageAndScheduleTask WITHOUT recurrence sets no recurrence deltas (normal flow unchanged)", () => {
+    const p = evaluate({ type: "TriageAndScheduleTask", owner_user_id: "o", scheduled_date: "2026-08-10" }, snap({ status: "inbox" }));
+    expect(p.task_field_deltas.recurrence_definition_id).toBeUndefined();
+    expect(p.task_field_deltas.occurrence_slot).toBeUndefined();
+    expect(p.task_field_deltas.client_id).toBeUndefined();
+  });
+  it("TriageAndScheduleTask WITH recurrence links the first occurrence (same events/status)", () => {
+    const p = evaluate(
+      {
+        type: "TriageAndScheduleTask",
+        owner_user_id: "o",
+        scheduled_date: "2026-08-25",
+        recurrence: { recurrence_definition_id: "def-1", occurrence_slot: "2026-08-25", client_id: "client-vm" },
+      },
+      snap({ status: "inbox" })
+    );
+    expect(p.resulting_status).toBe("scheduled");
+    expect(types(p)).toEqual(["TaskTriaged", "TaskScheduled"]); // op contract unchanged
+    expect(p.task_field_deltas).toMatchObject({
+      recurrence_definition_id: "def-1",
+      occurrence_slot: "2026-08-25",
+      client_id: "client-vm",
+      due_date: "2026-08-25", // defaults to scheduled_date
+    });
   });
   it("ScheduleTask planned → scheduled; inbox → IllegalTransition", () => {
     expect(evaluate({ type: "ScheduleTask", scheduled_date: "2026-08-10" }, snap({ status: "planned" })).resulting_status).toBe("scheduled");

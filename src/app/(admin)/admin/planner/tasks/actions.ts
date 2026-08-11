@@ -33,10 +33,15 @@ import { TaskError, mapDbError } from "@/lib/planner/tasks/errors";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
 import { listAdminTeam } from "@/lib/planner/team";
 import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
-import type { Profile, TaskPriority } from "@/lib/database.types";
+import { createRecurringDefinition } from "@/lib/planner/recurrence/definitions";
+import { generateForDefinitionId } from "@/lib/planner/recurrence/generator";
+import type { Profile, RecurrenceRuleUnit, TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
 const MY_TASKS_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/tasks", "/admin/planner"];
+// A new recurring occurrence can surface anywhere a scheduled task does.
+const RECUR_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner/today", "/admin/planner/week", "/admin/planner/tasks", "/admin/planner/team", "/admin/planner"];
+const RECURRENCE_UNITS: RecurrenceRuleUnit[] = ["day", "week", "month"];
 
 /** The minimal target every My Tasks lifecycle action needs (never actor/owner/workspace). */
 type MyTaskTarget = { taskId: string; expectedAggregateVersion: number; idempotencyKey: string };
@@ -150,6 +155,106 @@ export async function triageAndScheduleTaskAction(input: {
     },
     { revalidate: INBOX_REVALIDATE }
   );
+}
+
+/**
+ * Triage an Inbox task into a RECURRING reminder. The captured inbox task BECOMES
+ * the first occurrence (linked to a new definition via the recurrence-linkage
+ * triage), so every occurrence — first and generated — shares the definition,
+ * badge and history. The generator then advances next_occurrence and fills the
+ * look-ahead; future occurrences are created by the scheduled generator, never by
+ * completing this one. If linking fails the just-created definition is deactivated
+ * (compensating rollback) so no orphan series generates.
+ *
+ * SECURITY: workspace + owner are server-derived/validated (Slice B); the browser
+ * never chooses the definition's workspace or author. The task title/priority are
+ * read server-side from the real task, not trusted from the client.
+ */
+export async function triageAndScheduleRecurringAction(input: {
+  taskId: string;
+  expectedAggregateVersion: number;
+  idempotencyKey: string;
+  scheduledDate: string; // first occurrence date (agency-local, today-or-future)
+  unit: RecurrenceRuleUnit; // day | week | month
+  assignedToId?: string;
+  clientId?: string | null;
+  priority?: TaskPriority;
+}): Promise<TaskActionResult> {
+  if (!RECURRENCE_UNITS.includes(input.unit)) return failWith("InvalidCommand");
+  if (!isValidScheduleDate(input.scheduledDate, agencyToday())) return failWith("InvalidCommand");
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  if (!profile.workspace_id) return failWith("NotAuthorized");
+  const owner = await resolveAssignedOwner(profile, input.assignedToId);
+  if (!owner.ok) return owner.result;
+  const clientId = typeof input.clientId === "string" && input.clientId.trim().length > 0 ? input.clientId.trim() : null;
+
+  // Read the real task server-side (title/priority are never trusted from the browser).
+  const supabase = await createClient();
+  const { data: task, error: readErr } = await supabase
+    .from("tasks")
+    .select("id,title,priority,status,aggregate_version")
+    .eq("id", input.taskId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (readErr) return { ok: false, code: "PersistenceError", error: mapDbError(readErr).message };
+  if (!task) return failWith("InvalidCommand");
+  if (task.status !== "inbox") return failWith("InvalidCommand");
+  const priority = input.priority ?? (task.priority as TaskPriority);
+
+  // 1 — create the definition (service-role; RLS blocks admin writes). next_occurrence
+  //     starts at the first date so the generator self-heals if linking fails.
+  let definitionId: string;
+  try {
+    const def = await createRecurringDefinition({
+      workspaceId: profile.workspace_id,
+      ownerUserId: owner.ownerId,
+      assigneeId: null,
+      clientId,
+      title: task.title,
+      priority,
+      firstDate: input.scheduledDate,
+      unit: input.unit,
+    });
+    definitionId = def.id;
+  } catch {
+    return failWith("InvalidCommand");
+  }
+
+  // 2 — bind the inbox task as the FIRST occurrence (linked triage). On failure,
+  //     deactivate the fresh definition so it can never generate an orphan series.
+  const linked = await runTaskCommand(
+    {
+      command: {
+        type: "TriageAndScheduleTask",
+        owner_user_id: owner.ownerId,
+        scheduled_date: input.scheduledDate,
+        assignee_id: null,
+        priority,
+        recurrence: {
+          recurrence_definition_id: definitionId,
+          occurrence_slot: input.scheduledDate,
+          client_id: clientId,
+          due_date: input.scheduledDate,
+        },
+      },
+      task_id: input.taskId,
+      expected_aggregate_version: input.expectedAggregateVersion,
+      idempotency_key: input.idempotencyKey,
+    },
+    { revalidate: RECUR_REVALIDATE }
+  );
+  if (!linked.ok) {
+    const { deactivateRecurringDefinition } = await import("@/lib/planner/recurrence/definitions");
+    try { await deactivateRecurringDefinition(profile.workspace_id, definitionId); } catch { /* best-effort rollback */ }
+    return linked;
+  }
+
+  // 3 — advance next_occurrence past the linked first occurrence + fill look-ahead.
+  //     Idempotent: the first slot is an accepted_noop (already owned by the task).
+  try { await generateForDefinitionId(definitionId); } catch { /* cron will catch up */ }
+  return linked;
 }
 
 // ── My Tasks lifecycle actions (C-My Tasks) ──────────────────────────────────
