@@ -78,6 +78,18 @@ describe("planGeneration — missed 'skip' catch-up (stale / cron offline)", () 
     const plan = planGeneration(monthly({ next_occurrence: "2026-09-25" }), "2026-09-11", 14, false);
     expect(plan.skipped).toBe(0);
   });
+
+  it("skip catch-up is bounded (a years-stale daily definition cannot spin unbounded)", () => {
+    const plan = planGeneration(
+      { next_occurrence: "2000-01-01", rule_unit: "day", rule_interval: 1, anchor_day: null, missed_policy: "skip", due_offset_days: 0 },
+      "2026-08-25",
+      14,
+      false
+    );
+    // Terminates via the MAX_CATCHUP guard; no unbounded loop, deterministic result.
+    expect(plan.skipped).toBeLessThanOrEqual(5000);
+    expect(Array.isArray(plan.occurrences)).toBe(true);
+  });
 });
 
 describe("planGeneration — 'roll' backfills (not used in v1, but defined)", () => {

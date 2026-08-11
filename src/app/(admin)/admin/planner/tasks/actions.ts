@@ -33,7 +33,7 @@ import { TaskError, mapDbError } from "@/lib/planner/tasks/errors";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
 import { listAdminTeam } from "@/lib/planner/team";
 import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
-import { createRecurringDefinition } from "@/lib/planner/recurrence/definitions";
+import { createRecurringDefinition, activateRecurringDefinition } from "@/lib/planner/recurrence/definitions";
 import { generateForDefinitionId } from "@/lib/planner/recurrence/generator";
 import type { Profile, RecurrenceRuleUnit, TaskPriority } from "@/lib/database.types";
 
@@ -203,8 +203,16 @@ export async function triageAndScheduleRecurringAction(input: {
   if (task.status !== "inbox") return failWith("InvalidCommand");
   const priority = input.priority ?? (task.priority as TaskPriority);
 
-  // 1 — create the definition (service-role; RLS blocks admin writes). next_occurrence
-  //     starts at the first date so the generator self-heals if linking fails.
+  // Validate the client against the caller's RLS-visible clients (rejects unknown /
+  // cross-workspace ids before they reach the definition + occurrences).
+  if (clientId) {
+    const { data: clientRow } = await supabase.from("clients").select("id").eq("id", clientId).maybeSingle();
+    if (!clientRow) return failWith("InvalidCommand");
+  }
+
+  // 1 — create the definition DORMANT (service-role; RLS blocks admin writes). It
+  //     generates nothing until activated, so a crash/cron tick before the link
+  //     can never see an unlinked active series. next_occurrence starts at firstDate.
   let definitionId: string;
   try {
     const def = await createRecurringDefinition({
@@ -222,8 +230,9 @@ export async function triageAndScheduleRecurringAction(input: {
     return failWith("InvalidCommand");
   }
 
-  // 2 — bind the inbox task as the FIRST occurrence (linked triage). On failure,
-  //     deactivate the fresh definition so it can never generate an orphan series.
+  // 2 — bind the inbox task as the FIRST occurrence (linked triage). On failure the
+  //     definition is still dormant (active=false) → nothing to roll back; it will
+  //     never generate. Surface the failure and leave the task in the Inbox.
   const linked = await runTaskCommand(
     {
       command: {
@@ -245,15 +254,18 @@ export async function triageAndScheduleRecurringAction(input: {
     },
     { revalidate: RECUR_REVALIDATE }
   );
-  if (!linked.ok) {
-    const { deactivateRecurringDefinition } = await import("@/lib/planner/recurrence/definitions");
-    try { await deactivateRecurringDefinition(profile.workspace_id, definitionId); } catch { /* best-effort rollback */ }
-    return linked;
-  }
+  if (!linked.ok) return linked;
 
-  // 3 — advance next_occurrence past the linked first occurrence + fill look-ahead.
-  //     Idempotent: the first slot is an accepted_noop (already owned by the task).
-  try { await generateForDefinitionId(definitionId); } catch { /* cron will catch up */ }
+  // 3 — activate the series, then advance next_occurrence past the linked first
+  //     occurrence + fill the look-ahead. Idempotent: the first slot is an
+  //     accepted_noop (already owned by the task); the cron catches up if this fails.
+  try {
+    const active = await activateRecurringDefinition(profile.workspace_id, definitionId);
+    if (active) await generateForDefinitionId(definitionId);
+  } catch {
+    /* cron will activate-effect via the next pass once the row is active; if
+       activation itself failed the first occurrence still exists as a task */
+  }
   return linked;
 }
 

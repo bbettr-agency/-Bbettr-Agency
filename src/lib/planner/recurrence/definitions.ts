@@ -25,12 +25,15 @@ export interface CreateRecurringDefinitionInput {
 }
 
 /**
- * Insert a recurring definition (service-role) and return the row. It does NOT
- * generate occurrences: the recurring-triage action binds the captured inbox task
- * as the FIRST occurrence (via linked triage) and then runs the generator to
- * advance next_occurrence + fill the look-ahead. next_occurrence starts at
- * firstDate so, even if the linking step fails, the generator self-heals (the
- * op's (definition, slot) idempotency makes a re-generated firstDate a no-op).
+ * Insert a recurring definition (service-role) and return the row. It is created
+ * DORMANT (active=false) and generates nothing: the recurring-triage action binds
+ * the captured inbox task as the FIRST occurrence (via linked triage) and only
+ * then activates + runs the generator. Creating dormant means a crash or a cron
+ * tick between the two writes can never see an unlinked ACTIVE definition — so no
+ * premature/duplicate first occurrence and no orphan series; a failed link just
+ * leaves a harmless inactive row (hidden from the management view). next_occurrence
+ * starts at firstDate so, once active, the generator self-heals via the op's
+ * (definition, slot) idempotency (a re-generated firstDate is a no-op).
  */
 export async function createRecurringDefinition(
   input: CreateRecurringDefinitionInput
@@ -55,11 +58,32 @@ export async function createRecurringDefinition(
       due_offset_days: 0,
       next_occurrence: input.firstDate,
       anchor_day,
-      active: true,
+      active: false, // dormant until the first occurrence is linked (see above)
     })
     .select("*")
     .single();
   if (error || !data) throw error ?? new Error("recurrence: definition insert failed");
+  return data as RecurringDefinition;
+}
+
+/**
+ * Activate a freshly-created definition once its first occurrence is linked, so
+ * the generator begins producing occurrences 2..N. Workspace-scoped; returns the
+ * activated row (active=true) so the caller can generate the look-ahead from it.
+ */
+export async function activateRecurringDefinition(
+  workspaceId: string,
+  definitionId: string
+): Promise<RecurringDefinition | null> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("recurring_definitions")
+    .update({ active: true })
+    .eq("id", definitionId)
+    .eq("workspace_id", workspaceId)
+    .select("*")
+    .single();
+  if (error || !data) return null;
   return data as RecurringDefinition;
 }
 

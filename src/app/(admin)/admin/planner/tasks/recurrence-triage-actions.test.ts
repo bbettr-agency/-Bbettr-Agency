@@ -9,7 +9,7 @@ vi.mock("@/lib/planner/tasks/run-command", () => ({ runTaskCommand: vi.fn() }));
 vi.mock("@/lib/planner/team", () => ({ listAdminTeam: vi.fn() }));
 vi.mock("@/lib/planner/recurrence/definitions", () => ({
   createRecurringDefinition: vi.fn(),
-  deactivateRecurringDefinition: vi.fn(),
+  activateRecurringDefinition: vi.fn(),
 }));
 vi.mock("@/lib/planner/recurrence/generator", () => ({ generateForDefinitionId: vi.fn() }));
 vi.mock("@/lib/planner/tasks/schedule-date", async (importOriginal) => {
@@ -22,7 +22,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { runTaskCommand } from "@/lib/planner/tasks/run-command";
 import { listAdminTeam } from "@/lib/planner/team";
-import { createRecurringDefinition, deactivateRecurringDefinition } from "@/lib/planner/recurrence/definitions";
+import { createRecurringDefinition, activateRecurringDefinition } from "@/lib/planner/recurrence/definitions";
 import { generateForDefinitionId } from "@/lib/planner/recurrence/generator";
 
 const KEY = "11111111-1111-1111-1111-111111111111";
@@ -30,25 +30,35 @@ const ADMIN = { id: "admin-1", role: "admin", full_name: "Eloff", email: "e@b.co
 const TASK = { id: "t9", title: "Send Vision Motors invoice", priority: "normal", status: "inbox", aggregate_version: 4 };
 const base = { taskId: "t9", expectedAggregateVersion: 4, idempotencyKey: KEY, scheduledDate: "2026-08-25", unit: "month" as const };
 
-function fakeSupabase(taskRow: unknown, error: unknown = null) {
+/** Table-aware fluent fake: tasks read → the task; clients read → the client (or null). */
+function fakeSupabase(opts: { task?: unknown; taskError?: unknown; client?: unknown } = {}) {
+  const task = "task" in opts ? opts.task : TASK;
+  const client = "client" in opts ? opts.client : { id: "client-vm" };
+  const node = (resolve: () => unknown): Record<string, unknown> => {
+    const n: Record<string, unknown> = {};
+    n.select = () => n;
+    n.eq = () => n;
+    n.is = () => n;
+    n.maybeSingle = () => Promise.resolve(resolve());
+    n.single = () => Promise.resolve(resolve());
+    return n;
+  };
   return {
-    from: () => ({
-      select: () => ({ eq: () => ({ is: () => ({ maybeSingle: () => Promise.resolve({ data: taskRow, error }) }) }) }),
-    }),
+    from: (t: string) => (t === "clients" ? node(() => ({ data: client, error: null })) : node(() => ({ data: task, error: opts.taskError ?? null }))),
   };
 }
 
 beforeEach(() => {
   vi.mocked(getCurrentProfile).mockResolvedValue(ADMIN as never);
-  vi.mocked(createClient).mockResolvedValue(fakeSupabase(TASK) as never);
+  vi.mocked(createClient).mockResolvedValue(fakeSupabase() as never);
   vi.mocked(runTaskCommand).mockReset();
   vi.mocked(runTaskCommand).mockResolvedValue({ ok: true, outcome: "applied", taskId: "t9", aggregateVersion: 5 } as never);
   vi.mocked(listAdminTeam).mockReset();
   vi.mocked(listAdminTeam).mockResolvedValue([{ id: "admin-1", fullName: "Eloff" }, { id: "ashwin", fullName: "Ashwin" }] as never);
   vi.mocked(createRecurringDefinition).mockReset();
   vi.mocked(createRecurringDefinition).mockResolvedValue({ id: "def-1", workspace_id: "ws1", owner_user_id: "admin-1" } as never);
-  vi.mocked(deactivateRecurringDefinition).mockReset();
-  vi.mocked(deactivateRecurringDefinition).mockResolvedValue({ deactivated: true } as never);
+  vi.mocked(activateRecurringDefinition).mockReset();
+  vi.mocked(activateRecurringDefinition).mockResolvedValue({ id: "def-1", workspace_id: "ws1", active: true } as never);
   vi.mocked(generateForDefinitionId).mockReset();
   vi.mocked(generateForDefinitionId).mockResolvedValue({ created: 0, existing: 1, skipped: 0, advanced: true, error: false } as never);
 });
@@ -95,8 +105,14 @@ describe("triageAndScheduleRecurringAction — validation", () => {
     expect(createRecurringDefinition).not.toHaveBeenCalled();
   });
   it("rejects when the task is not an inbox task", async () => {
-    vi.mocked(createClient).mockResolvedValue(fakeSupabase({ ...TASK, status: "scheduled" }) as never);
+    vi.mocked(createClient).mockResolvedValue(fakeSupabase({ task: { ...TASK, status: "scheduled" } }) as never);
     const res = await triageAndScheduleRecurringAction(base);
+    expect(res.ok).toBe(false);
+    expect(createRecurringDefinition).not.toHaveBeenCalled();
+  });
+  it("rejects an unknown / cross-workspace clientId (not among RLS-visible clients)", async () => {
+    vi.mocked(createClient).mockResolvedValue(fakeSupabase({ client: null }) as never);
+    const res = await triageAndScheduleRecurringAction({ ...base, clientId: "client-x" });
     expect(res.ok).toBe(false);
     expect(createRecurringDefinition).not.toHaveBeenCalled();
   });
@@ -115,16 +131,16 @@ describe("triageAndScheduleRecurringAction — happy path", () => {
     const cmd = vi.mocked(runTaskCommand).mock.calls[0][0].command as { type: string; recurrence?: { recurrence_definition_id: string; occurrence_slot: string } };
     expect(cmd.type).toBe("TriageAndScheduleTask");
     expect(cmd.recurrence).toMatchObject({ recurrence_definition_id: "def-1", occurrence_slot: "2026-08-25" });
-    // Generator advances next_occurrence + fills look-ahead.
+    // Series is activated only AFTER the link, then the generator advances + fills look-ahead.
+    expect(activateRecurringDefinition).toHaveBeenCalledWith("ws1", "def-1");
     expect(generateForDefinitionId).toHaveBeenCalledWith("def-1");
-    expect(deactivateRecurringDefinition).not.toHaveBeenCalled();
   });
 
-  it("rolls back the definition when linking fails (compensating deactivate)", async () => {
+  it("leaves the definition dormant (never activates/generates) when linking fails", async () => {
     vi.mocked(runTaskCommand).mockResolvedValue({ ok: false, code: "VersionConflict", error: "changed" } as never);
     const res = await triageAndScheduleRecurringAction(base);
     expect(res.ok).toBe(false);
-    expect(deactivateRecurringDefinition).toHaveBeenCalledWith("ws1", "def-1");
+    expect(activateRecurringDefinition).not.toHaveBeenCalled();
     expect(generateForDefinitionId).not.toHaveBeenCalled();
   });
 });

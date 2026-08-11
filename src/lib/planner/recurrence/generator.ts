@@ -89,6 +89,7 @@ export async function generateForDefinition(
   let created = 0;
   let existing = 0;
   let error = false;
+  let advanced = false;
   try {
     for (const occ of plan.occurrences) {
       const res = await generateOccurrence({
@@ -108,12 +109,13 @@ export async function generateForDefinition(
         .eq("id", def.id)
         .eq("workspace_id", def.workspace_id);
       if (upErr) error = true;
+      else advanced = true; // report the ACTUAL DB advance, not the intended one
     }
   } catch {
     error = true;
   }
 
-  return { created, existing, skipped: plan.skipped, advanced: plan.nextOccurrence !== def.next_occurrence, error };
+  return { created, existing, skipped: plan.skipped, advanced, error };
 }
 
 /**

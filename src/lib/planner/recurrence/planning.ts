@@ -62,11 +62,14 @@ export function planGeneration(
   const interval = def.rule_interval;
   const offset = def.due_offset_days ?? 0;
 
-  // 'skip' catch-up: advance past any slot already strictly in the past.
+  // 'skip' catch-up: advance past any slot already strictly in the past. Bounded
+  // (like slotsThrough) so a years-stale daily definition can never spin — it
+  // always terminates anyway since interval ≥ 1 guarantees forward progress.
   let cursor = def.next_occurrence;
   let skipped = 0;
   if (def.missed_policy === "skip") {
-    while (cursor < today) {
+    const MAX_CATCHUP = 5000;
+    while (cursor < today && skipped < MAX_CATCHUP) {
       cursor = nextOccurrence(cursor, def.rule_unit, interval, anchor);
       skipped++;
     }
