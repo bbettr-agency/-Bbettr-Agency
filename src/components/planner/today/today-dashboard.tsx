@@ -12,7 +12,6 @@ import { groupToday, actionableToday } from "@/lib/planner/today/today-grouping"
 import { nextBestAction } from "@/lib/planner/today/next-best-action";
 import { todayProgress } from "@/lib/planner/today/today-progress";
 import { smartAlerts } from "@/lib/planner/today/smart-alerts";
-import { buildTimeline } from "@/lib/planner/today/timeline";
 import { buildGreeting } from "@/lib/planner/today/greeting";
 import { minutesUntil, remainingMeetings, type TodayMeeting } from "@/lib/planner/today/today-meeting";
 import { TodayGreeting } from "./today-greeting";
@@ -22,9 +21,7 @@ import { TodayProgress } from "./today-progress";
 import { TodayMeetings } from "./today-meetings";
 import { TodayTasks } from "./today-tasks";
 import { TodayActionableInbox } from "./today-actionable-inbox";
-import { TodayTimeline } from "./today-timeline";
 import { TodayQuickActions } from "./today-quick-actions";
-import { TodayEmptyState } from "./today-empty-state";
 import { TodayEveningSummary } from "./today-evening-summary";
 
 /**
@@ -88,41 +85,30 @@ export async function TodayDashboard() {
   const nbaMeetUrl = nba?.kind === "meeting" ? meetViews.get(nba.meeting.id)?.meetUrl ?? null : null;
   const dueTodayCount = actionable.filter((t) => t.dueDate === today && !t.isOverdue).length;
   const alerts = smartAlerts({ now, meetings: meetingLites, overdueCount: progress.overdue, dueTodayCount, estimatedRemainingMinutes: progress.estimatedRemainingMinutes });
-  const timeline = buildTimeline(meetingLites, actionable, now);
   const greeting = buildGreeting(now, profile?.full_name, { tasks: actionable.length, meetings: remaining.length, overdue: progress.overdue });
 
   const soon = remaining[0] && minutesUntil(remaining[0].startsAt, now) <= 60 ? { title: remaining[0].title, startsAt: remaining[0].startsAt, minutes: minutesUntil(remaining[0].startsAt, now) } : null;
   const feed = feedRes.status === "fulfilled" ? feedRes.value : { items: [], unreadCount: 0 };
   const inboxCount = inboxRes.status === "fulfilled" ? inboxRes.value.length : 0;
-  const nothing = groups.length === 0 && todayMeetings.length === 0;
 
+  // Single-column daily execution page: supporting blocks (greeting/alerts/next
+  // action/progress) frame the day, then every operational section stacks
+  // full-width in order — Meetings, then the Today task sections. No two-column
+  // grid, no Timeline (its work is now the stacked sections themselves).
   return (
     <div className="space-y-6 animate-fade-in">
       <TodayGreeting greeting={greeting} />
-      {nothing ? (
-        <TodayEmptyState />
+      <TodaySmartAlerts alerts={alerts} />
+      {greeting.evening ? (
+        <TodayEveningSummary progress={progress} meetingsCompleted={meetingsCompleted} firstName={greeting.firstName} />
       ) : (
-        <>
-          <TodaySmartAlerts alerts={alerts} />
-          {greeting.evening ? (
-            <TodayEveningSummary progress={progress} meetingsCompleted={meetingsCompleted} firstName={greeting.firstName} />
-          ) : (
-            <TodayNextBestAction nba={nba} now={now} meetUrl={nbaMeetUrl} />
-          )}
-          <TodayProgress progress={progress} />
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-1">
-              <TodayMeetings meetings={todayMeetings} views={meetViews} soon={soon} />
-            </div>
-            <div className="lg:col-span-2">
-              <TodayTasks groups={groups} now={now} assign={assign} />
-            </div>
-          </div>
-          <TodayActionableInbox items={feed.items} inboxCount={inboxCount} />
-          <TodayTimeline timeline={timeline} />
-          <TodayQuickActions />
-        </>
+        <TodayNextBestAction nba={nba} now={now} meetUrl={nbaMeetUrl} />
       )}
+      <TodayProgress progress={progress} />
+      <TodayMeetings meetings={todayMeetings} views={meetViews} soon={soon} />
+      <TodayTasks groups={groups} now={now} assign={assign} />
+      <TodayActionableInbox items={feed.items} inboxCount={inboxCount} />
+      <TodayQuickActions />
     </div>
   );
 }

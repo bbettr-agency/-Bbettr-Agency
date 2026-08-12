@@ -21,28 +21,52 @@ const mtg = (o: Partial<TodayMeeting> & Pick<TodayMeeting, "id" | "startsAt" | "
 const NOW = new Date("2026-08-04T09:00:00Z"); // 11:00 SAST
 const groupOf = (gs: ReturnType<typeof groupToday>, id: string) => gs.find((g) => g.tasks.some((t) => t.id === id))?.key;
 
-describe("groupToday — single placement", () => {
+describe("groupToday — Reminders / To-do's / In Progress / Waiting / Completed", () => {
   const active = [
-    v({ id: "od", status: "scheduled", isOverdue: true, dueDate: "2026-08-01" }),
-    v({ id: "ip", status: "in_progress", scheduledDate: "2026-08-04" }),
-    v({ id: "pl", status: "planned", scheduledDate: "2026-08-04" }),
-    v({ id: "wt", status: "waiting", scheduledDate: "2026-08-04" }),
+    v({ id: "rem", status: "scheduled", scheduledDate: "2026-08-04", isRecurring: true }), // recurring → Reminders
+    v({ id: "todo", status: "scheduled", scheduledDate: "2026-08-04" }), // non-recurring → To-do's
+    v({ id: "od", status: "scheduled", isOverdue: true, dueDate: "2026-08-01" }), // overdue non-recurring → To-do's
+    v({ id: "odr", status: "planned", isOverdue: true, dueDate: "2026-08-01", isRecurring: true }), // overdue recurring → Reminders
+    v({ id: "ip", status: "in_progress", scheduledDate: "2026-08-04", isRecurring: true }), // in-progress (any origin) → In Progress
+    v({ id: "wt", status: "waiting", scheduledDate: "2026-08-04" }), // → Waiting
   ];
   const done = [v({ id: "cd", status: "completed", completedAt: "2026-08-04T08:00:00Z" })];
   const gs = groupToday(active, done);
-  it("orders Overdue → In Progress → Planned → Completed → Waiting", () => {
-    expect(gs.map((g) => g.key)).toEqual(["overdue", "in_progress", "planned_today", "completed_today", "waiting"]);
+
+  it("returns the locked section order (empty sections retained)", () => {
+    expect(gs.map((g) => g.key)).toEqual(["reminders", "todos", "in_progress", "waiting", "completed_today"]);
   });
-  it("overdue (non-waiting) appears only in Overdue", () => {
-    expect(groupOf(gs, "od")).toBe("overdue");
-    expect(gs.filter((g) => g.tasks.some((t) => t.id === "od"))).toHaveLength(1);
+  it("recurring scheduled/overdue occurrences go to Reminders", () => {
+    expect(groupOf(gs, "rem")).toBe("reminders");
+    expect(groupOf(gs, "odr")).toBe("reminders"); // overdue recurring folds into Reminders (no separate Overdue)
   });
-  it("waiting stays in Waiting; each task placed exactly once", () => {
+  it("non-recurring scheduled/overdue tasks go to To-do's for Today", () => {
+    expect(groupOf(gs, "todo")).toBe("todos");
+    expect(groupOf(gs, "od")).toBe("todos"); // overdue folds in (row shows the overdue marker)
+  });
+  it("in-progress goes to In Progress regardless of origin (a started reminder leaves Reminders)", () => {
+    expect(groupOf(gs, "ip")).toBe("in_progress");
+  });
+  it("waiting stays in Waiting; completed in Completed Today; each task placed exactly once", () => {
     expect(groupOf(gs, "wt")).toBe("waiting");
-    expect(gs.reduce((n, g) => n + g.tasks.length, 0)).toBe(5);
+    expect(groupOf(gs, "cd")).toBe("completed_today");
+    expect(gs.reduce((n, g) => n + g.tasks.length, 0)).toBe(7);
+  });
+  it("Reminders/To-do's/In Progress/Completed always show; Waiting only when non-empty", () => {
+    const meta = new Map(gs.map((g) => [g.key, g.alwaysShow]));
+    expect(meta.get("reminders")).toBe(true);
+    expect(meta.get("todos")).toBe(true);
+    expect(meta.get("in_progress")).toBe(true);
+    expect(meta.get("completed_today")).toBe(true);
+    expect(meta.get("waiting")).toBe(false);
+  });
+  it("empty active + empty completed still returns all sections (day-at-a-glance)", () => {
+    const empty = groupToday([], []);
+    expect(empty.map((g) => g.key)).toEqual(["reminders", "todos", "in_progress", "waiting", "completed_today"]);
+    expect(empty.every((g) => g.tasks.length === 0)).toBe(true);
   });
   it("actionableToday excludes waiting", () => {
-    expect(actionableToday(active).map((t) => t.id)).toEqual(["od", "ip", "pl"]);
+    expect(actionableToday(active).map((t) => t.id).sort()).toEqual(["ip", "od", "odr", "rem", "todo"]);
   });
 });
 
