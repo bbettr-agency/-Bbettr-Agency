@@ -38,8 +38,9 @@ import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-d
 import type { TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FieldHelp, Select } from "@/components/ui/input";
+import { EditTaskDialog } from "./edit-task-dialog";
 import type { InboxRowTarget } from "./inbox-row-target";
-import type { AssignChoices } from "./task-command-target";
+import type { AssignChoices, TaskCommandTarget } from "./task-command-target";
 
 /** Triage carries no variable payload → a constant signature ⇒ retries reuse the key. */
 const TRIAGE_SIGNATURE = "triage";
@@ -80,6 +81,7 @@ export function InboxTriageControls({
   // Recurrence config (only used when repeat !== "none"; None keeps the normal flow).
   const [repeat, setRepeat] = useState<RepeatChoice>("none");
   const [clientId, setClientId] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const triageIntentRef = useRef<CommandIntent>(IDLE);
@@ -248,6 +250,16 @@ export function InboxTriageControls({
         >
           Schedule
         </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditOpen(true)}
+          disabled={submitting}
+          aria-label={`Edit “${target.title}”`}
+        >
+          Edit
+        </Button>
       </div>
 
       {scheduleOpen && (
@@ -352,6 +364,23 @@ export function InboxTriageControls({
         <div id={feedbackId} className="basis-full" aria-live="polite">
           {message ? <FieldHelp className="text-red-600">{message}</FieldHelp> : null}
         </div>
+      )}
+
+      {/* Mounted only while open so the form always initialises from the current target. */}
+      {editOpen && (
+        <EditTaskDialog
+          open
+          onClose={() => setEditOpen(false)}
+          target={{
+            taskId: target.taskId,
+            aggregateVersion: target.aggregateVersion,
+            status: "inbox",
+            title: target.title,
+            description: target.description,
+            priority: target.priority,
+            criticalReason: target.criticalReason,
+          }}
+        />
       )}
     </>
   );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { legalActionsFor, TASK_ACTION_LABEL, type TaskActionKey } from "./task-legality";
+import { legalActionsFor, primaryActionKey, TASK_ACTION_LABEL, type TaskActionKey } from "./task-legality";
 import type { TaskStatus } from "@/lib/database.types";
 
 const keys = (s: TaskStatus) => legalActionsFor(s).map((a) => a.key);
@@ -44,5 +44,25 @@ describe("legalActionsFor", () => {
     for (const s of ["planned", "scheduled", "in_progress", "waiting"] as TaskStatus[])
       for (const a of legalActionsFor(s)) expect(TASK_ACTION_LABEL[a.key]).toBeTruthy();
     expect(TASK_ACTION_LABEL.delete).toBe("Delete");
+  });
+});
+
+describe("primaryActionKey", () => {
+  it("Complete is primary for planned/scheduled/in_progress", () => {
+    expect(primaryActionKey("planned")).toBe("complete");
+    expect(primaryActionKey("scheduled")).toBe("complete");
+    expect(primaryActionKey("in_progress")).toBe("complete");
+  });
+  it("Unblock is primary for waiting", () => {
+    expect(primaryActionKey("waiting")).toBe("unblock");
+  });
+  it("no primary where there are no controls (inbox/completed/archived)", () => {
+    for (const s of ["inbox", "completed", "archived"] as TaskStatus[]) expect(primaryActionKey(s)).toBeNull();
+  });
+  it("the primary is always itself a legal action for that status", () => {
+    for (const s of ["planned", "scheduled", "in_progress", "waiting"] as TaskStatus[]) {
+      const p = primaryActionKey(s);
+      expect(legalActionsFor(s).some((a) => a.key === p)).toBe(true);
+    }
   });
 });

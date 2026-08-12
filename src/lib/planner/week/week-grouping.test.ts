@@ -15,6 +15,7 @@ function view(o: Partial<TaskView> = {}): TaskView {
     status: (o.status ?? "scheduled") as TaskStatus,
     priority: (o.priority ?? "normal") as TaskPriority,
     criticalReason: null,
+    description: o.description ?? null,
     scheduledDate: o.scheduledDate ?? null,
     dueDate: o.dueDate ?? null,
     estimatedMinutes: null,

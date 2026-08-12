@@ -76,7 +76,14 @@ export async function InboxList() {
             <InboxRow
               key={t.id}
               view={toInboxRowView(t, nameById.get(t.created_by) ?? null, now)}
-              target={{ taskId: t.id, aggregateVersion: t.aggregate_version, title: t.title }}
+              target={{
+                taskId: t.id,
+                aggregateVersion: t.aggregate_version,
+                title: t.title,
+                description: t.description,
+                priority: t.priority,
+                criticalReason: t.priority === "critical" ? t.critical_reason : null,
+              }}
               assign={assign}
               clients={clients}
             />

@@ -23,6 +23,8 @@ export interface TaskView {
   priority: TaskPriority;
   /** Only when priority is critical AND a real reason exists; else null. */
   criticalReason: string | null;
+  /** The task's description (carried so Edit can prefill/diff; never a raw row). */
+  description: string | null;
   scheduledDate: string | null; // 'YYYY-MM-DD'
   dueDate: string | null; // 'YYYY-MM-DD'
   estimatedMinutes: number | null;
@@ -71,6 +73,7 @@ export function toTaskView(
     status: task.status,
     priority: task.priority,
     criticalReason: task.priority === "critical" && task.critical_reason != null && task.critical_reason.trim().length > 0 ? task.critical_reason.trim() : null,
+    description: task.description,
     scheduledDate: task.scheduled_date,
     dueDate: task.due_date,
     estimatedMinutes: task.estimated_minutes,

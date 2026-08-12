@@ -25,12 +25,23 @@ function formatEstimate(minutes: number): string {
 }
 
 export function TaskRow({ view, now, assign }: { view: TaskView; now: Date; assign?: AssignChoices }) {
-  const target: TaskCommandTarget = { taskId: view.id, aggregateVersion: view.aggregateVersion, status: view.status, title: view.title };
+  const target: TaskCommandTarget = {
+    taskId: view.id,
+    aggregateVersion: view.aggregateVersion,
+    status: view.status,
+    title: view.title,
+    description: view.description,
+    priority: view.priority,
+    criticalReason: view.criticalReason,
+  };
   return (
     <li className="py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        {/* Title owns the row: min-w-0 + flex-1 lets it take the width freed by the
+            compact action cluster, and long titles WRAP (break-words) instead of
+            being clipped. */}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink-900">{view.title}</p>
+          <p className="text-sm font-medium text-ink-900 break-words">{view.title}</p>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
             {view.isRecurring ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600">

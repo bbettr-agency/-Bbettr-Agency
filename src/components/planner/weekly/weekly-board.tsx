@@ -93,7 +93,9 @@ export function WeeklyBoard({
           Nothing matches these filters.
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        // Stacked full-width per member (not side-by-side columns) so each person's
+        // completed-work text gets the whole row width and reads easily.
+        <div className="space-y-4">
           {groups.map((g) => (
             <MemberUpdatesCard key={g.memberId} group={g} onDelete={onDelete} deletingId={deletingId} />
           ))}

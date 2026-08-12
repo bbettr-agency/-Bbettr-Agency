@@ -34,10 +34,12 @@ import {
 import { newIdempotencyKey } from "@/lib/planner/tasks/idempotency";
 import { clearCommandIntent, commandIntentAfterResult, intentDispositionFor, prepareCommandSubmit, IDLE, type CommandIntent } from "@/lib/planner/tasks/inbox-command-intent";
 import { agencyToday, isValidScheduleDate } from "@/lib/planner/tasks/schedule-date";
-import { legalActionsFor, TASK_ACTION_LABEL, type TaskActionDescriptor, type TaskActionKey } from "@/lib/planner/tasks/task-legality";
+import { legalActionsFor, primaryActionKey, TASK_ACTION_LABEL, type TaskActionDescriptor, type TaskActionKey } from "@/lib/planner/tasks/task-legality";
 import type { TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FieldHelp, Select } from "@/components/ui/input";
+import { DropdownMenu, type DropdownItem } from "@/components/ui/dropdown-menu";
+import { EditTaskDialog } from "./edit-task-dialog";
 import type { AssignChoices, TaskCommandTarget } from "./task-command-target";
 
 const CONFLICT_MESSAGE = "This item was already updated. Refreshing…";
@@ -59,11 +61,13 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
   const [blockerReason, setBlockerReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null); // which control is in-flight (spinner target)
+  const [editOpen, setEditOpen] = useState(false);
 
   const intentRef = useRef<CommandIntent>(IDLE);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const areaTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null); // the Actions ▾ button (focus-return target)
 
   const today = agencyToday();
   const base: Base = { taskId: target.taskId, expectedAggregateVersion: target.aggregateVersion };
@@ -220,66 +224,55 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
     }
   }
 
-  function renderActionButton(a: TaskActionDescriptor) {
-    const label = TASK_ACTION_LABEL[a.key];
-    const common = { key: a.key, type: "button" as const, size: "sm" as const, variant: "ghost" as const, disabled: submitting };
-    if (a.kind === "instant") {
-      const active = submitting && activeKey === a.key;
-      return (
-        <Button {...common} loading={active} aria-busy={active || undefined} onClick={() => onInstant(a.key)} aria-label={`${label} “${target.title}”`}>
-          {label}
-        </Button>
-      );
-    }
-    if (a.kind === "date") {
-      const key = a.key === "reschedule" ? "reschedule" : "schedule";
-      return (
-        <Button {...common} aria-expanded={openArea === "date" && dateKey === key} onClick={(e) => openDate(key, e.currentTarget)} aria-label={`${label} “${target.title}”`}>
-          {label}
-        </Button>
-      );
-    }
-    if (a.kind === "delete") {
-      return (
-        <Button
-          {...common}
-          className="text-red-600 hover:bg-red-50 hover:text-red-700"
-          aria-expanded={openArea === "delete"}
-          onClick={(e) => openDelete(e.currentTarget)}
-          aria-label={`Delete “${target.title}”`}
-        >
-          {label}
-        </Button>
-      );
-    }
-    return (
-      <Button {...common} aria-expanded={openArea === "block"} onClick={(e) => openBlock(e.currentTarget)} aria-label={`${label} “${target.title}”`}>
-        {label}
-      </Button>
-    );
+  /** Trigger a legal action from the menu (routes to the right instant/inline flow).
+   *  Inline flows return focus to the Actions ▾ trigger when they close. */
+  function onMenuAction(a: TaskActionDescriptor) {
+    const trigger = menuTriggerRef.current;
+    if (a.kind === "instant") onInstant(a.key);
+    else if (a.kind === "date") openDate(a.key === "reschedule" ? "reschedule" : "schedule", trigger);
+    else if (a.kind === "block") openBlock(trigger);
+    else if (a.kind === "delete") openDelete(trigger);
   }
 
   if (actions.length === 0) return null;
 
+  // One visible PRIMARY action (Complete for active work, Unblock for waiting);
+  // every other legal action moves into the compact Actions ▾ menu, with Edit and
+  // (when available) Assign, and the destructive Delete separated at the bottom.
+  const primaryKey = primaryActionKey(target.status);
+  const primary = primaryKey ? actions.find((a) => a.key === primaryKey) : undefined;
+  const menuItems: DropdownItem[] = [];
+  for (const a of actions) {
+    if (a.key === primaryKey || a.key === "delete") continue;
+    menuItems.push({ key: a.key, label: TASK_ACTION_LABEL[a.key], onSelect: () => onMenuAction(a) });
+  }
+  menuItems.push({ key: "edit", label: "Edit", onSelect: () => setEditOpen(true) });
+  if (assign && assign.admins.length > 1) menuItems.push({ key: "assign", label: "Assign", onSelect: () => openAssign(menuTriggerRef.current) });
+  const deleteAction = actions.find((a) => a.key === "delete");
+  if (deleteAction) {
+    menuItems.push({ type: "separator", key: "sep-delete" });
+    menuItems.push({ key: "delete", label: "Delete", destructive: true, onSelect: () => openDelete(menuTriggerRef.current) });
+  }
+
   return (
     <>
-      {/* Grows beside the title on desktop; wraps to a full-width line and flows
-          across the row on narrow screens (up to six actions must never overflow). */}
-      <div className="flex min-w-0 basis-full flex-wrap items-center justify-end gap-1 sm:basis-auto">
-        {actions.map(renderActionButton)}
-        {assign && assign.admins.length > 1 ? (
+      {/* Compact cluster — stays out of the title's way (shrink-0), so the task
+          content owns the row width. Inline flows still open full-width below. */}
+      <div className="flex shrink-0 items-center gap-1.5">
+        {primary ? (
           <Button
             type="button"
             size="sm"
-            variant="ghost"
             disabled={submitting}
-            aria-expanded={openArea === "assign"}
-            onClick={(e) => openAssign(e.currentTarget)}
-            aria-label={`Assign “${target.title}”`}
+            loading={submitting && activeKey === primary.key}
+            aria-busy={submitting && activeKey === primary.key ? true : undefined}
+            onClick={() => onInstant(primary.key)}
+            aria-label={`${TASK_ACTION_LABEL[primary.key]} “${target.title}”`}
           >
-            Assign
+            {TASK_ACTION_LABEL[primary.key]}
           </Button>
         ) : null}
+        <DropdownMenu label="Actions" items={menuItems} align="end" disabled={submitting} triggerRef={menuTriggerRef} aria-label={`Actions for “${target.title}”`} />
       </div>
 
       {openArea === "date" && (
@@ -427,6 +420,11 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
           {message ? <FieldHelp className="text-red-600">{message}</FieldHelp> : null}
         </div>
       )}
+
+      {/* Mounted only while open so the form always initialises from the CURRENT
+          target (never a stale draft, and never diffing a stale form against a
+          refreshed target — which could silently revert a concurrent edit). */}
+      {editOpen && <EditTaskDialog open onClose={() => setEditOpen(false)} target={target} />}
     </>
   );
 }

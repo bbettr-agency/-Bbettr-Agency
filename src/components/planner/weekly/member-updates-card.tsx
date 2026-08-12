@@ -15,9 +15,10 @@ function ItemRow({ it, onDelete, deleting }: { it: WeeklyUpdateItem; onDelete: (
           <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-300" aria-hidden />
         )}
         <div className="min-w-0">
-          <p className="truncate text-sm text-ink-800">{it.text}</p>
+          {/* The completed-work description is the point of this page — let it wrap. */}
+          <p className="text-sm text-ink-800 break-words">{it.text}</p>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-500">
-            <span className="truncate">{it.clientName ?? INTERNAL_CLIENT_LABEL}</span>
+            <span className="break-words">{it.clientName ?? INTERNAL_CLIENT_LABEL}</span>
             <span className="text-ink-300">·</span>
             <span>{it.dateLabel}</span>
             {it.source === "manual" ? (
