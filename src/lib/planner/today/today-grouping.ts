@@ -1,40 +1,49 @@
 /**
  * Deterministic Today task grouping (pure). Single placement — a task is never
- * shown twice. Overdue is a derived warning, not a status: an overdue (non-waiting)
- * task is lifted into Overdue and removed from Planned/In Progress. Waiting always
- * stays in Waiting/Blocked (visible, not actionable) even when overdue. Completed-
- * today tasks are a separate, pre-filtered input.
+ * shown twice. Placement is status-first so transitions are unambiguous: starting
+ * a task moves it to In Progress, blocking it to Waiting, completing it to
+ * Completed Today. Active (non-terminal) scheduled/overdue work splits by origin:
+ * recurring occurrences (isRecurring) go to Reminders, everything else to To-do's
+ * for Today. Overdue tasks are NOT a separate section — they fold into their
+ * status/origin bucket and the row itself shows the "Overdue · due X" marker.
+ * Completed-today is a separate, pre-filtered input.
  *
- * Groups (locked, in display order): Overdue · In Progress · Planned for today ·
- * Completed today · Waiting / Blocked.
+ * Sections (locked, in display order): Reminders · To-do's for Today · In Progress ·
+ * Waiting / Blocked · Completed Today. Meetings are rendered above these, outside
+ * this module. `alwaysShow` sections render even when empty (with `emptyLabel`);
+ * Waiting/Blocked is shown only when it has tasks.
  */
 import type { TaskView } from "@/lib/planner/tasks/task-view";
 import type { TaskPriority } from "@/lib/database.types";
 
-export type TodayGroupKey = "overdue" | "in_progress" | "planned_today" | "completed_today" | "waiting";
+export type TodayGroupKey = "reminders" | "todos" | "in_progress" | "waiting" | "completed_today";
 
 export interface TodayGroup {
   key: TodayGroupKey;
   label: string;
   tasks: TaskView[];
+  /** Shown inside the card when the section is visible but empty. */
+  emptyLabel: string;
+  /** When true the section renders even with zero tasks (day-at-a-glance). */
+  alwaysShow: boolean;
 }
 
-const ORDER: { key: TodayGroupKey; label: string }[] = [
-  { key: "overdue", label: "Overdue" },
-  { key: "in_progress", label: "In Progress" },
-  { key: "planned_today", label: "Planned for today" },
-  { key: "completed_today", label: "Completed today" },
-  { key: "waiting", label: "Waiting / Blocked" },
+const ORDER: { key: TodayGroupKey; label: string; emptyLabel: string; alwaysShow: boolean }[] = [
+  { key: "reminders", label: "Reminders", emptyLabel: "No reminders due today.", alwaysShow: true },
+  { key: "todos", label: "To-do's for Today", emptyLabel: "Nothing scheduled for today.", alwaysShow: true },
+  { key: "in_progress", label: "In Progress", emptyLabel: "Nothing in progress.", alwaysShow: true },
+  { key: "waiting", label: "Waiting / Blocked", emptyLabel: "", alwaysShow: false },
+  { key: "completed_today", label: "Completed Today", emptyLabel: "Nothing completed yet.", alwaysShow: true },
 ];
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { critical: 0, high: 1, normal: 2, low: 3 };
 
-function activeGroupFor(v: TaskView): Exclude<TodayGroupKey, "completed_today"> | null {
+/** Single-placement bucket for an ACTIVE Today task (never completed here). */
+function activeGroupFor(v: TaskView): Exclude<TodayGroupKey, "completed_today"> {
   if (v.status === "waiting") return "waiting";
-  if (v.isOverdue) return "overdue";
   if (v.status === "in_progress") return "in_progress";
-  if (v.status === "planned" || v.status === "scheduled") return "planned_today";
-  return null;
+  // planned or scheduled (may be overdue): split by origin.
+  return v.isRecurring ? "reminders" : "todos";
 }
 
 function cmpDateAsc(a: string | null, b: string | null): number {
@@ -53,19 +62,20 @@ function cmpActive(a: TaskView, b: TaskView): number {
   return a.title.localeCompare(b.title);
 }
 
-/** Group active Today members + completed-today into ordered, non-empty groups. */
+/**
+ * Group active Today members + completed-today into the ordered sections. Unlike
+ * the old behaviour, EMPTY sections are retained (the renderer decides visibility
+ * via `alwaysShow`), so the page shows the whole day at a glance.
+ */
 export function groupToday(active: TaskView[], completedToday: TaskView[]): TodayGroup[] {
   const buckets = new Map<TodayGroupKey, TaskView[]>(ORDER.map(({ key }) => [key, []]));
-  for (const v of active) {
-    const g = activeGroupFor(v);
-    if (g) buckets.get(g)!.push(v);
-  }
+  for (const v of active) buckets.get(activeGroupFor(v))!.push(v);
   buckets.set(
     "completed_today",
     completedToday.slice().sort((a, b) => cmpDateAsc(b.completedAt, a.completedAt)) // most recently completed first
   );
-  for (const key of ["overdue", "in_progress", "planned_today", "waiting"] as const) buckets.get(key)!.sort(cmpActive);
-  return ORDER.map(({ key, label }) => ({ key, label, tasks: buckets.get(key)! })).filter((g) => g.tasks.length > 0);
+  for (const key of ["reminders", "todos", "in_progress", "waiting"] as const) buckets.get(key)!.sort(cmpActive);
+  return ORDER.map((g) => ({ ...g, tasks: buckets.get(g.key)! }));
 }
 
 /** Actionable Today tasks (active, non-waiting, non-completed) — the queue NBA/progress use. */
