@@ -60,6 +60,19 @@ export function legalActionsFor(status: TaskStatus): TaskActionDescriptor[] {
   }
 }
 
+/**
+ * The single PRIMARY action a row surfaces beside the Actions menu:
+ * Complete for active work (planned/scheduled/in_progress), Unblock for waiting,
+ * none for statuses with no controls. Every other legal action lives in the menu.
+ * Pure — the state machine still re-validates whatever the row dispatches.
+ */
+export function primaryActionKey(status: TaskStatus): TaskActionKey | null {
+  const legal = legalActionsFor(status);
+  if (legal.length === 0) return null;
+  if (status === "waiting") return "unblock";
+  return legal.some((a) => a.key === "complete") ? "complete" : null;
+}
+
 /** Human labels for the action buttons (kept with the descriptor so pages stay consistent). */
 export const TASK_ACTION_LABEL: Record<TaskActionKey, string> = {
   start: "Start",

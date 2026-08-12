@@ -1,4 +1,4 @@
-import type { TaskStatus } from "@/lib/database.types";
+import type { TaskPriority, TaskStatus } from "@/lib/database.types";
 
 /**
  * The minimal, serializable command target a task row hands to its client command
@@ -13,6 +13,10 @@ export type TaskCommandTarget = {
   aggregateVersion: number;
   status: TaskStatus;
   title: string;
+  /** Current editable fields (for the Edit modal to prefill + diff). Never the raw row. */
+  description?: string | null;
+  priority?: TaskPriority;
+  criticalReason?: string | null;
 };
 
 /**

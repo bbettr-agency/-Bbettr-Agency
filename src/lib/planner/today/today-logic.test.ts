@@ -9,7 +9,7 @@ import type { TodayMeeting } from "./today-meeting";
 
 function v(o: Partial<TaskView> & Pick<TaskView, "id" | "status">): TaskView {
   return {
-    title: o.title ?? `${o.status}-${o.id}`, priority: "normal", criticalReason: null, scheduledDate: null,
+    title: o.title ?? `${o.status}-${o.id}`, priority: "normal", criticalReason: null, description: null, scheduledDate: null,
     dueDate: null, estimatedMinutes: null, isOverdue: false, isWaiting: o.status === "waiting",
     blockedSince: null, ownerDisplay: null, assigneeDisplay: null, isCompleted: o.status === "completed",
     completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 1, ...o,

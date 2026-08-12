@@ -35,6 +35,7 @@ import { listAdminTeam } from "@/lib/planner/team";
 import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { createRecurringDefinition, activateRecurringDefinition } from "@/lib/planner/recurrence/definitions";
 import { generateForDefinitionId } from "@/lib/planner/recurrence/generator";
+import type { TaskCommand } from "@/lib/planner/tasks/state-machine";
 import type { Profile, RecurrenceRuleUnit, TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
@@ -42,6 +43,8 @@ const MY_TASKS_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/tasks", "/ad
 // A new recurring occurrence can surface anywhere a scheduled task does.
 const RECUR_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner/today", "/admin/planner/week", "/admin/planner/tasks", "/admin/planner/team", "/admin/planner"];
 const RECURRENCE_UNITS: RecurrenceRuleUnit[] = ["day", "week", "month"];
+// An edit can surface anywhere a task appears (Inbox included).
+const EDIT_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner/today", "/admin/planner/week", "/admin/planner/tasks", "/admin/planner/team", "/admin/planner"];
 
 /** The minimal target every My Tasks lifecycle action needs (never actor/owner/workspace). */
 type MyTaskTarget = { taskId: string; expectedAggregateVersion: number; idempotencyKey: string };
@@ -267,6 +270,74 @@ export async function triageAndScheduleRecurringAction(input: {
        activation itself failed the first occurrence still exists as a task */
   }
   return linked;
+}
+
+/**
+ * Edit a task's Title / Description / Priority through the EXISTING commands
+ * (RenameTask, EditDescription, ChangePriority) — never a raw DB write. Only the
+ * fields that ACTUALLY changed are dispatched (the caller sends `undefined` for
+ * unchanged fields), so a no-op Edit produces zero commands/events. Each command
+ * is a separate aggregate step, so the returned aggregate_version is THREADED into
+ * the next command; a distinct per-field idempotency key keeps each retry-safe.
+ * admin/workspace/concurrency/audit all come from the standard command pipeline;
+ * this works from Inbox too (RenameTask/EditDescription/ChangePriority are legal
+ * from any non-archived status). Editing a recurring OCCURRENCE edits only that
+ * task — it never touches recurring_definitions.
+ */
+export async function editTaskAction(input: {
+  taskId: string;
+  expectedAggregateVersion: number;
+  idempotencyKey: string;
+  title?: string; // present ⇒ changed
+  description?: string | null; // present ⇒ changed (null/empty clears)
+  priority?: TaskPriority; // present ⇒ changed
+  criticalReason?: string | null; // required only when priority === 'critical'
+}): Promise<TaskActionResult> {
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  const key = typeof input.idempotencyKey === "string" ? input.idempotencyKey.trim() : "";
+  if (key.length === 0) return failWith("InvalidCommand");
+
+  const steps: { command: TaskCommand; suffix: string }[] = [];
+  if (input.title !== undefined) {
+    if (typeof input.title !== "string" || input.title.trim().length === 0) return failWith("InvalidCommand");
+    steps.push({ command: { type: "RenameTask", title: input.title.trim() }, suffix: "title" });
+  }
+  if (input.description !== undefined) {
+    const d = typeof input.description === "string" && input.description.trim().length > 0 ? input.description : null;
+    steps.push({ command: { type: "EditDescription", description: d }, suffix: "desc" });
+  }
+  if (input.priority !== undefined) {
+    if (input.priority === "critical" && !(typeof input.criticalReason === "string" && input.criticalReason.trim().length > 0)) {
+      return failWith("InvalidCommand");
+    }
+    steps.push({
+      command: { type: "ChangePriority", priority: input.priority, critical_reason: input.priority === "critical" ? input.criticalReason ?? null : null },
+      suffix: "prio",
+    });
+  }
+
+  // No-op edit: nothing changed → no commands, no events.
+  if (steps.length === 0) {
+    return { ok: true, outcome: "applied", taskId: input.taskId, aggregateVersion: input.expectedAggregateVersion };
+  }
+
+  let version = input.expectedAggregateVersion;
+  let last: Extract<TaskActionResult, { ok: true }> | null = null;
+  for (const step of steps) {
+    const res = await runTaskCommand({
+      command: step.command,
+      task_id: input.taskId,
+      expected_aggregate_version: version,
+      idempotency_key: `${key}:${step.suffix}`,
+    });
+    if (!res.ok) return res; // stop on first failure (earlier steps already committed)
+    version = res.aggregateVersion;
+    last = res;
+  }
+  for (const p of EDIT_REVALIDATE) revalidatePath(p);
+  return last as TaskActionResult;
 }
 
 // ── My Tasks lifecycle actions (C-My Tasks) ──────────────────────────────────

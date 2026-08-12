@@ -24,7 +24,7 @@ describe("toTaskView", () => {
       id: "t1", title: "Alpha", status: "planned", priority: "normal", criticalReason: null,
       scheduledDate: "2026-08-04", dueDate: null, estimatedMinutes: 30, isOverdue: false,
       isWaiting: false, blockedSince: null, ownerDisplay: "Eloff", assigneeDisplay: null,
-      isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 3,
+      isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, description: null, aggregateVersion: 3,
     });
   });
   it("flags recurring occurrences and resolves the cadence label", () => {

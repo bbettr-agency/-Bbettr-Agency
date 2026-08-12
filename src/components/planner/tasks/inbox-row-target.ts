@@ -8,8 +8,14 @@
  * the row was rendered at (for optimistic concurrency), and the title (for
  * accessible control labels). The full Task record is NEVER handed to the client.
  */
+import type { TaskPriority } from "@/lib/database.types";
+
 export type InboxRowTarget = {
   taskId: string;
   aggregateVersion: number;
   title: string;
+  /** Current editable fields (for the Edit modal to prefill + diff). Never the raw row. */
+  description?: string | null;
+  priority?: TaskPriority;
+  criticalReason?: string | null;
 };
