@@ -54,7 +54,7 @@ export function DropdownMenu({
   const close = React.useCallback((returnFocus = true) => {
     setOpen(false);
     if (returnFocus) triggerRef.current?.focus();
-  }, []);
+  }, [triggerRef]);
 
   // Outside-click (pointerdown so it beats the click) + Escape.
   React.useEffect(() => {
