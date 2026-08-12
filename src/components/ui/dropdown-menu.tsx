@@ -29,6 +29,7 @@ export function DropdownMenu({
   size = "sm",
   variant = "outline",
   triggerClassName,
+  triggerRef: externalTriggerRef,
   "aria-label": ariaLabel,
 }: {
   label: string;
@@ -38,11 +39,14 @@ export function DropdownMenu({
   size?: ButtonProps["size"];
   variant?: ButtonProps["variant"];
   triggerClassName?: string;
+  /** Optional shared ref to the trigger button (so callers can return focus to it). */
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
   "aria-label"?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const internalTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const triggerRef = externalTriggerRef ?? internalTriggerRef;
   const itemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
   const actionable = items.filter(isItem);
@@ -118,7 +122,7 @@ export function DropdownMenu({
   return (
     <div ref={rootRef} className="relative inline-block">
       <Button
-        ref={triggerRef}
+        ref={triggerRef as React.RefObject<HTMLButtonElement>}
         type="button"
         size={size}
         variant={variant}

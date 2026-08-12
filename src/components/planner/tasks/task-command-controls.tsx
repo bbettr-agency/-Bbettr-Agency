@@ -67,6 +67,7 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
   const dateInputRef = useRef<HTMLInputElement>(null);
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const areaTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null); // the Actions ▾ button (focus-return target)
 
   const today = agencyToday();
   const base: Base = { taskId: target.taskId, expectedAggregateVersion: target.aggregateVersion };
@@ -223,12 +224,14 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
     }
   }
 
-  /** Trigger a legal action from the menu (routes to the right instant/inline flow). */
+  /** Trigger a legal action from the menu (routes to the right instant/inline flow).
+   *  Inline flows return focus to the Actions ▾ trigger when they close. */
   function onMenuAction(a: TaskActionDescriptor) {
+    const trigger = menuTriggerRef.current;
     if (a.kind === "instant") onInstant(a.key);
-    else if (a.kind === "date") openDate(a.key === "reschedule" ? "reschedule" : "schedule", null);
-    else if (a.kind === "block") openBlock(null);
-    else if (a.kind === "delete") openDelete(null);
+    else if (a.kind === "date") openDate(a.key === "reschedule" ? "reschedule" : "schedule", trigger);
+    else if (a.kind === "block") openBlock(trigger);
+    else if (a.kind === "delete") openDelete(trigger);
   }
 
   if (actions.length === 0) return null;
@@ -244,11 +247,11 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
     menuItems.push({ key: a.key, label: TASK_ACTION_LABEL[a.key], onSelect: () => onMenuAction(a) });
   }
   menuItems.push({ key: "edit", label: "Edit", onSelect: () => setEditOpen(true) });
-  if (assign && assign.admins.length > 1) menuItems.push({ key: "assign", label: "Assign", onSelect: () => openAssign(null) });
+  if (assign && assign.admins.length > 1) menuItems.push({ key: "assign", label: "Assign", onSelect: () => openAssign(menuTriggerRef.current) });
   const deleteAction = actions.find((a) => a.key === "delete");
   if (deleteAction) {
     menuItems.push({ type: "separator", key: "sep-delete" });
-    menuItems.push({ key: "delete", label: "Delete", destructive: true, onSelect: () => openDelete(null) });
+    menuItems.push({ key: "delete", label: "Delete", destructive: true, onSelect: () => openDelete(menuTriggerRef.current) });
   }
 
   return (
@@ -269,7 +272,7 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
             {TASK_ACTION_LABEL[primary.key]}
           </Button>
         ) : null}
-        <DropdownMenu label="Actions" items={menuItems} align="end" disabled={submitting} aria-label={`Actions for “${target.title}”`} />
+        <DropdownMenu label="Actions" items={menuItems} align="end" disabled={submitting} triggerRef={menuTriggerRef} aria-label={`Actions for “${target.title}”`} />
       </div>
 
       {openArea === "date" && (
@@ -418,7 +421,10 @@ export function TaskCommandControls({ target, assign }: { target: TaskCommandTar
         </div>
       )}
 
-      <EditTaskDialog open={editOpen} onClose={() => setEditOpen(false)} target={target} />
+      {/* Mounted only while open so the form always initialises from the CURRENT
+          target (never a stale draft, and never diffing a stale form against a
+          refreshed target — which could silently revert a concurrent edit). */}
+      {editOpen && <EditTaskDialog open onClose={() => setEditOpen(false)} target={target} />}
     </>
   );
 }

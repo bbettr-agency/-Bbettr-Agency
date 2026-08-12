@@ -366,19 +366,22 @@ export function InboxTriageControls({
         </div>
       )}
 
-      <EditTaskDialog
-        open={editOpen}
-        onClose={() => setEditOpen(false)}
-        target={{
-          taskId: target.taskId,
-          aggregateVersion: target.aggregateVersion,
-          status: "inbox",
-          title: target.title,
-          description: target.description,
-          priority: target.priority,
-          criticalReason: target.criticalReason,
-        }}
-      />
+      {/* Mounted only while open so the form always initialises from the current target. */}
+      {editOpen && (
+        <EditTaskDialog
+          open
+          onClose={() => setEditOpen(false)}
+          target={{
+            taskId: target.taskId,
+            aggregateVersion: target.aggregateVersion,
+            status: "inbox",
+            title: target.title,
+            description: target.description,
+            priority: target.priority,
+            criticalReason: target.criticalReason,
+          }}
+        />
+      )}
     </>
   );
 }
