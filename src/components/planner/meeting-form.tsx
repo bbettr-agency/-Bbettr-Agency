@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Plus, X } from "lucide-react";
+import { AlertCircle, Plus, X, Check, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Textarea, Select, Label, FieldHelp } from "@/components/ui/input";
@@ -87,6 +87,9 @@ export function MeetingForm({ initial }: { initial?: MeetingFormInitial }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // On a successful CREATE we show an honest outcome (incl. confirmation-email
+  // status) instead of navigating away immediately.
+  const [created, setCreated] = useState<{ emailSent?: boolean; emailWarning?: string } | null>(null);
 
   const tz0 = initial?.timeZone ?? "Africa/Johannesburg";
   const [timeZone, setTimeZone] = useState(tz0);
@@ -128,12 +131,46 @@ export function MeetingForm({ initial }: { initial?: MeetingFormInitial }) {
       const res = initial
         ? await updateMeetingAction(initial.id, input)
         : await createMeetingAction(input, getIdempotencyKey());
-      if (res.error) setError(res.error);
-      else {
-        if (!initial) clearIdempotencyKey();
+      if (res.error) {
+        setError(res.error);
+      } else if (initial) {
         router.push("/admin/planner/meetings");
+      } else {
+        clearIdempotencyKey();
+        setCreated({ emailSent: res.emailSent, emailWarning: res.emailWarning });
       }
     });
+  }
+
+  if (created) {
+    return (
+      <Card>
+        <CardContent className="space-y-4 py-8">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+            <CheckCircle className="h-5 w-5 text-emerald-600" /> Meeting scheduled
+          </div>
+          <ul className="space-y-1.5 text-sm">
+            <li className="flex items-center gap-2 text-ink-600">
+              <Check className="h-4 w-4 shrink-0 text-emerald-600" /> Added to the Portal and calendar projection.
+            </li>
+            {created.emailWarning ? (
+              <li className="flex items-start gap-2 text-amber-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {created.emailWarning}
+              </li>
+            ) : created.emailSent ? (
+              <li className="flex items-center gap-2 text-ink-600">
+                <Check className="h-4 w-4 shrink-0 text-emerald-600" /> Confirmation email sent to attendees.
+              </li>
+            ) : (
+              <li className="text-ink-500">No attendees to email.</li>
+            )}
+          </ul>
+          <Button type="button" onClick={() => router.push("/admin/planner/meetings")}>
+            View meetings
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
