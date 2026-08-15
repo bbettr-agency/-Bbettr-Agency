@@ -1019,12 +1019,12 @@ export async function provisionPortalAccessAction(
     });
   }
 
-  // D1: portal access immediately opens onboarding for new clients.
-  await advanceIntakeStatus(clientId, "onboarding_started", ["portal_access_sent"], {
-    type: "onboarding_started",
-    title: "Onboarding opened",
-  });
-
+  // NOTE: granting Portal Access records ONLY the portal-access facts
+  // (intake_status=portal_access_sent + granted_at + welcome email). It must NOT
+  // advance to onboarding_started — granting access is not "onboarding started".
+  // The client's own first login advances portal_access_sent → onboarding_started
+  // (see intake-login-advance + the client layout), so onboarding still opens for
+  // them; it just isn't falsely pre-marked here.
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return {

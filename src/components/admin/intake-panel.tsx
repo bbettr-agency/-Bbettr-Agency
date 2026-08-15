@@ -10,7 +10,7 @@ import {
   linkDealToClientAction,
   unlinkDealAction,
 } from "@/app/(admin)/admin/actions";
-import { INTAKE_STEPS, intakeIndex } from "@/lib/intake";
+import { INTAKE_DISPLAY_ORDER, intakeLabel, intakeStepDone, type IntakeStepFacts } from "@/lib/intake";
 import { Button } from "@/components/ui/button";
 import type { IntakeStatus } from "@/lib/database.types";
 import type { DealLink, LinkableDeal } from "@/lib/admin-queries";
@@ -72,8 +72,18 @@ export function IntakePanel({
     });
   }
 
-  const currentIdx = intakeIndex(intakeStatus);
-  const nextStep = INTAKE_STEPS[currentIdx + 1];
+  // Each step's completion is derived from its OWN independent fact (never the
+  // ordinal intake_status), so granting Portal Access can never paint contract /
+  // invoice / onboarding steps as done.
+  const stepFacts: IntakeStepFacts = {
+    intakeStatus,
+    contractStatus,
+    hasPortalAccess,
+    invoiceStatus: dealLink?.invoiceStatus ?? null,
+    paymentStatus: dealLink?.paymentStatus ?? null,
+  };
+  const steps = INTAKE_DISPLAY_ORDER.map((key) => ({ key, label: intakeLabel(key), done: intakeStepDone(key, stepFacts) }));
+  const firstTodoKey = steps.find((s) => !s.done)?.key ?? null;
 
   function advanceTo(status: IntakeStatus) {
     setError(null);
@@ -106,7 +116,7 @@ export function IntakePanel({
       {/* Status chips */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatusChip label="Onboarding Type" value={onboardingType === "new" ? "New Client" : "Legacy Client"} />
-        <StatusChip label="Intake Status" value={INTAKE_STEPS[currentIdx]?.label ?? intakeStatus} />
+        <StatusChip label="Intake Status" value={intakeLabel(intakeStatus)} />
         <StatusChip label="Contract" value={CONTRACT_LABEL[contractStatus] ?? contractStatus} />
         <StatusChip label="Portal Access" value={hasPortalAccess ? "Active" : "Not provisioned"} tone={hasPortalAccess ? "good" : "muted"} />
         <StatusChip label="Welcome Email" value={welcomeEmailSent ? "Sent" : "Not sent"} tone={welcomeEmailSent ? "good" : "muted"} />
@@ -216,12 +226,11 @@ export function IntakePanel({
         )}
       </div>
 
-      {/* Pipeline progression */}
+      {/* Pipeline progression — every dot reflects that step's OWN fact, in a
+          display order that surfaces Portal Access first. */}
       <ol className="relative space-y-1">
-        {INTAKE_STEPS.map((step, i) => {
-          const done = i < currentIdx;
-          const current = i === currentIdx;
-          const isNext = nextStep && step.key === nextStep.key;
+        {steps.map((step) => {
+          const current = step.key === firstTodoKey;
           return (
             <li
               key={step.key}
@@ -233,24 +242,24 @@ export function IntakePanel({
               <span
                 className={cn(
                   "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs",
-                  done
+                  step.done
                     ? "bg-brand-500 text-white"
                     : current
                       ? "bg-amber-100 text-amber-600 ring-2 ring-amber-200"
                       : "border-2 border-ink-200 text-ink-300"
                 )}
               >
-                {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : i + 1}
+                {step.done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
               </span>
               <span
                 className={cn(
                   "flex-1 text-sm",
-                  current ? "font-semibold text-ink-900" : done ? "text-ink-600" : "text-ink-400"
+                  current ? "font-semibold text-ink-900" : step.done ? "text-ink-600" : "text-ink-400"
                 )}
               >
                 {step.label}
               </span>
-              {isNext && <NextAction />}
+              <StepAction stepKey={step.key} isCurrent={current} />
             </li>
           );
         })}
@@ -258,33 +267,32 @@ export function IntakePanel({
     </div>
   );
 
-  function NextAction() {
-    if (!nextStep) return null;
-    // The Portal Access step provisions the login + welcome email.
-    if (nextStep.key === "portal_access_sent" && !hasPortalAccess) {
+  /**
+   * The action for a step. Portal Access provisions the login (real action, shown
+   * whenever access is not yet active). Onboarding steps can be advanced manually
+   * (their dot IS the ordinal). Contract/invoice steps complete via their own
+   * workflows (Contracts / linked deal), so they carry no manual "mark" button here.
+   */
+  function StepAction({ stepKey, isCurrent }: { stepKey: IntakeStatus; isCurrent: boolean }) {
+    if (stepKey === "portal_access_sent") {
+      if (hasPortalAccess) return null;
       return (
         <Button size="sm" loading={pending} onClick={grantAccess}>
           <KeyRound className="h-4 w-4" /> Grant Portal Access
         </Button>
       );
     }
-    const label =
-      nextStep.key === "invoice_sent"
-        ? "Mark Invoice Sent"
-        : nextStep.key === "paid"
-          ? "Mark Invoice Paid"
-          : `Mark ${nextStep.label}`;
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        loading={pending}
-        onClick={() => advanceTo(nextStep.key)}
-      >
-        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-        {label}
-      </Button>
-    );
+    // Onboarding steps are the only ones whose completion IS the ordinal, so a
+    // manual advance is honest here; only offer it on the current step.
+    if (isCurrent && (stepKey === "onboarding_started" || stepKey === "onboarding_submitted")) {
+      return (
+        <Button variant="outline" size="sm" loading={pending} onClick={() => advanceTo(stepKey)}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          Mark {intakeLabel(stepKey)}
+        </Button>
+      );
+    }
+    return null;
   }
 }
 
