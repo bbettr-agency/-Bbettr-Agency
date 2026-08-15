@@ -259,7 +259,7 @@ export function IntakePanel({
               >
                 {step.label}
               </span>
-              <StepAction stepKey={step.key} isCurrent={current} />
+              <StepAction stepKey={step.key} />
             </li>
           );
         })}
@@ -270,10 +270,13 @@ export function IntakePanel({
   /**
    * The action for a step. Portal Access provisions the login (real action, shown
    * whenever access is not yet active). Onboarding steps can be advanced manually
-   * (their dot IS the ordinal). Contract/invoice steps complete via their own
-   * workflows (Contracts / linked deal), so they carry no manual "mark" button here.
+   * (their dot IS the ordinal) — gated on their OWN precondition (access granted →
+   * can start; started → can submit), NOT on being the global first-todo, so the
+   * admin override stays reachable even when an upstream fact (e.g. an EFT invoice)
+   * never lands. Contract/invoice steps complete via their own workflows (Contracts
+   * / linked deal), so they carry no manual "mark" button here.
    */
-  function StepAction({ stepKey, isCurrent }: { stepKey: IntakeStatus; isCurrent: boolean }) {
+  function StepAction({ stepKey }: { stepKey: IntakeStatus }) {
     if (stepKey === "portal_access_sent") {
       if (hasPortalAccess) return null;
       return (
@@ -282,9 +285,12 @@ export function IntakePanel({
         </Button>
       );
     }
-    // Onboarding steps are the only ones whose completion IS the ordinal, so a
-    // manual advance is honest here; only offer it on the current step.
-    if (isCurrent && (stepKey === "onboarding_started" || stepKey === "onboarding_submitted")) {
+    const onboardingStarted = intakeStepDone("onboarding_started", stepFacts);
+    const onboardingSubmitted = intakeStepDone("onboarding_submitted", stepFacts);
+    const showMark =
+      (stepKey === "onboarding_started" && hasPortalAccess && !onboardingStarted) ||
+      (stepKey === "onboarding_submitted" && onboardingStarted && !onboardingSubmitted);
+    if (showMark) {
       return (
         <Button variant="outline" size="sm" loading={pending} onClick={() => advanceTo(stepKey)}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
