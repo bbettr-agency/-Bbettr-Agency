@@ -71,6 +71,29 @@ describe("createMeetingAction — confirmation email", () => {
     expect(res.emailWarning).toContain("RESEND_API_KEY is not configured");
   });
 
+  it("PARTIAL failure (1 of 2 attendees fails) → emailSent false + warning (not 'sent to every attendee')", async () => {
+    vi.mocked(sendMeetingConfirmationEmail)
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, error: "recipient rejected" });
+    const res = await createMeetingAction(
+      input({ attendees: [{ email: "a@x.com", displayName: "A" }, { email: "b@x.com", displayName: "B" }] }),
+      "idem-partial"
+    );
+    expect(res.ok).toBe(true);
+    expect(res.emailSent).toBe(false); // NOT true — one attendee did not receive it
+    expect(res.emailWarning).toContain("could not be delivered");
+    expect(sendMeetingConfirmationEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("a thrown send is contained — meeting stays created (structurally non-fatal)", async () => {
+    vi.mocked(sendMeetingConfirmationEmail).mockRejectedValue(new Error("boom"));
+    const res = await createMeetingAction(input(), "idem-throw");
+    expect(res.ok).toBe(true); // meeting committed regardless of the throw
+    expect(res.id).toBe(MID);
+    expect(res.emailSent).toBe(false);
+    expect(res.emailWarning).toContain("could not be delivered");
+  });
+
   it("no attendees → no email sent, still a clean success", async () => {
     const res = await createMeetingAction(input({ attendees: [] }), "idem-3");
     expect(res.ok).toBe(true);

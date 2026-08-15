@@ -76,8 +76,10 @@ async function sendConfirmations(
     else if (!firstError) firstError = res.error;
   }
   if (sent === attendees.length) return { emailSent: true };
+  // Any failure (partial or total) is NOT "sent to every attendee" — report false
+  // and surface a warning so the UI never claims a clean send.
   return {
-    emailSent: sent > 0,
+    emailSent: false,
     emailWarning: firstError
       ? `Confirmation email could not be delivered: ${firstError}`
       : "Confirmation email could not be delivered.",
@@ -161,10 +163,17 @@ export async function createMeetingAction(
   }
 
   await project(newId, correlationId);
-  // Branded Portal confirmation — non-fatal, honest status. Sent only on a genuine
-  // first create (the idempotency replay/adopt paths above return earlier, so a
-  // refresh/double-click never re-sends).
-  const email = await sendConfirmations(newId, input, attendees);
+  // Branded Portal confirmation — STRUCTURALLY non-fatal (the meeting is already
+  // committed): the send is wrapped so it can never throw out of the action and
+  // leave a created meeting reported as failed. Sent only on a genuine first create
+  // (the idempotency replay/adopt paths above return earlier, so a refresh/double-
+  // click never re-sends).
+  let email: { emailSent?: boolean; emailWarning?: string } = {};
+  try {
+    email = await sendConfirmations(newId, input, attendees);
+  } catch {
+    email = { emailSent: false, emailWarning: "Confirmation email could not be delivered." };
+  }
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id: newId, ...email };
 }
