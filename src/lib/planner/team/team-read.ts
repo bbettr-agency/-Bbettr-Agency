@@ -25,8 +25,9 @@ import { AGENCY_TZ, formatDayLabel, formatTimeInZone, localDate, todayDate, week
 import { listMeetings } from "@/lib/planner/meetings/queries";
 import { scheduledMeetings, meetingsTodayCount } from "@/lib/planner/meetings/meeting-metrics";
 import { listAdminTeam } from "@/lib/planner/team";
+import { getRecurrenceLabels } from "@/lib/planner/recurrence/recurrence-read";
 import { TaskError } from "@/lib/planner/tasks/errors";
-import { toFacet, buildSummary, type MemberMeetingLite, type MemberMeta, type TeamSummary, type TeamTaskFacet } from "./team-board";
+import { toFacet, buildSummary, buildTeamReminders, splitFacets, type MemberMeetingLite, type MemberMeta, type TeamReminderGroup, type TeamSummary, type TeamTaskFacet } from "./team-board";
 import type { CompletedFacet } from "./team-detail";
 import type { Task, TaskStatus } from "@/lib/database.types";
 
@@ -41,7 +42,8 @@ type CompletedRow = Pick<Task, "id" | "title" | "owner_user_id" | "assignee_id" 
 export interface TeamViewData {
   today: string; // agency-local YYYY-MM-DD (drives overdue + hydration-stable flags)
   summary: TeamSummary;
-  facets: TeamTaskFacet[]; // active tasks (workload)
+  facets: TeamTaskFacet[]; // NORMAL active tasks (workload) — recurring reminders excluded
+  reminders: TeamReminderGroup[]; // recurring reminders grouped by admin (read-only section)
   completed: CompletedFacet[]; // completed today (for the Level-2 "Completed today" section)
   members: MemberMeta[];
 }
@@ -98,11 +100,18 @@ export async function getTeamViewData(now: Date = new Date()): Promise<TeamViewD
 
   const nameById = new Map(team.map((m) => [m.id, m.fullName]));
 
-  const facets: TeamTaskFacet[] = [];
+  // Cadence labels for the reminder tags (one batched, RLS-scoped read; reused from Today).
+  const recurrenceLabels = await getRecurrenceLabels(activeTasks.map((t) => t.recurrence_definition_id)).catch(() => new Map<string, string>());
+
+  const allFacets: TeamTaskFacet[] = [];
   for (const t of activeTasks) {
-    const f = toFacet(t, nameById, clientNameById, today, weekStart, weekEnd);
-    if (f) facets.push(f);
+    const f = toFacet(t, nameById, clientNameById, today, weekStart, weekEnd, recurrenceLabels);
+    if (f) allFacets.push(f);
   }
+  // Workload/summary/client-workload use NORMAL facets only; reminders get their
+  // own read-only section so they never inflate operational workload.
+  const { normal: facets, reminders: reminderFacets } = splitFacets(allFacets);
+  const reminders = buildTeamReminders(reminderFacets);
 
   const completed: CompletedFacet[] = [];
   for (const r of completedToday) {
@@ -140,5 +149,5 @@ export async function getTeamViewData(now: Date = new Date()): Promise<TeamViewD
   // member resolution (a completed task always has an owner per the
   // owner-beyond-inbox constraint, but the summary must not silently drop one).
   const summary = buildSummary(facets, members.length, completedToday.length, meetingsToday);
-  return { today, summary, facets, completed, members };
+  return { today, summary, facets, reminders, completed, members };
 }

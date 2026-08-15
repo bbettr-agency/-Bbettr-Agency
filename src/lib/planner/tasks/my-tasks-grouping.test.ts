@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupMyTasks } from "./my-tasks-grouping";
+import { groupMyTasks, splitReminders } from "./my-tasks-grouping";
 import type { TaskView } from "./task-view";
 
 function v(overrides: Partial<TaskView> = {}): TaskView {
@@ -10,6 +10,40 @@ function v(overrides: Partial<TaskView> = {}): TaskView {
   };
 }
 const groupOf = (groups: ReturnType<typeof groupMyTasks>, id: string) => groups.find((g) => g.tasks.some((t) => t.id === id))?.key;
+
+describe("splitReminders — separate recurring from normal work", () => {
+  it("partitions by isRecurring", () => {
+    const { normal, reminders } = splitReminders([
+      v({ id: "a", isRecurring: false }),
+      v({ id: "r1", isRecurring: true }),
+      v({ id: "b", isRecurring: false }),
+      v({ id: "r2", isRecurring: true }),
+    ]);
+    expect(normal.map((t) => t.id).sort()).toEqual(["a", "b"]);
+    expect(reminders.map((t) => t.id).sort()).toEqual(["r1", "r2"]);
+  });
+  it("grouping the normal set excludes reminders (12 reminders don't read as active tasks)", () => {
+    const views = [v({ id: "task", status: "scheduled" }), ...Array.from({ length: 12 }, (_, i) => v({ id: `rem${i}`, status: "scheduled", isRecurring: true }))];
+    const { normal, reminders } = splitReminders(views);
+    const groups = groupMyTasks(normal);
+    expect(reminders).toHaveLength(12);
+    expect(groups.reduce((n, g) => n + g.tasks.length, 0)).toBe(1); // only the one real task
+    expect(groupOf(groups, "task")).toBe("scheduled");
+    expect(groups.some((g) => g.tasks.some((t) => t.isRecurring))).toBe(false);
+  });
+  it("reminders come back sorted (priority → due → scheduled → title)", () => {
+    const { reminders } = splitReminders([
+      v({ id: "lo", isRecurring: true, priority: "low", scheduledDate: "2026-09-01" }),
+      v({ id: "hi", isRecurring: true, priority: "high", scheduledDate: "2026-09-15" }),
+    ]);
+    expect(reminders.map((t) => t.id)).toEqual(["hi", "lo"]); // high priority first
+  });
+  it("empty + all-normal + all-reminders", () => {
+    expect(splitReminders([])).toEqual({ normal: [], reminders: [] });
+    expect(splitReminders([v({ id: "x" })]).reminders).toEqual([]);
+    expect(splitReminders([v({ id: "y", isRecurring: true })]).normal).toEqual([]);
+  });
+});
 
 describe("groupMyTasks — single placement", () => {
   it("places each status in its own group, ordered Overdue→InProgress→Scheduled→Planned→Waiting", () => {

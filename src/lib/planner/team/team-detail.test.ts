@@ -22,6 +22,8 @@ function facet(o: Partial<TeamTaskFacet> = {}): TeamTaskFacet {
     isThisWeek: o.isThisWeek ?? false,
     isActionable: o.isActionable ?? status !== "waiting",
     estimatedMinutes: o.estimatedMinutes ?? null,
+    isRecurring: o.isRecurring ?? false,
+    recurrenceLabel: o.recurrenceLabel ?? null,
   };
 }
 function completed(o: Partial<CompletedFacet> = {}): CompletedFacet {

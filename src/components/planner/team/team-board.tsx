@@ -13,18 +13,21 @@
  * baked in server-side, SSR == first client render (no hydration drift).
  */
 import { useMemo, useState } from "react";
-import { computeBoard, type MemberMeta, type TeamBoardFilter, type TeamTaskFacet } from "@/lib/planner/team/team-board";
+import { computeBoard, type MemberMeta, type TeamBoardFilter, type TeamReminderGroup, type TeamTaskFacet } from "@/lib/planner/team/team-board";
 import { buildMemberDetail, type CompletedFacet } from "@/lib/planner/team/team-detail";
 import { TeamFilters } from "./team-filters";
 import { MemberBand } from "./member-band";
 import { ClientWorkloadList } from "./client-workload-list";
+import { TeamReminders } from "./team-reminders";
 
 export function TeamBoard({
   facets,
+  reminders,
   completed,
   members,
 }: {
   facets: TeamTaskFacet[];
+  reminders: TeamReminderGroup[];
   completed: CompletedFacet[];
   members: MemberMeta[];
 }) {
@@ -79,6 +82,11 @@ export function TeamBoard({
           <p className="text-sm text-ink-500">No team members match these filters.</p>
         )}
       </section>
+
+      {/* Team Reminders — recurring reminders grouped by admin (read-only). Kept out
+          of Team Workload so reminder-heavy admins don't read as overloaded. Static:
+          not narrowed by the workload filter. */}
+      <TeamReminders groups={reminders} />
 
       {/* Client Workload (cross-client lens) */}
       <section className="space-y-3">
