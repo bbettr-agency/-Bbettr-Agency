@@ -86,10 +86,18 @@ export function GrantAccessModal({
         </div>
       ) : result?.ok ? (
         <div className="space-y-4">
+          {/* On email failure the action returns ok:true WITH an error note, so don't
+              claim the email was sent — surface the note and let the admin share the
+              temporary password manually. */}
           <p className="text-sm text-ink-600">
-            Portal access granted{result.password ? " — a welcome email was sent. Temporary password (shown once):" : "."}
+            Portal access granted{result.error ? "." : result.password ? " — a welcome email was sent." : "."}
           </p>
-          {result.password ? <CopyField value={result.password} /> : null}
+          {result.password ? (
+            <>
+              <p className="text-xs text-ink-500">Temporary password (shown once):</p>
+              <CopyField value={result.password} />
+            </>
+          ) : null}
           {result.error ? <p className="text-xs text-amber-700">{result.error}</p> : null}
           <div className="flex justify-end">
             <Button type="button" size="sm" onClick={goToClient}>

@@ -31,7 +31,10 @@ export function NewClientForm() {
     setError(null);
     const formData = new FormData(e.currentTarget);
     const clientName = String(formData.get("name") ?? "").trim() || "The client";
-    const passwordProvided = String(formData.get("password") ?? "").trim().length > 0;
+    // Match createClientAction's inline-provision condition exactly (`if (password
+    // && legacy)`, untrimmed), so `alreadyHasAccess` never disagrees with what the
+    // server actually did.
+    const passwordProvided = String(formData.get("password") ?? "").length > 0;
     startTransition(async () => {
       const res = await createClientAction(formData);
       if (res.error && !res.ok) {
