@@ -49,6 +49,17 @@ export interface TeamTaskFacet {
   isThisWeek: boolean; // scheduled within the agency week (overdue handled by filter)
   isActionable: boolean; // status !== 'waiting'
   estimatedMinutes: number | null;
+  /** True when this is a generated recurring reminder occurrence (recurrence_definition_id set). */
+  isRecurring: boolean;
+  /** Cadence label ("Monthly") when resolvable; else null. Presentation only. */
+  recurrenceLabel: string | null;
+}
+
+/** A member's recurring reminders (read-only Team Reminders section). */
+export interface TeamReminderGroup {
+  memberId: string;
+  memberName: string;
+  reminders: TeamTaskFacet[];
 }
 
 /** A member's upcoming scheduled meeting (created_by = scheduler, NOT attendance). */
@@ -142,7 +153,8 @@ export function toFacet(
   clientNameById: ReadonlyMap<string, string>,
   today: string,
   weekStart: string,
-  weekEnd: string
+  weekEnd: string,
+  recurrenceLabelById?: ReadonlyMap<string, string>
 ): TeamTaskFacet | null {
   const status = task.status;
   if (status !== "planned" && status !== "scheduled" && status !== "in_progress" && status !== "waiting") {
@@ -169,7 +181,51 @@ export function toFacet(
     isThisWeek: scheduled != null && scheduled >= weekStart && scheduled <= weekEnd,
     isActionable: status !== "waiting",
     estimatedMinutes: task.estimated_minutes,
+    isRecurring: task.recurrence_definition_id != null,
+    recurrenceLabel: task.recurrence_definition_id != null ? recurrenceLabelById?.get(task.recurrence_definition_id) ?? null : null,
   };
+}
+
+/**
+ * Split facets into NORMAL operational work (recurrence_definition_id == null) and
+ * recurring REMINDERS. The whole workload board — member counts, current focus,
+ * capacity, client workload and the summary — is computed from NORMAL facets only,
+ * so recurring reminders never inflate "who is overloaded". Reminders surface in
+ * their own read-only Team Reminders section. Presentation split only; every
+ * reminder remains a real task underneath.
+ */
+export function splitFacets(facets: readonly TeamTaskFacet[]): { normal: TeamTaskFacet[]; reminders: TeamTaskFacet[] } {
+  const normal: TeamTaskFacet[] = [];
+  const reminders: TeamTaskFacet[] = [];
+  for (const f of facets) (f.isRecurring ? reminders : normal).push(f);
+  return { normal, reminders };
+}
+
+/** Nulls sort last for ascending date order. */
+function cmpDateAscNullsLast(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Group recurring reminders by responsible admin for the read-only Team Reminders
+ * section. Members sort by name; within a member, reminders sort soonest-first
+ * (scheduled → due → title). Retains client name, cadence, date and overdue flag.
+ */
+export function buildTeamReminders(reminderFacets: readonly TeamTaskFacet[]): TeamReminderGroup[] {
+  const byMember = new Map<string, TeamReminderGroup>();
+  for (const f of reminderFacets) {
+    const g = byMember.get(f.memberId);
+    if (g) g.reminders.push(f);
+    else byMember.set(f.memberId, { memberId: f.memberId, memberName: f.memberName, reminders: [f] });
+  }
+  const groups = [...byMember.values()];
+  for (const g of groups) {
+    g.reminders.sort((a, b) => cmpDateAscNullsLast(a.scheduledDate, b.scheduledDate) || cmpDateAscNullsLast(a.dueDate, b.dueDate) || a.title.localeCompare(b.title));
+  }
+  return groups.sort((a, b) => a.memberName.localeCompare(b.memberName) || (a.memberId < b.memberId ? -1 : 1));
 }
 
 /**

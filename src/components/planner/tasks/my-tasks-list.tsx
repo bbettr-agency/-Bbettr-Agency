@@ -5,7 +5,8 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getMyTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
-import { groupMyTasks } from "@/lib/planner/tasks/my-tasks-grouping";
+import { groupMyTasks, splitReminders } from "@/lib/planner/tasks/my-tasks-grouping";
+import { getRecurrenceLabels } from "@/lib/planner/recurrence/recurrence-read";
 import { AGENCY_TZ, todayDate } from "@/lib/planner/meetings/date-views";
 import { TaskRow } from "./task-row";
 import type { AssignChoices } from "./task-command-target";
@@ -46,10 +47,19 @@ export async function MyTasksList() {
     ? { admins: teamResult.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id }
     : undefined;
 
-  const views = tasksResult.value.map((t) => toTaskView(t, nameById, today));
-  const groups = groupMyTasks(views);
+  // Cadence labels for the "Reminder · Monthly" pill (one batched, RLS-scoped read).
+  const recurrenceLabels = await getRecurrenceLabels(tasksResult.value.map((t) => t.recurrence_definition_id)).catch(() => new Map<string, string>());
+  const views = tasksResult.value.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
 
-  if (groups.length === 0) {
+  // Recurring reminders are real, fully-actionable tasks — but they get their own
+  // block so normal sections read as normal work only (12 invoice reminders must
+  // not inflate the active-task picture).
+  const { normal, reminders } = splitReminders(views);
+  const groups = groupMyTasks(normal);
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "";
+  const remindersTitle = firstName ? `Reminders for ${firstName}` : "Reminders";
+
+  if (groups.length === 0 && reminders.length === 0) {
     return (
       <EmptyState
         icon={ListChecks}
@@ -61,21 +71,48 @@ export async function MyTasksList() {
 
   return (
     <div className="space-y-4">
-      {groups.map((g) => (
-        <Card key={g.key}>
+      {groups.length > 0 ? (
+        groups.map((g) => (
+          <Card key={g.key}>
+            <CardHeader className="flex-row items-center justify-between gap-3">
+              <CardTitle>{g.label}</CardTitle>
+              <span className="text-xs text-ink-500">{g.tasks.length}</span>
+            </CardHeader>
+            <CardContent>
+              <ul className="divide-y divide-ink-100">
+                {g.tasks.map((v) => (
+                  <TaskRow key={v.id} view={v} now={now} assign={assign} />
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ))
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Normal Work</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="py-2 text-sm text-ink-500">Nothing outstanding.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {reminders.length > 0 ? (
+        <Card>
           <CardHeader className="flex-row items-center justify-between gap-3">
-            <CardTitle>{g.label}</CardTitle>
-            <span className="text-xs text-ink-500">{g.tasks.length}</span>
+            <CardTitle>{remindersTitle}</CardTitle>
+            <span className="text-xs text-ink-500">{reminders.length}</span>
           </CardHeader>
           <CardContent>
             <ul className="divide-y divide-ink-100">
-              {g.tasks.map((v) => (
+              {reminders.map((v) => (
                 <TaskRow key={v.id} view={v} now={now} assign={assign} />
               ))}
             </ul>
           </CardContent>
         </Card>
-      ))}
+      ) : null}
     </div>
   );
 }

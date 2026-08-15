@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   toFacet,
+  splitFacets,
+  buildTeamReminders,
   summarizeEstimates,
   pickCurrentFocus,
   buildClientWorkloads,
@@ -42,6 +44,8 @@ function facet(o: Partial<TeamTaskFacet> = {}): TeamTaskFacet {
     isThisWeek: o.isThisWeek ?? false,
     isActionable: o.isActionable ?? status !== "waiting",
     estimatedMinutes: o.estimatedMinutes ?? null,
+    isRecurring: o.isRecurring ?? false,
+    recurrenceLabel: o.recurrenceLabel ?? null,
   };
 }
 
@@ -103,6 +107,63 @@ describe("toFacet", () => {
 });
 
 // ── capacity: summarizeEstimates ─────────────────────────────────────────────
+describe("toFacet — recurrence flag", () => {
+  it("sets isRecurring + recurrenceLabel from recurrence_definition_id + the labels map", () => {
+    const labels = new Map([["def-1", "Monthly"]]);
+    const f = toFacet(task({ recurrence_definition_id: "def-1", occurrence_slot: "2026-08-25" }), names, clients, TODAY, WEEK_START, WEEK_END, labels)!;
+    expect(f.isRecurring).toBe(true);
+    expect(f.recurrenceLabel).toBe("Monthly");
+    const normal = toFacet(task({ recurrence_definition_id: null }), names, clients, TODAY, WEEK_START, WEEK_END, labels)!;
+    expect(normal.isRecurring).toBe(false);
+    expect(normal.recurrenceLabel).toBeNull();
+    // recurring but no label map entry → flagged, null label
+    const noLabel = toFacet(task({ recurrence_definition_id: "def-x", occurrence_slot: "s" }), names, clients, TODAY, WEEK_START, WEEK_END)!;
+    expect(noLabel.isRecurring).toBe(true);
+    expect(noLabel.recurrenceLabel).toBeNull();
+  });
+});
+
+describe("splitFacets + workload excludes reminders", () => {
+  it("partitions normal vs recurring", () => {
+    const { normal, reminders } = splitFacets([
+      facet({ id: "a" }),
+      facet({ id: "r1", isRecurring: true }),
+      facet({ id: "r2", isRecurring: true }),
+    ]);
+    expect(normal.map((f) => f.id)).toEqual(["a"]);
+    expect(reminders.map((f) => f.id)).toEqual(["r1", "r2"]);
+  });
+  it("summary/client-workload over the NORMAL set exclude reminders (no inflated Active)", () => {
+    const mixed = [
+      facet({ id: "real1", clientId: "c1", clientName: "Vision Motors" }),
+      facet({ id: "real2", clientId: "c1", clientName: "Vision Motors" }),
+      facet({ id: "rem1", clientId: "c1", clientName: "Vision Motors", isRecurring: true }),
+      facet({ id: "rem2", isRecurring: true }),
+    ];
+    const { normal } = splitFacets(mixed);
+    expect(buildSummary(normal, 2, 0, 0).activeTasks).toBe(2); // NOT 4
+    const vm = buildClientWorkloads(normal).find((c) => c.clientId === "c1")!;
+    expect(vm.active).toBe(2); // the invoice reminder does not count as client delivery work
+  });
+});
+
+describe("buildTeamReminders — grouped by admin, read-only fields", () => {
+  it("groups recurring reminders by member, members sorted by name, reminders soonest-first", () => {
+    const groups = buildTeamReminders([
+      facet({ id: "e2", memberId: "eloff", memberName: "Eloff Sander", isRecurring: true, recurrenceLabel: "Monthly", scheduledDate: "2026-09-15", clientName: "Cuisine Foods" }),
+      facet({ id: "e1", memberId: "eloff", memberName: "Eloff Sander", isRecurring: true, recurrenceLabel: "Monthly", scheduledDate: "2026-08-25", clientName: "Vision Motors" }),
+      facet({ id: "a1", memberId: "ashwin", memberName: "Ashwin Erasmus", isRecurring: true, recurrenceLabel: "Monthly", scheduledDate: "2026-09-01" }),
+    ]);
+    expect(groups.map((g) => g.memberName)).toEqual(["Ashwin Erasmus", "Eloff Sander"]);
+    const eloff = groups.find((g) => g.memberId === "eloff")!;
+    expect(eloff.reminders.map((r) => r.id)).toEqual(["e1", "e2"]); // 25 Aug before 15 Sep
+    expect(eloff.reminders[0]).toMatchObject({ recurrenceLabel: "Monthly", clientName: "Vision Motors" });
+  });
+  it("empty input → no groups", () => {
+    expect(buildTeamReminders([])).toEqual([]);
+  });
+});
+
 describe("summarizeEstimates (capacity ruling)", () => {
   it("null minutes when NO in-scope task has an estimate; counts them", () => {
     const s = summarizeEstimates([facet(), facet(), facet()]);

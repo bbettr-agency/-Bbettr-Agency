@@ -66,6 +66,22 @@ function cmpWithin(a: TaskView, b: TaskView): number {
   return a.title.localeCompare(b.title);
 }
 
+/**
+ * Split My Tasks views into NORMAL operational work (recurrence_definition_id ==
+ * null) and recurring REMINDERS (isRecurring). Presentation separation only — the
+ * reminders are ordinary, fully-actionable tasks; this just keeps them out of the
+ * normal sections (so 12 invoice reminders don't read as 12 active tasks) and into
+ * a dedicated "Reminders" block. Reminders are returned in the same stable order
+ * the groups use (priority → due → scheduled → title).
+ */
+export function splitReminders(views: TaskView[]): { normal: TaskView[]; reminders: TaskView[] } {
+  const normal: TaskView[] = [];
+  const reminders: TaskView[] = [];
+  for (const v of views) (v.isRecurring ? reminders : normal).push(v);
+  reminders.sort(cmpWithin);
+  return { normal, reminders };
+}
+
 /** Group views into ordered, non-empty groups with single placement and stable in-group order. */
 export function groupMyTasks(views: TaskView[]): MyTaskGroup[] {
   const buckets = new Map<MyTaskGroupKey, TaskView[]>(ORDER.map(({ key }) => [key, []]));

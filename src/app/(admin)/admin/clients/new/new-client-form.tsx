@@ -9,6 +9,7 @@ import { SERVICE_LIST } from "@/lib/services";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FieldHelp } from "@/components/ui/input";
+import { GrantAccessModal } from "./grant-access-modal";
 
 export function NewClientForm() {
   const router = useRouter();
@@ -16,6 +17,10 @@ export function NewClientForm() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [onboardingType, setOnboardingType] = useState<"legacy" | "new">("legacy");
+  // On successful create we open the post-create Grant Portal Access modal instead
+  // of navigating straight to the client (Flow A). `alreadyHasAccess` is true only
+  // when a legacy client was just provisioned inline (password typed + no warning).
+  const [created, setCreated] = useState<{ clientId: string; clientName: string; alreadyHasAccess: boolean } | null>(null);
 
   function toggle(id: string) {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -25,6 +30,11 @@ export function NewClientForm() {
     e.preventDefault();
     setError(null);
     const formData = new FormData(e.currentTarget);
+    const clientName = String(formData.get("name") ?? "").trim() || "The client";
+    // Match createClientAction's inline-provision condition exactly (`if (password
+    // && legacy)`, untrimmed), so `alreadyHasAccess` never disagrees with what the
+    // server actually did.
+    const passwordProvided = String(formData.get("password") ?? "").length > 0;
     startTransition(async () => {
       const res = await createClientAction(formData);
       if (res.error && !res.ok) {
@@ -32,10 +42,15 @@ export function NewClientForm() {
         return;
       }
       if (res.error && res.ok) {
-        // Created but with a non-fatal warning (e.g. login provisioning).
+        // Created but with a non-fatal warning (e.g. inline login provisioning failed).
         setError(res.error);
       }
-      if (res.clientId) router.push(`/admin/clients/${res.clientId}`);
+      if (res.clientId) {
+        // A legacy client created WITH a password is already provisioned inline (only
+        // when there was no provisioning warning); otherwise offer to grant now.
+        const alreadyHasAccess = onboardingType === "legacy" && passwordProvided && !res.error;
+        setCreated({ clientId: res.clientId, clientName, alreadyHasAccess });
+      }
     });
   }
 
@@ -239,6 +254,15 @@ export function NewClientForm() {
           Create client
         </Button>
       </div>
+
+      {created ? (
+        <GrantAccessModal
+          clientId={created.clientId}
+          clientName={created.clientName}
+          alreadyHasAccess={created.alreadyHasAccess}
+          onClose={() => setCreated(null)}
+        />
+      ) : null}
     </form>
   );
 }
