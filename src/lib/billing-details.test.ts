@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  validateBillingInput,
+  validateBillingDraft,
   resolveEffectiveEmail,
   isBillingComplete,
   normaliseBillingInput,
@@ -18,53 +18,36 @@ const input = (over: Partial<BillingDetailsInput> = {}): BillingDetailsInput => 
   ...over,
 });
 
-describe("validateBillingInput", () => {
-  it("requires invoice_name", () => {
-    const v = validateBillingInput(input({ billing_email: "a@b.com" }), null);
-    expect(v.ok).toBe(false);
-    expect(v.errors.invoice_name).toBeTruthy();
+describe("validateBillingDraft (PARTIAL saves allowed)", () => {
+  it("allows a completely empty draft", () => {
+    expect(validateBillingDraft(input()).ok).toBe(true);
   });
-
-  it("accepts a complete profile with a valid explicit billing email", () => {
-    const v = validateBillingInput(input({ invoice_name: "Acme (Pty) Ltd", billing_email: "accounts@acme.co.za" }), null);
-    expect(v.ok).toBe(true);
+  it("allows an invoice_name-only draft (no email)", () => {
+    expect(validateBillingDraft(input({ invoice_name: "Acme" })).ok).toBe(true);
   });
-
-  it("rejects an invalid explicit billing email", () => {
-    const v = validateBillingInput(input({ invoice_name: "Acme", billing_email: "not-an-email" }), null);
+  it("allows a VAT + address only draft (no invoice_name / no email)", () => {
+    expect(validateBillingDraft(input({ vat_number: "4123456789", billing_address: "1 Main Rd" })).ok).toBe(true);
+  });
+  it("allows company registration only", () => {
+    expect(validateBillingDraft(input({ company_registration_number: "2015/123456/07" })).ok).toBe(true);
+  });
+  it("allows same-as-contact with no contact email at DRAFT stage (completeness is separate)", () => {
+    expect(validateBillingDraft(input({ billing_email_same_as_contact: true })).ok).toBe(true);
+  });
+  it("REJECTS a malformed explicit billing email", () => {
+    const v = validateBillingDraft(input({ billing_email: "not-an-email" }));
     expect(v.ok).toBe(false);
     expect(v.errors.billing_email).toMatch(/valid billing email/i);
   });
-
-  it("requires a billing email when not same-as-contact and none given", () => {
-    const v = validateBillingInput(input({ invoice_name: "Acme" }), "contact@acme.com");
-    expect(v.ok).toBe(false);
-    expect(v.errors.billing_email).toMatch(/required/i);
+  it("does NOT check billing_email format when same-as-contact (it's dropped)", () => {
+    expect(validateBillingDraft(input({ billing_email: "junk", billing_email_same_as_contact: true })).ok).toBe(true);
   });
-
-  it("same-as-contact is complete when the account email is valid", () => {
-    const v = validateBillingInput(input({ invoice_name: "Acme", billing_email_same_as_contact: true }), "contact@acme.com");
-    expect(v.ok).toBe(true);
+  it("REJECTS over-length supplied fields (mirrors 0055 limits)", () => {
+    expect(validateBillingDraft(input({ invoice_name: "x".repeat(BILLING_LIMITS.invoice_name + 1) })).errors.invoice_name).toBeTruthy();
+    expect(validateBillingDraft(input({ vat_number: "9".repeat(BILLING_LIMITS.vat_number + 1) })).errors.vat_number).toBeTruthy();
   });
-
-  it("same-as-contact is REJECTED when the account email is missing/invalid", () => {
-    expect(validateBillingInput(input({ invoice_name: "Acme", billing_email_same_as_contact: true }), null).ok).toBe(false);
-    expect(validateBillingInput(input({ invoice_name: "Acme", billing_email_same_as_contact: true }), "bad").ok).toBe(false);
-  });
-
-  it("optional fields are genuinely optional", () => {
-    const v = validateBillingInput(input({ invoice_name: "Acme", billing_email: "a@b.com" }), null);
-    expect(v.ok).toBe(true); // reg/vat/contact/address/po/instructions all blank
-  });
-
-  it("enforces the same length limits as the DB (0055)", () => {
-    const v = validateBillingInput(
-      input({ invoice_name: "x".repeat(BILLING_LIMITS.invoice_name + 1), billing_email: "a@b.com" }),
-      null
-    );
-    expect(v.ok).toBe(false);
-    expect(v.errors.invoice_name).toMatch(/characters or fewer/i);
-    expect(validateBillingInput(input({ invoice_name: "Acme", billing_email: "a@b.com", vat_number: "9".repeat(BILLING_LIMITS.vat_number + 1) }), null).errors.vat_number).toBeTruthy();
+  it("accepts a valid explicit billing email", () => {
+    expect(validateBillingDraft(input({ invoice_name: "Acme (Pty) Ltd", billing_email: "accounts@acme.co.za" })).ok).toBe(true);
   });
 });
 

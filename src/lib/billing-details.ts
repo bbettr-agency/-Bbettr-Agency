@@ -144,33 +144,27 @@ export interface BillingValidation {
 }
 
 /**
- * Authoritative validation for a COMPLETE billing profile. Required:
- * invoice_name + an effective billing email (same-as-contact with a valid
- * contact_email, OR a valid explicit billing_email). Everything else optional.
- * Also enforces the 0055 length limits.
+ * DRAFT validation — the SAVE path. Permissive by design: a partial billing
+ * profile may be saved (invoice_name only, VAT + address only, etc.), mirroring
+ * the intentionally-nullable 0055 columns and the onboarding principle
+ * "draft = permissive, final submit = strict". It only rejects SUPPLIED values
+ * that are malformed:
+ *   • an explicit billing_email (when NOT same-as-contact) must be a valid email;
+ *   • any supplied field must be within the 0055 length limits.
+ * It never requires invoice_name or an effective email — that is the strict
+ * `isBillingComplete` concern, enforced only at the onboarding submit gate.
  */
-export function validateBillingInput(
-  input: BillingDetailsInput,
-  contactEmail: string | null
-): BillingValidation {
+export function validateBillingDraft(input: BillingDetailsInput): BillingValidation {
   const errors: BillingValidation["errors"] = {};
 
-  if (!trimOrNull(input.invoice_name)) {
-    errors.invoice_name = "Invoice / company name is required.";
-  }
-
-  if (input.billing_email_same_as_contact) {
-    if (!contactEmail || !isValidEmail(contactEmail)) {
-      errors.billing_email =
-        "Your account email isn't available or valid — please enter a billing email instead.";
-    }
-  } else {
+  // Email FORMAT only when an explicit address is supplied (same-as-contact
+  // drops billing_email to NULL on normalise, so it isn't checked here).
+  if (!input.billing_email_same_as_contact) {
     const email = trimOrNull(input.billing_email);
-    if (!email) errors.billing_email = "A billing email is required.";
-    else if (!isValidEmail(email)) errors.billing_email = "Enter a valid billing email.";
+    if (email && !isValidEmail(email)) errors.billing_email = "Enter a valid billing email.";
   }
 
-  // Length guards (mirror 0055) on the trimmed values.
+  // Length guards (mirror 0055) on the trimmed supplied values.
   (Object.keys(BILLING_LIMITS) as (keyof typeof BILLING_LIMITS)[]).forEach((k) => {
     const v = trimOrNull(input[k] as string);
     if (v && v.length > BILLING_LIMITS[k]) {

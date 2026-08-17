@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { Pencil, Receipt } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { BillingDetailsForm } from "@/components/billing/billing-details-form";
 import { adminSaveBillingDetailsAction } from "@/lib/billing-details-actions";
 import {
   toBillingInput,
   resolveEffectiveEmail,
+  isBillingComplete,
   type BillingDetailsView,
 } from "@/lib/billing-details";
 
@@ -37,12 +39,18 @@ export function BillingDetailsCard({
         contactEmail
       )
     : null;
+  const complete = isBillingComplete(initial, contactEmail);
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Receipt className="h-4 w-4 text-brand-600" /> Billing Details
+          {complete ? (
+            <Badge tone="success">Complete</Badge>
+          ) : (
+            <Badge tone="warning">Missing required invoicing details</Badge>
+          )}
         </CardTitle>
         <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
           <Pencil className="h-4 w-4" /> Edit

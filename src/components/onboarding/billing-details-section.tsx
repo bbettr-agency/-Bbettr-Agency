@@ -40,10 +40,12 @@ export function BillingDetailsSection({
               </p>
             </div>
           </div>
-          {complete && (
+          {complete ? (
             <Badge tone="success">
               <CheckCircle2 className="h-3.5 w-3.5" /> Complete
             </Badge>
+          ) : (
+            <Badge tone="warning">Needs invoice name + billing email</Badge>
           )}
         </div>
 

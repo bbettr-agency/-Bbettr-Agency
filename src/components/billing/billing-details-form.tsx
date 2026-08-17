@@ -5,7 +5,7 @@ import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, FieldHelp } from "@/components/ui/input";
 import {
-  validateBillingInput,
+  validateBillingDraft,
   isValidEmail,
   type BillingDetailsInput,
 } from "@/lib/billing-details";
@@ -51,8 +51,10 @@ export function BillingDetailsForm({
   function submit() {
     setGeneral(null);
     setSaved(false);
-    // Client-side pre-validation for instant feedback; the server re-validates.
-    const v = validateBillingInput(form, contactEmail);
+    // DRAFT validation — partial profiles are allowed to save; only malformed
+    // supplied values block. Completeness is enforced at the onboarding submit
+    // gate, not here. The server re-validates the same way.
+    const v = validateBillingDraft(form);
     if (!v.ok) {
       setErrors(v.errors);
       return;
@@ -160,6 +162,11 @@ export function BillingDetailsForm({
         <FieldHelp>Optional.</FieldHelp>
         <FieldError msg={errors?.invoice_instructions} />
       </div>
+
+      <p className="text-xs text-ink-400">
+        You can save partial details now. An invoice name and billing email are
+        needed before you can submit your onboarding.
+      </p>
 
       {general && (
         <p className="flex items-start gap-1.5 text-sm text-red-600">
