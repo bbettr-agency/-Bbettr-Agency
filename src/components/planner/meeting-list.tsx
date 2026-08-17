@@ -6,8 +6,7 @@ import { MeetLink } from "./meet-link";
 import { MeetingRowActions } from "./meeting-row-actions";
 import { formatMeetingRange } from "@/lib/planner/meetings/date-views";
 import { deriveMeetingState, LIFECYCLE_META } from "@/lib/planner/meetings/lifecycle";
-import type { Meeting } from "@/lib/database.types";
-import type { SafeProjectionView } from "@/lib/planner/meetings/view-types";
+import type { SafeProjectionView, CalendarMeeting } from "@/lib/planner/meetings/view-types";
 
 /**
  * Reusable meeting list (Calendar / Today / This Week / Overview). Renders purely
@@ -22,7 +21,7 @@ export function MeetingList({
   emptyLabel = "No meetings.",
   now,
 }: {
-  meetings: Meeting[];
+  meetings: CalendarMeeting[];
   views: Map<string, SafeProjectionView>;
   showActions?: boolean;
   emptyLabel?: string;

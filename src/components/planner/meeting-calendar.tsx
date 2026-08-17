@@ -9,8 +9,7 @@ import {
   LIFECYCLE_TABS,
   type MeetingLifecycleState,
 } from "@/lib/planner/meetings/lifecycle";
-import type { Meeting } from "@/lib/database.types";
-import type { SafeProjectionView } from "@/lib/planner/meetings/view-types";
+import type { SafeProjectionView, CalendarMeeting } from "@/lib/planner/meetings/view-types";
 
 /**
  * The Calendar surface: one page, five derived tabs. Upcoming is the default;
@@ -24,7 +23,7 @@ export function MeetingCalendar({
   viewsObj,
   nowIso,
 }: {
-  meetings: Meeting[];
+  meetings: CalendarMeeting[];
   viewsObj: Record<string, SafeProjectionView>;
   nowIso: string;
 }) {
@@ -33,13 +32,13 @@ export function MeetingCalendar({
   const views = useMemo(() => new Map(Object.entries(viewsObj)), [viewsObj]);
 
   const groups = useMemo(() => {
-    const g: Record<MeetingLifecycleState, Meeting[]> = {
+    const g: Record<MeetingLifecycleState, CalendarMeeting[]> = {
       upcoming: [], needs_outcome: [], completed: [], no_show: [], cancelled: [],
     };
     for (const m of meetings) g[deriveMeetingState(m, now)].push(m);
     // Future-facing tabs soonest-first; past/archive tabs most-recent-first.
-    const asc = (a: Meeting, b: Meeting) => Date.parse(a.starts_at) - Date.parse(b.starts_at);
-    const desc = (a: Meeting, b: Meeting) => Date.parse(b.starts_at) - Date.parse(a.starts_at);
+    const asc = (a: CalendarMeeting, b: CalendarMeeting) => Date.parse(a.starts_at) - Date.parse(b.starts_at);
+    const desc = (a: CalendarMeeting, b: CalendarMeeting) => Date.parse(b.starts_at) - Date.parse(a.starts_at);
     g.upcoming.sort(asc);
     g.needs_outcome.sort(desc);
     g.completed.sort(desc);

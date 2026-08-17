@@ -4,6 +4,7 @@ import { CalendarClock, Plus } from "lucide-react";
 import { requirePlannerAccess } from "@/lib/planner/guard";
 import { isGoogleConfigured } from "@/lib/google";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
+import { toCalendarMeeting } from "@/lib/planner/meetings/view-types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,7 +55,7 @@ export default async function CalendarPage() {
         </Card>
       ) : (
         <MeetingCalendar
-          meetings={meetings}
+          meetings={meetings.map(toCalendarMeeting)}
           viewsObj={Object.fromEntries(views)}
           nowIso={new Date().toISOString()}
         />
