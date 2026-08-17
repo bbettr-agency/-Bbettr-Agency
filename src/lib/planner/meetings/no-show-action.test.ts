@@ -134,6 +134,18 @@ describe("sendNoShowFollowUpAction", () => {
     expect(sendNoShowFollowUpEmail).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-scheduled (e.g. cancelled) meeting — no email, no token issued", async () => {
+    // The status='scheduled' guard on the SELECT makes it resolve to nothing.
+    const rec: Record<string, unknown> = {};
+    vi.mocked(createClient).mockResolvedValue(
+      makeClient({ meetings: { rec, single: { data: null, error: null } } })
+    );
+    const res = await sendNoShowFollowUpAction(MID);
+    expect(res.error).toMatch(/no longer scheduled|not found/i);
+    expect(sendNoShowFollowUpEmail).not.toHaveBeenCalled();
+    expect(rec.updates).toBeUndefined(); // no token ever written
+  });
+
   it("errors when there are no attendees to follow up with", async () => {
     vi.mocked(createClient).mockResolvedValue(
       makeClient({ meetings: { single: { data: meeting, error: null } }, meeting_attendees: { settle: { data: [], error: null } } })

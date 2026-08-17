@@ -338,13 +338,17 @@ export async function sendNoShowFollowUpAction(id: string): Promise<MeetingActio
   await requireAdmin();
 
   const supabase = await createClient();
+  // Must still be a live, scheduled meeting: a cancelled one nulls its token, so
+  // issuing/emailing a fresh link for it would send a dead link (the token store
+  // below is status-guarded and would silently no-op). Reject it up front.
   const { data: meeting } = await supabase
     .from("meetings")
     .select("id, title, starts_at, ends_at, time_zone, no_show_at, no_show_followup_sent_at")
     .eq("id", id)
+    .eq("status", "scheduled")
     .is("deleted_at", null)
     .maybeSingle();
-  if (!meeting) return { error: "Meeting not found." };
+  if (!meeting) return { error: "Meeting not found, or it is no longer scheduled." };
   if (!meeting.no_show_at)
     return { error: "Mark the meeting as a no-show before sending a follow-up." };
 
@@ -394,10 +398,13 @@ export async function sendNoShowFollowUpAction(id: string): Promise<MeetingActio
   // usable link must never outlive an email that wholly failed to send. Do not
   // stamp — nothing went out.
   if (sent === 0) {
+    // Retire ONLY the token this call issued — keyed on our own hash so a
+    // concurrent re-issue whose email DID land isn't voided by our rollback.
     await supabase
       .from("meetings")
       .update({ reschedule_token_hash: null, reschedule_token_expires_at: null })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("reschedule_token_hash", token.tokenHash);
     revalidatePath(MEETINGS_PATH);
     revalidatePath(`${MEETINGS_PATH}/${id}`);
     return {
