@@ -12,7 +12,11 @@ import {
   sendNoShowFollowUpEmail,
 } from "@/lib/email/meeting-notifications";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
+import { issueRescheduleToken } from "./reschedule-token";
 import type { MeetingInput } from "./types";
+
+/** Canonical public base URL for building client-facing links (same default as notifications). */
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://portal.bbettragency.com";
 
 /**
  * Meetings server actions. Responsibility is strictly: validate → write Portal
@@ -352,6 +356,24 @@ export async function sendNoShowFollowUpAction(id: string): Promise<MeetingActio
   if (list.length === 0)
     return { error: "This meeting has no attendees to follow up with." };
 
+  // Issue a fresh single-use token and persist ONLY its hash + 14-day expiry.
+  // A fresh issue overwrites any prior hash, retiring an earlier outstanding
+  // link. Store BEFORE sending so the emailed URL is immediately live; if every
+  // send then fails we roll it back (below) so no usable orphan token survives.
+  const token = issueRescheduleToken();
+  const { error: tokenError } = await supabase
+    .from("meetings")
+    .update({
+      reschedule_token_hash: token.tokenHash,
+      reschedule_token_expires_at: token.expiresAt,
+    })
+    .eq("id", id)
+    .eq("status", "scheduled")
+    .is("deleted_at", null);
+  if (tokenError) return { error: tokenError.message };
+
+  const rescheduleUrl = `${APP_URL}/reschedule/${token.rawToken}`;
+
   let sent = 0;
   let firstError: string | undefined;
   for (const a of list) {
@@ -362,14 +384,35 @@ export async function sendNoShowFollowUpAction(id: string): Promise<MeetingActio
       startsAt: meeting.starts_at,
       endsAt: meeting.ends_at,
       timeZone: meeting.time_zone,
+      rescheduleUrl,
     });
     if (res.ok) sent += 1;
     else if (!firstError) firstError = res.error;
   }
 
-  // Stamp the first genuine send only (something actually went out) and preserve
-  // it thereafter — historical evidence, not a per-send timestamp.
-  if (sent > 0 && !meeting.no_show_followup_sent_at) {
+  // Total delivery failure → nobody received the raw token, so retire it: a
+  // usable link must never outlive an email that wholly failed to send. Do not
+  // stamp — nothing went out.
+  if (sent === 0) {
+    await supabase
+      .from("meetings")
+      .update({ reschedule_token_hash: null, reschedule_token_expires_at: null })
+      .eq("id", id);
+    revalidatePath(MEETINGS_PATH);
+    revalidatePath(`${MEETINGS_PATH}/${id}`);
+    return {
+      ok: true,
+      id,
+      emailSent: false,
+      emailWarning: firstError
+        ? `Follow-up could not be sent: ${firstError}`
+        : "Follow-up could not be sent.",
+    };
+  }
+
+  // At least one attendee received a working link. Stamp the first genuine send
+  // only, preserving it thereafter — historical evidence, not a per-send stamp.
+  if (!meeting.no_show_followup_sent_at) {
     await supabase
       .from("meetings")
       .update({ no_show_followup_sent_at: new Date().toISOString() })

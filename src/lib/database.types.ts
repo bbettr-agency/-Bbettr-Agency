@@ -1447,6 +1447,14 @@ export interface Database {
         Args: { p_meeting_id: string };
         Returns: string;
       };
+      // Atomic, service-role-only self-service reschedule (0053). Revalidates the
+      // token, guards against Portal double-booking under an advisory lock,
+      // applies the new window, clears no_show_at, and consumes the token.
+      // Returns the affected meeting id; raises on an invalid link / taken slot.
+      confirm_meeting_reschedule: {
+        Args: { p_token_hash: string; p_starts_at: string; p_ends_at: string };
+        Returns: string;
+      };
       // ── Planner Tasks domain (0036–0048) ────────────────────────────────
       // Admin-only permanent erase of a task (SECURITY DEFINER; re-checks
       // is_admin(); workspace-scoped). Sets deleted_at so the task disappears

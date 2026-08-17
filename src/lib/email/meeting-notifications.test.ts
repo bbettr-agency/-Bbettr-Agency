@@ -61,8 +61,8 @@ describe("sendMeetingConfirmationEmail", () => {
   });
 });
 
-describe("sendNoShowFollowUpEmail (Slice C — reply-to-arrange, no link)", () => {
-  it("sends a 'we missed you' follow-up with the missed date/time and NO self-service link", async () => {
+describe("sendNoShowFollowUpEmail (Slice D — secure reschedule CTA)", () => {
+  it("embeds the /reschedule/<raw-token> CTA and the missed date/time", async () => {
     const res = await sendNoShowFollowUpEmail({
       to: "vm@client.com",
       attendeeName: "Vision Motors",
@@ -70,14 +70,15 @@ describe("sendNoShowFollowUpEmail (Slice C — reply-to-arrange, no link)", () =
       startsAt: "2026-08-13T10:30:00Z", // 12:30 Africa/Johannesburg
       endsAt: "2026-08-13T11:30:00Z",
       timeZone: "Africa/Johannesburg",
+      rescheduleUrl: "https://portal.bbettragency.com/reschedule/RAW_TOKEN_VALUE",
     });
     expect(res.ok).toBe(true);
     const sent = lastSend();
-    expect(sent.subject).toBe("We missed you — let's reschedule: Strategy Meeting");
+    expect(sent.subject).toBe("Reschedule your meeting: Strategy Meeting");
     expect(sent.html).toContain("Vision Motors");
     expect(sent.html).toContain("13 August 2026");
     expect(sent.html).toContain("12:30");
-    expect(sent.html).toContain("reply to this email"); // reply-to-arrange (no link yet)
-    expect(sent.html).not.toContain("/reschedule/"); // Slice D adds the tokenized link
+    expect(sent.html).toContain("Reschedule Meeting"); // CTA label
+    expect(sent.html).toContain("https://portal.bbettragency.com/reschedule/RAW_TOKEN_VALUE");
   });
 });

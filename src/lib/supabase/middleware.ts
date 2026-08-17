@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
+import { isPublicRoute } from "./public-routes";
 
 /** Hard cap on the Edge auth call so a slow auth server can't 504 the site. */
 const AUTH_TIMEOUT_MS = 2500;
@@ -17,17 +18,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
-
-const PUBLIC_ROUTES = [
-  "/login",
-  "/auth",
-  "/forgot-password",
-  "/reset-password",
-  // PayFast checkout hand-off + return/cancel pages + ITN (V2) are hit by the
-  // international payer, who is not a logged-in portal user.
-  "/pay",
-  "/api/payfast",
-];
 
 /**
  * Refreshes the Supabase session on every request and enforces route-level
@@ -77,7 +67,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+  const isPublic = isPublicRoute(pathname);
 
   // Only apply redirects when the auth state is actually known.
   if (authKnown) {
