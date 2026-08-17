@@ -26,6 +26,10 @@ function meeting(id: string, startsAt: string): Meeting {
     cancelled_by: null,
     cancelled_at: null,
     deleted_at: null,
+    no_show_at: null,
+    no_show_followup_sent_at: null,
+    reschedule_token_hash: null,
+    reschedule_token_expires_at: null,
   };
 }
 

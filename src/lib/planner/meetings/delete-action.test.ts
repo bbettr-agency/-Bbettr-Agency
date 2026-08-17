@@ -27,8 +27,10 @@ beforeEach(() => {
 describe("deleteMeetingAction", () => {
   it("soft-deletes via the RPC, then reconciles — projection runs ONLY after success", async () => {
     const rpc = vi.fn(async () => ({ data: MID, error: null }));
+    // deleteMeetingAction now pre-nulls the reschedule token before the RPC.
+    const tokenChain = { update: () => tokenChain, eq: () => tokenChain, is: async () => ({ error: null }) };
     vi.mocked(createClient).mockResolvedValue(
-      { rpc } as unknown as Awaited<ReturnType<typeof createClient>>
+      { from: () => tokenChain, rpc } as unknown as Awaited<ReturnType<typeof createClient>>
     );
 
     const res = await deleteMeetingAction(MID);
@@ -44,8 +46,9 @@ describe("deleteMeetingAction", () => {
       data: null,
       error: { message: "not authorized", code: "42501" },
     }));
+    const tokenChain = { update: () => tokenChain, eq: () => tokenChain, is: async () => ({ error: null }) };
     vi.mocked(createClient).mockResolvedValue(
-      { rpc } as unknown as Awaited<ReturnType<typeof createClient>>
+      { from: () => tokenChain, rpc } as unknown as Awaited<ReturnType<typeof createClient>>
     );
 
     const res = await deleteMeetingAction(MID);

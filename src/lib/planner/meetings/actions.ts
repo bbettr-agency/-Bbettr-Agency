@@ -7,7 +7,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isPlannerEnabled } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
 import { reconcileMeeting } from "@/lib/planner/scheduling/service";
-import { sendMeetingConfirmationEmail } from "@/lib/email/meeting-notifications";
+import {
+  sendMeetingConfirmationEmail,
+  sendNoShowFollowUpEmail,
+} from "@/lib/email/meeting-notifications";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
 import type { MeetingInput } from "./types";
 
@@ -190,6 +193,23 @@ export async function updateMeetingAction(
 
   const correlationId = newCorrelationId();
   const supabase = await createClient();
+
+  // Detect a genuine RESCHEDULE (time window changed). Only then do we clear a
+  // no-show annotation and retire any outstanding self-service token — the admin
+  // has moved the meeting by hand, so a pending client link must not survive and
+  // a prior no-show no longer applies. A pure metadata edit (title/description/
+  // attendees) leaves those untouched.
+  const { data: current } = await supabase
+    .from("meetings")
+    .select("starts_at, ends_at")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  const timeChanged =
+    !current ||
+    new Date(current.starts_at).getTime() !== new Date(input.startsAt).getTime() ||
+    new Date(current.ends_at).getTime() !== new Date(input.endsAt).getTime();
+
   const { error } = await supabase
     .from("meetings")
     .update({
@@ -199,6 +219,13 @@ export async function updateMeetingAction(
       ends_at: input.endsAt,
       time_zone: input.timeZone,
       has_meet: input.hasMeet,
+      ...(timeChanged
+        ? {
+            no_show_at: null,
+            reschedule_token_hash: null,
+            reschedule_token_expires_at: null,
+          }
+        : {}),
     })
     .eq("id", id);
   if (error) return { error: error.message };
@@ -227,9 +254,16 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
 
   const correlationId = newCorrelationId();
   const supabase = await createClient();
+  // Cancelling also retires any outstanding self-service reschedule token
+  // (defense-in-depth: confirm_meeting_reschedule already rejects a non-scheduled
+  // meeting, but we don't leave a live link pointing at a cancelled meeting).
   const { error } = await supabase
     .from("meetings")
-    .update({ status: "cancelled" })
+    .update({
+      status: "cancelled",
+      reschedule_token_hash: null,
+      reschedule_token_expires_at: null,
+    })
     .eq("id", id);
   if (error) return { error: error.message };
 
@@ -238,12 +272,140 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
   return { ok: true, id };
 }
 
+/**
+ * Mark a scheduled meeting as a no-show. This is a PURE ANNOTATION: it sets
+ * no_show_at and deliberately does NOT invoke the reconciliation service, so it
+ * creates/patches/deletes NO Google event and resends NO guest updates
+ * (no_show_at is not part of the projection's desired-state hash). Status stays
+ * 'scheduled'; a no-show is not a cancellation.
+ */
+export async function markNoShowAction(id: string): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("meetings")
+    .update({ no_show_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "scheduled")
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!data) return { error: "Meeting not found, or it is not a scheduled meeting." };
+
+  // Intentionally NO project() — inert to Google by design.
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * Clear a no-show annotation (admin correction). Leaves the follow-up-sent
+ * history intact. Also inert to Google.
+ */
+export async function unmarkNoShowAction(id: string): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meetings")
+    .update({ no_show_at: null })
+    .eq("id", id)
+    .is("deleted_at", null);
+  if (error) return { error: error.message };
+
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * Send the no-show follow-up to EVERY attendee (branded Resend, non-fatal). Only
+ * valid once the meeting is marked a no-show. Honest delivery status: emailSent
+ * is true only when every attendee received it. no_show_followup_sent_at is
+ * stamped once (first genuine send) and preserved thereafter as historical
+ * evidence — a later reschedule does not clear it.
+ */
+export async function sendNoShowFollowUpAction(id: string): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const { data: meeting } = await supabase
+    .from("meetings")
+    .select("id, title, starts_at, ends_at, time_zone, no_show_at, no_show_followup_sent_at")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!meeting) return { error: "Meeting not found." };
+  if (!meeting.no_show_at)
+    return { error: "Mark the meeting as a no-show before sending a follow-up." };
+
+  const { data: attendees } = await supabase
+    .from("meeting_attendees")
+    .select("email, display_name")
+    .eq("meeting_id", id);
+  const list = attendees ?? [];
+  if (list.length === 0)
+    return { error: "This meeting has no attendees to follow up with." };
+
+  let sent = 0;
+  let firstError: string | undefined;
+  for (const a of list) {
+    const res = await sendNoShowFollowUpEmail({
+      to: a.email,
+      attendeeName: a.display_name,
+      title: meeting.title,
+      startsAt: meeting.starts_at,
+      endsAt: meeting.ends_at,
+      timeZone: meeting.time_zone,
+    });
+    if (res.ok) sent += 1;
+    else if (!firstError) firstError = res.error;
+  }
+
+  // Stamp the first genuine send only (something actually went out) and preserve
+  // it thereafter — historical evidence, not a per-send timestamp.
+  if (sent > 0 && !meeting.no_show_followup_sent_at) {
+    await supabase
+      .from("meetings")
+      .update({ no_show_followup_sent_at: new Date().toISOString() })
+      .eq("id", id);
+  }
+
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  if (sent === list.length) return { ok: true, id, emailSent: true };
+  return {
+    ok: true,
+    id,
+    emailSent: false,
+    emailWarning: firstError
+      ? `Follow-up could not be delivered to all attendees: ${firstError}`
+      : "Follow-up could not be delivered to all attendees.",
+  };
+}
+
 export async function deleteMeetingAction(id: string): Promise<MeetingActionResult> {
   if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
   await requireAdmin();
 
   const correlationId = newCorrelationId();
   const supabase = await createClient();
+
+  // Retire any outstanding self-service reschedule token BEFORE the soft-delete:
+  // once deleted_at is set, RLS hides the row from the updater's view, so the
+  // token columns could no longer be cleared. confirm_meeting_reschedule already
+  // rejects a deleted meeting; this is the active-invalidation the lifecycle
+  // requires. Best-effort — the delete proceeds regardless.
+  await supabase
+    .from("meetings")
+    .update({ reschedule_token_hash: null, reschedule_token_expires_at: null })
+    .eq("id", id)
+    .is("deleted_at", null);
 
   // Soft-delete via the guarded SECURITY DEFINER RPC. A plain UPDATE setting
   // deleted_at is rejected by RLS (the SELECT visibility policy hides deleted
