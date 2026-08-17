@@ -39,7 +39,11 @@ const MID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 function makeBuilder(cfg: Record<string, unknown>) {
   const rec = (cfg.rec as Record<string, unknown>) ?? {};
   const b: Record<string, unknown> = {
-    update(p: unknown) { rec.update = p; return b; },
+    update(p: unknown) {
+      rec.update = p;
+      (rec.updates as unknown[]) = [...((rec.updates as unknown[]) ?? []), p];
+      return b;
+    },
     insert(p: unknown) { rec.insert = p; return b; },
     delete() { rec.deleted = true; return b; },
     select() { return b; },
@@ -130,6 +134,18 @@ describe("sendNoShowFollowUpAction", () => {
     expect(sendNoShowFollowUpEmail).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-scheduled (e.g. cancelled) meeting — no email, no token issued", async () => {
+    // The status='scheduled' guard on the SELECT makes it resolve to nothing.
+    const rec: Record<string, unknown> = {};
+    vi.mocked(createClient).mockResolvedValue(
+      makeClient({ meetings: { rec, single: { data: null, error: null } } })
+    );
+    const res = await sendNoShowFollowUpAction(MID);
+    expect(res.error).toMatch(/no longer scheduled|not found/i);
+    expect(sendNoShowFollowUpEmail).not.toHaveBeenCalled();
+    expect(rec.updates).toBeUndefined(); // no token ever written
+  });
+
   it("errors when there are no attendees to follow up with", async () => {
     vi.mocked(createClient).mockResolvedValue(
       makeClient({ meetings: { single: { data: meeting, error: null } }, meeting_attendees: { settle: { data: [], error: null } } })
@@ -138,7 +154,15 @@ describe("sendNoShowFollowUpAction", () => {
     expect(res.error).toMatch(/no attendees/i);
   });
 
-  it("sends to every attendee, reports emailSent, and stamps the first send", async () => {
+  const updatesOf = (rec: Record<string, unknown>) => (rec.updates as Record<string, unknown>[]) ?? [];
+  const anyHas = (rec: Record<string, unknown>, key: string) => updatesOf(rec).some((u) => key in u);
+  const stamped = (rec: Record<string, unknown>) => anyHas(rec, "no_show_followup_sent_at");
+  const tokenIssued = (rec: Record<string, unknown>) =>
+    updatesOf(rec).some((u) => typeof u.reschedule_token_hash === "string" && u.reschedule_token_hash !== null);
+  const tokenRolledBack = (rec: Record<string, unknown>) =>
+    updatesOf(rec).some((u) => "reschedule_token_hash" in u && u.reschedule_token_hash === null);
+
+  it("issues a token (hash + expiry), emails every attendee, reports emailSent, stamps once", async () => {
     const rec: Record<string, unknown> = {};
     vi.mocked(createClient).mockResolvedValue(
       makeClient({
@@ -148,12 +172,20 @@ describe("sendNoShowFollowUpAction", () => {
     );
     const res = await sendNoShowFollowUpAction(MID);
     expect(sendNoShowFollowUpEmail).toHaveBeenCalledTimes(2);
+    // The email carries a /reschedule/<raw-token> URL; the DB only ever gets the hash.
+    const emailArg = vi.mocked(sendNoShowFollowUpEmail).mock.calls[0][0] as { rescheduleUrl: string };
+    expect(emailArg.rescheduleUrl).toContain("/reschedule/");
+    const stored = updatesOf(rec).find((u) => typeof u.reschedule_token_hash === "string")!;
+    expect((stored.reschedule_token_hash as string)).toHaveLength(64); // SHA-256 hex
+    expect(emailArg.rescheduleUrl).not.toContain(stored.reschedule_token_hash as string); // raw ≠ hash
     expect(res.emailSent).toBe(true);
     expect(res.emailWarning).toBeUndefined();
-    expect((rec.update as Record<string, unknown>).no_show_followup_sent_at).toBeTypeOf("string");
+    expect(tokenIssued(rec)).toBe(true);
+    expect(stamped(rec)).toBe(true);
+    expect(tokenRolledBack(rec)).toBe(false);
   });
 
-  it("PARTIAL failure → emailSent false + warning, and does NOT claim a clean send", async () => {
+  it("PARTIAL failure → emailSent false + warning, token stays live, stamped", async () => {
     vi.mocked(sendNoShowFollowUpEmail).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, error: "recipient rejected" });
     const rec: Record<string, unknown> = {};
     vi.mocked(createClient).mockResolvedValue(
@@ -164,12 +196,13 @@ describe("sendNoShowFollowUpAction", () => {
     );
     const res = await sendNoShowFollowUpAction(MID);
     expect(res.emailSent).toBe(false);
-    expect(res.emailWarning).toContain("could not be delivered");
-    // At least one went out → still stamp the historical evidence.
-    expect((rec.update as Record<string, unknown>).no_show_followup_sent_at).toBeTypeOf("string");
+    expect(res.emailWarning).toBeTruthy();
+    expect(tokenIssued(rec)).toBe(true);
+    expect(tokenRolledBack(rec)).toBe(false); // someone got a working link
+    expect(stamped(rec)).toBe(true);
   });
 
-  it("TOTAL failure → not stamped (nothing was actually sent)", async () => {
+  it("TOTAL failure → token ROLLED BACK (no usable orphan) and NOT stamped", async () => {
     vi.mocked(sendNoShowFollowUpEmail).mockResolvedValue({ ok: false, error: "RESEND_API_KEY is not configured" });
     const rec: Record<string, unknown> = {};
     vi.mocked(createClient).mockResolvedValue(
@@ -180,7 +213,8 @@ describe("sendNoShowFollowUpAction", () => {
     );
     const res = await sendNoShowFollowUpAction(MID);
     expect(res.emailSent).toBe(false);
-    expect(rec.update).toBeUndefined(); // no stamp when nothing was sent
+    expect(tokenRolledBack(rec)).toBe(true); // no usable token left behind
+    expect(stamped(rec)).toBe(false); // nothing went out
   });
 
   it("preserves an existing follow-up timestamp (does not re-stamp on resend)", async () => {
@@ -193,7 +227,8 @@ describe("sendNoShowFollowUpAction", () => {
     );
     const res = await sendNoShowFollowUpAction(MID);
     expect(res.emailSent).toBe(true);
-    expect(rec.update).toBeUndefined(); // historical evidence preserved
+    expect(tokenIssued(rec)).toBe(true); // fresh token still issued
+    expect(stamped(rec)).toBe(false); // historical evidence preserved, not re-stamped
   });
 });
 

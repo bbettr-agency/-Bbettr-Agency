@@ -48,9 +48,9 @@ export async function sendMeetingConfirmationEmail(opts: {
 
 /**
  * No-show follow-up (branded Resend). Sent after an admin marks a meeting a
- * no-show. This is the Slice C form — a "we missed you, reply to reschedule"
- * note with NO self-service link (Slice D upgrades this same email to embed the
- * secure /reschedule/<token> link once tokens are issued). Best-effort like all
+ * no-show. Slice D form: carries the secure self-service CTA — a "Reschedule
+ * Meeting" button pointing at /reschedule/<raw-token>. The raw token exists ONLY
+ * in this URL (never persisted; only its hash is stored). Best-effort like all
  * meeting mail: sendTransactionalEmail never throws.
  */
 export async function sendNoShowFollowUpEmail(opts: {
@@ -60,18 +60,21 @@ export async function sendNoShowFollowUpEmail(opts: {
   startsAt: string; // ISO
   endsAt: string; // ISO
   timeZone: string; // IANA
+  /** Public /reschedule/<raw-token> URL — the client's authorization link. */
+  rescheduleUrl: string;
 }): Promise<SendResult> {
   const dateLabel = fmtDate(opts.startsAt, opts.timeZone);
   const timeLabel = `${fmtTime(opts.startsAt, opts.timeZone)} – ${fmtTime(opts.endsAt, opts.timeZone)}`;
   const html = renderEmail({
-    preheader: `We missed you at “${opts.title}” — let's find a new time.`,
-    heading: "Sorry we missed you",
+    preheader: `We missed you at “${opts.title}” — pick a new time.`,
+    heading: "Let's find a new time",
     paragraphs: [
       `Hi ${opts.attendeeName || "there"},`,
-      `We were expecting you at “${opts.title}” on ${dateLabel} at ${timeLabel} (${opts.timeZone}), but it looks like we didn't get to connect.`,
-      "No problem at all — we'd love to find a new time that works for you. Just reply to this email and we'll get you rebooked.",
+      `We noticed you weren't able to make “${opts.title}” on ${dateLabel} at ${timeLabel} (${opts.timeZone}).`,
+      "No problem at all — use the button below to choose another date and time that works for you.",
     ],
-    footnote: "Reply to this email and we'll help you reschedule.",
+    cta: { label: "Reschedule Meeting", url: opts.rescheduleUrl },
+    footnote: "This link is personal to you and expires in 14 days. Prefer to arrange it directly? Just reply to this email.",
   });
-  return sendTransactionalEmail({ to: opts.to, subject: `We missed you — let's reschedule: ${opts.title}`, html });
+  return sendTransactionalEmail({ to: opts.to, subject: `Reschedule your meeting: ${opts.title}`, html });
 }
