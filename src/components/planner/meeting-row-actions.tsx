@@ -33,7 +33,10 @@ export function MeetingRowActions({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // A transient outcome message. `ok:false` is an honest failure (rendered with a
+  // warning icon, never a success check) — e.g. a follow-up that didn't reach
+  // every attendee.
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   function run(
@@ -68,8 +71,11 @@ export function MeetingRowActions({
                 onClick={() =>
                   run(() => sendNoShowFollowUpAction(id), (res) =>
                     setNotice(
-                      res.emailWarning ??
-                        (res.emailSent ? "Follow-up sent to attendees." : null)
+                      res.emailWarning
+                        ? { text: res.emailWarning, ok: false }
+                        : res.emailSent
+                          ? { text: "Follow-up sent to attendees.", ok: true }
+                          : null
                     )
                   )
                 }
@@ -137,11 +143,16 @@ export function MeetingRowActions({
           <Check className="h-3.5 w-3.5 text-emerald-600" /> Follow-up sent
         </p>
       )}
-      {notice && (
-        <p className="flex items-center gap-1 text-xs text-ink-500">
-          <Check className="h-3.5 w-3.5 text-emerald-600" /> {notice}
-        </p>
-      )}
+      {notice &&
+        (notice.ok ? (
+          <p className="flex items-center gap-1 text-xs text-ink-500">
+            <Check className="h-3.5 w-3.5 text-emerald-600" /> {notice.text}
+          </p>
+        ) : (
+          <p className="flex items-start gap-1 text-xs text-amber-700">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {notice.text}
+          </p>
+        ))}
       {error && (
         <p className="flex items-center gap-1 text-xs text-red-600">
           <AlertCircle className="h-3.5 w-3.5" /> {error}
