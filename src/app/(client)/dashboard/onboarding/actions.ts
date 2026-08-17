@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { sendOnboardingAssistanceEmail } from "@/lib/email/client-notifications";
 import { SERVICES } from "@/lib/services";
+import { isBillingComplete } from "@/lib/billing-details";
 import type { ServiceType } from "@/lib/database.types";
 
 export interface OnboardingState {
@@ -46,6 +47,47 @@ export async function saveOnboarding(
   const clientId = profile.client_id;
   const supabase = await createClient();
   const status = submit ? "submitted" : "in_progress";
+
+  // ── Shared final-submit gate (the ONE place, not per-service): a NEW onboarding
+  //    submission requires a complete client-level billing profile. Draft saves
+  //    (submit=false) are never blocked, and existing already-submitted services
+  //    are untouched (this only runs on a fresh submit call). Reads are the
+  //    client's own rows under RLS — no service role, no browser-supplied data.
+  if (submit) {
+    const [{ data: billingRow }, { data: clientRow }] = await Promise.all([
+      supabase
+        .from("client_billing_details")
+        .select(
+          "invoice_name, billing_email, billing_email_same_as_contact"
+        )
+        .eq("client_id", clientId)
+        .maybeSingle(),
+      supabase.from("clients").select("contact_email").eq("id", clientId).maybeSingle(),
+    ]);
+    const complete = isBillingComplete(
+      billingRow
+        ? {
+            invoiceName: billingRow.invoice_name,
+            billingEmail: billingRow.billing_email,
+            billingEmailSameAsContact: billingRow.billing_email_same_as_contact,
+            companyRegistrationNumber: null,
+            vatNumber: null,
+            billingContactName: null,
+            billingAddress: null,
+            poReference: null,
+            invoiceInstructions: null,
+            updatedAt: null,
+          }
+        : null,
+      clientRow?.contact_email ?? null
+    );
+    if (!complete) {
+      return {
+        error:
+          "Please complete your Invoice / Billing Details above before submitting your onboarding.",
+      };
+    }
+  }
 
   // 1. The submission itself is the client's own data → write under their RLS.
   const { data: submissionRow, error: submissionError } = await supabase

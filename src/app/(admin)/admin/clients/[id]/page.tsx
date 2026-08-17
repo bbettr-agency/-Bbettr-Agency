@@ -21,6 +21,7 @@ import {
   getClientBilling,
   getClientUpdateQuestions,
 } from "@/lib/admin-queries";
+import { getBillingDetails } from "@/lib/billing-details-queries";
 import { ClientDetail } from "@/components/admin/client-detail";
 import { DangerZone } from "@/components/admin/danger-zone";
 
@@ -55,6 +56,7 @@ export default async function ClientDetailPage({
     linkableDeals,
     billing,
     updateQuestions,
+    billingDetails,
   ] = await Promise.all([
     getClientServices(id),
     getProjectStages(id),
@@ -70,6 +72,7 @@ export default async function ClientDetailPage({
     getLinkableDeals(),
     getClientBilling(id),
     getClientUpdateQuestions(id),
+    getBillingDetails(id),
   ]);
 
   // Reaction counts depend on the fetched update ids (read-only for admins).
@@ -95,6 +98,7 @@ export default async function ClientDetailPage({
         dealLink={dealLink}
         linkableDeals={linkableDeals}
         billing={billing}
+        billingDetails={billingDetails}
         updateReactions={updateReactions}
         updateQuestions={updateQuestions}
       />

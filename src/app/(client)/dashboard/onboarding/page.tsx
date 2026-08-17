@@ -1,26 +1,33 @@
 import type { Metadata } from "next";
 import { ClipboardList, CheckCircle2 } from "lucide-react";
 import { requireClient } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import {
   getClientServices,
   getOnboarding,
   isOnboardingComplete,
 } from "@/lib/queries";
+import { getBillingDetails } from "@/lib/billing-details-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { OnboardingTabs } from "@/components/onboarding/onboarding-tabs";
+import { BillingDetailsSection } from "@/components/onboarding/billing-details-section";
 
 export const metadata: Metadata = { title: "Onboarding" };
 
 export default async function OnboardingPage() {
   const profile = await requireClient();
-  const [services, submissions] = await Promise.all([
+  const supabase = await createClient();
+  const [services, submissions, billing, clientRow] = await Promise.all([
     getClientServices(profile.client_id),
     getOnboarding(profile.client_id),
+    getBillingDetails(profile.client_id),
+    supabase.from("clients").select("contact_email").eq("id", profile.client_id).maybeSingle(),
   ]);
 
   const complete = isOnboardingComplete(services);
+  const contactEmail = clientRow.data?.contact_email ?? null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -49,14 +56,18 @@ export default async function OnboardingPage() {
       )}
 
       {services.length > 0 ? (
-        <OnboardingTabs
-          clientId={profile.client_id}
-          services={services.map((s) => ({
-            service: s.service,
-            onboarding_status: s.onboarding_status,
-          }))}
-          submissions={submissions}
-        />
+        <>
+          {/* One shared, client-level billing section — NOT per service tab. */}
+          <BillingDetailsSection initial={billing} contactEmail={contactEmail} />
+          <OnboardingTabs
+            clientId={profile.client_id}
+            services={services.map((s) => ({
+              service: s.service,
+              onboarding_status: s.onboarding_status,
+            }))}
+            submissions={submissions}
+          />
+        </>
       ) : (
         <EmptyState
           icon={ClipboardList}

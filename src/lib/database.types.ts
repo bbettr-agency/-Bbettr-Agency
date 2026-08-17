@@ -213,6 +213,40 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["clients"]["Row"]>;
         Relationships: [];
       };
+      // Client-owned billing profile (0055) — 1:1 with clients, shared across
+      // services. NOT the invoice ledger. Client-editable (own row) under RLS.
+      client_billing_details: {
+        Row: {
+          client_id: string;
+          invoice_name: string | null;
+          company_registration_number: string | null;
+          vat_number: string | null;
+          billing_email: string | null;
+          billing_email_same_as_contact: boolean;
+          billing_contact_name: string | null;
+          billing_address: string | null;
+          po_reference: string | null;
+          invoice_instructions: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          invoice_name?: string | null;
+          company_registration_number?: string | null;
+          vat_number?: string | null;
+          billing_email?: string | null;
+          billing_email_same_as_contact?: boolean;
+          billing_contact_name?: string | null;
+          billing_address?: string | null;
+          po_reference?: string | null;
+          invoice_instructions?: string | null;
+          updated_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_billing_details"]["Row"]>;
+        Relationships: [];
+      };
       weekly_updates: {
         Row: {
           id: string;
@@ -1510,6 +1544,8 @@ export interface Database {
 
 // Convenience row aliases used throughout the app.
 export type Client = Database["public"]["Tables"]["clients"]["Row"];
+export type ClientBillingDetails =
+  Database["public"]["Tables"]["client_billing_details"]["Row"];
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type ClientService = Database["public"]["Tables"]["client_services"]["Row"];
 export type OnboardingSubmission =
