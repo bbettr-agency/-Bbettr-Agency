@@ -25,6 +25,8 @@ import { ActivityManager } from "@/components/admin/activity-manager";
 import { ContractManager } from "@/components/admin/contract-manager";
 import { IntakePanel } from "@/components/admin/intake-panel";
 import { BillingPanel } from "@/components/admin/billing-panel";
+import { BillingDetailsCard } from "@/components/admin/billing-details-card";
+import type { BillingDetailsView } from "@/lib/billing-details";
 import type { ContractView } from "@/lib/queries";
 import type { ReactionSummary } from "@/lib/update-reactions";
 import { AssetsReceivedControl } from "@/components/admin/assets-received-control";
@@ -79,6 +81,7 @@ interface ClientDetailProps {
   dealLink: DealLink | null;
   linkableDeals: LinkableDeal[];
   billing: ClientBilling;
+  billingDetails: BillingDetailsView | null;
   updateReactions: Record<string, ReactionSummary>;
   updateQuestions: UpdateQuestionView[];
 }
@@ -99,6 +102,7 @@ export function ClientDetail({
   dealLink,
   linkableDeals,
   billing,
+  billingDetails,
   updateReactions,
   updateQuestions,
 }: ClientDetailProps) {
@@ -401,14 +405,21 @@ export function ClientDetail({
           )}
 
           {active === "billing" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Billing</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <BillingPanel clientId={client.id} billing={billing} />
-              </CardContent>
-            </Card>
+            <div className="space-y-6">
+              <BillingDetailsCard
+                clientId={client.id}
+                initial={billingDetails}
+                contactEmail={client.contact_email}
+              />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Billing</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <BillingPanel clientId={client.id} billing={billing} />
+                </CardContent>
+              </Card>
+            </div>
           )}
         </div>
       </div>
