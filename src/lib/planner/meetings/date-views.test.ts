@@ -30,6 +30,9 @@ function meeting(id: string, startsAt: string): Meeting {
     no_show_followup_sent_at: null,
     reschedule_token_hash: null,
     reschedule_token_expires_at: null,
+    attended_at: null,
+    outcome_notes: null,
+    thank_you_sent_at: null,
   };
 }
 

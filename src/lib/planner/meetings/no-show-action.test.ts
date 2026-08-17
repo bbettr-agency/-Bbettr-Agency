@@ -101,7 +101,7 @@ describe("markNoShowAction", () => {
       makeClient({ meetings: { single: { data: null, error: null } } })
     );
     const res = await markNoShowAction(MID);
-    expect(res.error).toMatch(/not.*scheduled/i);
+    expect(res.error).toMatch(/isn't scheduled|recorded outcome/i);
     expect(reconcileMeeting).not.toHaveBeenCalled();
   });
 });

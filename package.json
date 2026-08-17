@@ -28,6 +28,7 @@
     "test:tasks-0051": "node supabase/tests/tasks-0051-weekly-updates.test.mjs",
     "test:tasks-0052": "node supabase/tests/tasks-0052-anchor-day.test.mjs",
     "test:tasks-0053": "node supabase/tests/tasks-0053-meeting-reschedule.test.mjs",
+    "test:tasks-0054": "node supabase/tests/tasks-0054-meeting-completed.test.mjs",
     "test:parity": "node supabase/tests/schema-parity.test.mjs",
     "test:tasks-c1": "node supabase/tests/tasks-command-adapter.test.mjs",
     "test:tasks-inbox-read": "node supabase/tests/tasks-inbox-read.test.mjs",

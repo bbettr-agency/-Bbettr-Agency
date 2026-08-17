@@ -78,3 +78,26 @@ export async function sendNoShowFollowUpEmail(opts: {
   });
   return sendTransactionalEmail({ to: opts.to, subject: `Reschedule your meeting: ${opts.title}`, html });
 }
+
+/**
+ * Optional post-meeting follow-up (0054). Admin-authored subject + body (already
+ * personalised per recipient by the caller). Rendered through the shared branded
+ * template, which HTML-ESCAPES every paragraph — so admin free text is safe. Best
+ * effort like all meeting mail: sendTransactionalEmail never throws. Sending a
+ * follow-up is fully decoupled from the meeting's Completed state.
+ */
+export async function sendMeetingFollowUpEmail(opts: {
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<SendResult> {
+  // Each non-empty line becomes an escaped paragraph; blank lines are dropped.
+  const paragraphs = opts.body.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const html = renderEmail({
+    preheader: opts.subject,
+    heading: opts.subject,
+    paragraphs,
+    footnote: "You can reply directly to this email to reach us.",
+  });
+  return sendTransactionalEmail({ to: opts.to, subject: opts.subject, html });
+}
