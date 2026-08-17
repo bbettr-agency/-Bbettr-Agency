@@ -1311,6 +1311,12 @@ export interface Database {
           // is stored; the raw token lives solely in the emailed URL.
           reschedule_token_hash: string | null;
           reschedule_token_expires_at: string | null;
+          // Completion / post-meeting lifecycle (0054) — annotations, inert to
+          // the Google projection. attended_at is mutually exclusive with
+          // no_show_at (DB CHECK meetings_outcome_exclusive).
+          attended_at: string | null;
+          outcome_notes: string | null;
+          thank_you_sent_at: string | null;
         };
         // Audit fields (created_by/at, cancelled_by/at, updated_at) are
         // server-stamped by the meetings_enforce_audit trigger — omit on insert.

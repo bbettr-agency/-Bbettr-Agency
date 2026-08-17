@@ -10,9 +10,11 @@ import { reconcileMeeting } from "@/lib/planner/scheduling/service";
 import {
   sendMeetingConfirmationEmail,
   sendNoShowFollowUpEmail,
+  sendMeetingFollowUpEmail,
 } from "@/lib/email/meeting-notifications";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
 import { issueRescheduleToken } from "./reschedule-token";
+import { personalise } from "./followup-templates";
 import type { MeetingInput } from "./types";
 
 /** Canonical public base URL for building client-facing links (same default as notifications). */
@@ -32,6 +34,8 @@ export interface MeetingActionResult {
   emailSent?: boolean;
   /** present when a confirmation email could NOT be delivered (non-fatal). */
   emailWarning?: string;
+  /** follow-up: recipient emails that could NOT be delivered (per-recipient honesty). */
+  failedRecipients?: string[];
 }
 
 const MEETINGS_PATH = "/admin/planner/meetings";
@@ -199,10 +203,11 @@ export async function updateMeetingAction(
   const supabase = await createClient();
 
   // Detect a genuine RESCHEDULE (time window changed). Only then do we clear a
-  // no-show annotation and retire any outstanding self-service token — the admin
-  // has moved the meeting by hand, so a pending client link must not survive and
-  // a prior no-show no longer applies. A pure metadata edit (title/description/
-  // attendees) leaves those untouched.
+  // no-show annotation, retire any outstanding self-service token, and clear a
+  // completion (attended_at) — the admin has moved the meeting by hand, so it is
+  // a fresh scheduled occurrence again: a pending client link must not survive,
+  // and a prior no-show / attended outcome no longer applies. A pure metadata
+  // edit (title/description/attendees) leaves those untouched.
   const { data: current } = await supabase
     .from("meetings")
     .select("starts_at, ends_at")
@@ -226,6 +231,7 @@ export async function updateMeetingAction(
       ...(timeChanged
         ? {
             no_show_at: null,
+            attended_at: null,
             reschedule_token_hash: null,
             reschedule_token_expires_at: null,
           }
@@ -288,16 +294,21 @@ export async function markNoShowAction(id: string): Promise<MeetingActionResult>
   await requireAdmin();
 
   const supabase = await createClient();
+  // Guard attended_at IS NULL so an already-COMPLETED meeting is rejected cleanly
+  // here (0 rows) instead of tripping the meetings_outcome_exclusive DB CHECK.
+  // Switching a completed meeting to no-show requires an explicit undo first.
   const { data, error } = await supabase
     .from("meetings")
     .update({ no_show_at: new Date().toISOString() })
     .eq("id", id)
     .eq("status", "scheduled")
     .is("deleted_at", null)
+    .is("attended_at", null)
     .select("id")
     .maybeSingle();
   if (error) return { error: error.message };
-  if (!data) return { error: "Meeting not found, or it is not a scheduled meeting." };
+  if (!data)
+    return { error: "This meeting can't be marked a no-show — it isn't scheduled, or it already has a recorded outcome." };
 
   // Intentionally NO project() — inert to Google by design.
   revalidatePath(MEETINGS_PATH);
@@ -324,6 +335,181 @@ export async function unmarkNoShowAction(id: string): Promise<MeetingActionResul
   revalidatePath(MEETINGS_PATH);
   revalidatePath(`${MEETINGS_PATH}/${id}`);
   return { ok: true, id };
+}
+
+/**
+ * Mark a scheduled, already-ended meeting as ATTENDED — the admin's explicit
+ * confirmation that it actually happened. PURE ANNOTATION + token retirement,
+ * atomic in one UPDATE:
+ *   - attended_at = now();
+ *   - retire any outstanding self-service reschedule token (once we've confirmed
+ *     the meeting happened, an old reschedule link must not remain usable).
+ * Guards (all in the WHERE clause, so a stale UI rejects cleanly instead of
+ * hitting the meetings_outcome_exclusive DB CHECK): scheduled, not deleted,
+ * ends_at <= now(), no_show_at IS NULL, attended_at IS NULL. Sends NO email and
+ * NEVER calls project()/reconcile — inert to Google.
+ */
+export async function markAttendedAction(id: string): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("meetings")
+    .update({
+      attended_at: new Date().toISOString(),
+      reschedule_token_hash: null,
+      reschedule_token_expires_at: null,
+    })
+    .eq("id", id)
+    .eq("status", "scheduled")
+    .is("deleted_at", null)
+    .is("no_show_at", null)
+    .is("attended_at", null)
+    .lte("ends_at", new Date().toISOString())
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!data)
+    return {
+      error:
+        "This meeting can't be marked attended — it must be a scheduled meeting whose end time has passed, with no existing outcome.",
+    };
+
+  // Intentionally NO project() — inert to Google by design.
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * Clear a completion (admin correction). Clears attended_at ONLY — leaves
+ * outcome_notes and thank_you_sent_at intact. Sends nothing, calls no Google.
+ * The meeting derives back to Needs outcome (or Upcoming, if its end is future).
+ */
+export async function undoAttendedAction(id: string): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meetings")
+    .update({ attended_at: null })
+    .eq("id", id)
+    .is("deleted_at", null);
+  if (error) return { error: error.message };
+
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * Save internal outcome notes (max 4000 chars). INTERNAL ONLY — never emailed,
+ * never projected to Google, no reconcile. Empty/whitespace clears the field.
+ */
+export async function saveMeetingOutcomeNotesAction(
+  id: string,
+  notes: string
+): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const trimmed = (notes ?? "").trim();
+  if (trimmed.length > 4000)
+    return { error: "Outcome notes must be 4000 characters or fewer." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meetings")
+    .update({ outcome_notes: trimmed.length > 0 ? trimmed : null })
+    .eq("id", id)
+    .is("deleted_at", null);
+  if (error) return { error: error.message };
+
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * OPTIONAL post-meeting follow-up. Available ONLY for a Completed meeting and
+ * NEVER triggered automatically by mark-attended. Recipients are validated
+ * server-side against the meeting's OWN stored attendees (never an arbitrary
+ * submitted address; empty selection rejected). Per-recipient honest delivery;
+ * email failure NEVER changes the Completed state. thank_you_sent_at is stamped
+ * on the first genuine send and preserved thereafter.
+ */
+export async function sendMeetingFollowUpAction(
+  id: string,
+  input: { recipientEmails: string[]; subject: string; body: string }
+): Promise<MeetingActionResult> {
+  if (!isPlannerEnabled()) return { error: "Planner is not enabled." };
+  await requireAdmin();
+
+  const subject = (input.subject ?? "").trim();
+  const body = (input.body ?? "").trim();
+  if (!subject) return { error: "Add a subject before sending." };
+  if (!body) return { error: "Add a message before sending." };
+
+  const supabase = await createClient();
+  const { data: meeting } = await supabase
+    .from("meetings")
+    .select("id, status, attended_at, no_show_at, thank_you_sent_at")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!meeting) return { error: "Meeting not found." };
+  // Only a Completed meeting (scheduled + attended + not no-show) may be followed up.
+  if (!(meeting.status === "scheduled" && meeting.attended_at && !meeting.no_show_at))
+    return { error: "Follow-up is only available once a meeting is marked attended." };
+
+  // Recipient safety: intersect the submitted list with the meeting's OWN
+  // attendees. Never send to an address that isn't a stored attendee.
+  const { data: attendees } = await supabase
+    .from("meeting_attendees")
+    .select("email, display_name")
+    .eq("meeting_id", id);
+  const attendeeByEmail = new Map(
+    (attendees ?? []).map((a) => [a.email.trim().toLowerCase(), a])
+  );
+  const requested = new Set((input.recipientEmails ?? []).map((e) => e.trim().toLowerCase()));
+  const recipients = [...attendeeByEmail.entries()]
+    .filter(([email]) => requested.has(email))
+    .map(([, a]) => a);
+  if (recipients.length === 0)
+    return { error: "Select at least one of the meeting's attendees to email." };
+
+  let sent = 0;
+  const failed: string[] = [];
+  for (const r of recipients) {
+    const res = await sendMeetingFollowUpEmail({
+      to: r.email,
+      subject: personalise(subject, r.display_name),
+      body: personalise(body, r.display_name),
+    });
+    if (res.ok) sent += 1;
+    else failed.push(r.email);
+  }
+
+  // Stamp the first genuine send only; preserve thereafter (historical evidence).
+  // Completion (attended_at) is NEVER touched here, regardless of email outcome.
+  if (sent > 0 && !meeting.thank_you_sent_at) {
+    await supabase
+      .from("meetings")
+      .update({ thank_you_sent_at: new Date().toISOString() })
+      .eq("id", id);
+  }
+
+  revalidatePath(MEETINGS_PATH);
+  revalidatePath(`${MEETINGS_PATH}/${id}`);
+
+  if (failed.length === 0) return { ok: true, id, emailSent: true };
+  const warning =
+    sent > 0
+      ? `Sent to ${sent} of ${recipients.length}. Could not deliver to: ${failed.join(", ")}.`
+      : `Follow-up could not be delivered to: ${failed.join(", ")}.`;
+  return { ok: true, id, emailSent: false, emailWarning: warning, failedRecipients: failed };
 }
 
 /**

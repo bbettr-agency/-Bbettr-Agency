@@ -7,7 +7,7 @@ import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/que
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MeetingList } from "@/components/planner/meeting-list";
+import { MeetingCalendar } from "@/components/planner/meeting-calendar";
 import { ReconcileNowButton } from "@/components/planner/reconcile-now-button";
 
 export const metadata: Metadata = { title: "Calendar" };
@@ -53,7 +53,11 @@ export default async function CalendarPage() {
           </CardContent>
         </Card>
       ) : (
-        <MeetingList meetings={meetings} views={views} />
+        <MeetingCalendar
+          meetings={meetings}
+          viewsObj={Object.fromEntries(views)}
+          nowIso={new Date().toISOString()}
+        />
       )}
     </div>
   );

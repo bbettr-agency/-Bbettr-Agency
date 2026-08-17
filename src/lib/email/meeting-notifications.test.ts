@@ -4,7 +4,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // title, timezone-correct date/time, and the Meet link only when present.
 vi.mock("@/lib/email/resend", () => ({ sendTransactionalEmail: vi.fn(async () => ({ ok: true })) }));
 
-import { sendMeetingConfirmationEmail, sendNoShowFollowUpEmail } from "./meeting-notifications";
+import {
+  sendMeetingConfirmationEmail,
+  sendNoShowFollowUpEmail,
+  sendMeetingFollowUpEmail,
+} from "./meeting-notifications";
 import { sendTransactionalEmail } from "@/lib/email/resend";
 
 const lastSend = () => vi.mocked(sendTransactionalEmail).mock.calls.at(-1)![0];
@@ -80,5 +84,22 @@ describe("sendNoShowFollowUpEmail (Slice D — secure reschedule CTA)", () => {
     expect(sent.html).toContain("12:30");
     expect(sent.html).toContain("Reschedule Meeting"); // CTA label
     expect(sent.html).toContain("https://portal.bbettragency.com/reschedule/RAW_TOKEN_VALUE");
+  });
+});
+
+describe("sendMeetingFollowUpEmail (0054 — HTML-safe, decoupled from completion)", () => {
+  it("renders the admin subject/body and HTML-ESCAPES the body (no injection)", async () => {
+    const res = await sendMeetingFollowUpEmail({
+      to: "a@x.com",
+      subject: "Thanks Ann",
+      body: "Hi Ann,\n\nGreat <script>alert(1)</script> meeting & chat.",
+    });
+    expect(res.ok).toBe(true);
+    const sent = lastSend();
+    expect(sent.subject).toBe("Thanks Ann");
+    expect(sent.html).toContain("Hi Ann,");
+    expect(sent.html).toContain("&lt;script&gt;"); // escaped, not live markup
+    expect(sent.html).not.toContain("<script>alert(1)</script>");
+    expect(sent.html).toContain("&amp;"); // ampersand escaped
   });
 });
