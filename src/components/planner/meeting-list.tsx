@@ -42,6 +42,9 @@ export function MeetingList({
                     {m.title}
                   </Link>
                   {m.status === "cancelled" && <Badge tone="neutral">Cancelled</Badge>}
+                  {m.status !== "cancelled" && m.no_show_at && (
+                    <Badge tone="warning">No-show</Badge>
+                  )}
                 </div>
                 <p className="text-sm text-ink-500">
                   {formatMeetingRange(m.starts_at, m.ends_at, m.time_zone)}{" "}
@@ -53,7 +56,14 @@ export function MeetingList({
                   <MeetLink url={view?.meetUrl ?? null} />
                 </div>
               </div>
-              {showActions && <MeetingRowActions id={m.id} status={m.status} />}
+              {showActions && (
+                <MeetingRowActions
+                  id={m.id}
+                  status={m.status}
+                  noShowAt={m.no_show_at}
+                  followupSentAt={m.no_show_followup_sent_at}
+                />
+              )}
             </CardContent>
           </Card>
         );

@@ -1304,6 +1304,13 @@ export interface Database {
           cancelled_by: string | null;
           cancelled_at: string | null;
           deleted_at: string | null;
+          // No-show annotation (0053) — inert to the Google projection.
+          no_show_at: string | null;
+          no_show_followup_sent_at: string | null;
+          // Secure self-service reschedule token (0053) — only the SHA-256 hex
+          // is stored; the raw token lives solely in the emailed URL.
+          reschedule_token_hash: string | null;
+          reschedule_token_expires_at: string | null;
         };
         // Audit fields (created_by/at, cancelled_by/at, updated_at) are
         // server-stamped by the meetings_enforce_audit trigger — omit on insert.

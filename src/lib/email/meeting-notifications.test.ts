@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // title, timezone-correct date/time, and the Meet link only when present.
 vi.mock("@/lib/email/resend", () => ({ sendTransactionalEmail: vi.fn(async () => ({ ok: true })) }));
 
-import { sendMeetingConfirmationEmail } from "./meeting-notifications";
+import { sendMeetingConfirmationEmail, sendNoShowFollowUpEmail } from "./meeting-notifications";
 import { sendTransactionalEmail } from "@/lib/email/resend";
 
 const lastSend = () => vi.mocked(sendTransactionalEmail).mock.calls.at(-1)![0];
@@ -58,5 +58,26 @@ describe("sendMeetingConfirmationEmail", () => {
       timeZone: "Africa/Johannesburg",
     });
     expect(lastSend().html).toContain("Hi there,");
+  });
+});
+
+describe("sendNoShowFollowUpEmail (Slice C — reply-to-arrange, no link)", () => {
+  it("sends a 'we missed you' follow-up with the missed date/time and NO self-service link", async () => {
+    const res = await sendNoShowFollowUpEmail({
+      to: "vm@client.com",
+      attendeeName: "Vision Motors",
+      title: "Strategy Meeting",
+      startsAt: "2026-08-13T10:30:00Z", // 12:30 Africa/Johannesburg
+      endsAt: "2026-08-13T11:30:00Z",
+      timeZone: "Africa/Johannesburg",
+    });
+    expect(res.ok).toBe(true);
+    const sent = lastSend();
+    expect(sent.subject).toBe("We missed you — let's reschedule: Strategy Meeting");
+    expect(sent.html).toContain("Vision Motors");
+    expect(sent.html).toContain("13 August 2026");
+    expect(sent.html).toContain("12:30");
+    expect(sent.html).toContain("reply to this email"); // reply-to-arrange (no link yet)
+    expect(sent.html).not.toContain("/reschedule/"); // Slice D adds the tokenized link
   });
 });
