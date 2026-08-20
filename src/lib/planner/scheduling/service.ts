@@ -70,6 +70,27 @@ export async function reconcileMeeting(
 }
 
 /**
+ * Admin-initiated "Retry sync" for ONE existing meeting. Same reconciliation
+ * engine and deterministic same-event guarantees as every other path — it only
+ * PROJECTS the existing meeting (never inserts a Portal meeting, never creates a
+ * second Google event/Meet). Uses the default retry budget (a user clicked it,
+ * so spend a couple of attempts) and still honours the Google-config gate, so it
+ * can't bypass configuration/OAuth checks. Per-row single-flight locking makes
+ * concurrent clicks / an overlapping scheduler tick safe.
+ */
+export async function reconcileMeetingManually(
+  entityId: string,
+  correlationId: string = newCorrelationId()
+): Promise<MeetingReconcileResult> {
+  if (!isGoogleConfigured()) return { result: "skipped", reason: "not_configured" };
+  return projectEntity(
+    buildDeps(correlationId),
+    { entityType: "meeting", entityId },
+    correlationId
+  );
+}
+
+/**
  * Batch reconcile of due projections — the reliable backstop. Idempotent and
  * replay-safe; uses the default retry budget (this path is not user-facing).
  */

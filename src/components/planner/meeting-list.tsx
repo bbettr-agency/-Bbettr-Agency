@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SyncStatusBadge, MeetStatusBadge } from "./sync-status-badge";
-import { MeetLink } from "./meet-link";
+import { MeetingJoinButton } from "./meeting-join-button";
+import { RetrySyncButton } from "./retry-sync-button";
 import { MeetingRowActions } from "./meeting-row-actions";
 import { formatMeetingRange } from "@/lib/planner/meetings/date-views";
 import { deriveMeetingState, LIFECYCLE_META } from "@/lib/planner/meetings/lifecycle";
@@ -59,7 +60,13 @@ export function MeetingList({
                 <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <SyncStatusBadge view={view} />
                   <MeetStatusBadge view={view} />
-                  <MeetLink url={view?.meetUrl ?? null} />
+                  <MeetingJoinButton
+                    meetUrl={view?.meetUrl ?? null}
+                    startsAt={m.starts_at}
+                    endsAt={m.ends_at}
+                    now={clock}
+                  />
+                  <RetrySyncButton meetingId={m.id} syncState={view?.syncState} />
                 </div>
               </div>
               {showActions && (

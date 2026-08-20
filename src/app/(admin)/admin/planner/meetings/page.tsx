@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarClock, Plus } from "lucide-react";
 import { requirePlannerAccess } from "@/lib/planner/guard";
-import { isGoogleConfigured } from "@/lib/google";
+import { getGoogleConnectionStatus } from "@/lib/google";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
 import { toCalendarMeeting } from "@/lib/planner/meetings/view-types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MeetingCalendar } from "@/components/planner/meeting-calendar";
+import { GoogleSyncBanner } from "@/components/planner/google-sync-banner";
 import { ReconcileNowButton } from "@/components/planner/reconcile-now-button";
 
 export const metadata: Metadata = { title: "Calendar" };
@@ -18,7 +19,7 @@ export default async function CalendarPage() {
 
   const meetings = await listMeetings();
   const views = await getSafeProjectionViews(meetings.map((m) => m.id));
-  const googleReady = isGoogleConfigured();
+  const google = await getGoogleConnectionStatus();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -34,13 +35,11 @@ export default async function CalendarPage() {
         }
       />
 
+      {/* Impossible-to-miss when Google can't sync (not configured / disconnected). */}
+      <GoogleSyncBanner configured={google.configured} status={google.status} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ReconcileNowButton />
-        {!googleReady && (
-          <span className="text-xs text-amber-700">
-            Google isn&rsquo;t connected — meetings still work; calendar projection is paused.
-          </span>
-        )}
       </div>
 
       {meetings.length === 0 ? (

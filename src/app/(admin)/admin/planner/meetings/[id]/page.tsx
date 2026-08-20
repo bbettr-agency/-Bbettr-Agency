@@ -7,7 +7,8 @@ import { getMeeting, getSafeProjectionViews } from "@/lib/planner/meetings/queri
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { SyncStatusBadge, MeetStatusBadge } from "@/components/planner/sync-status-badge";
-import { MeetLink } from "@/components/planner/meet-link";
+import { MeetingJoinButton } from "@/components/planner/meeting-join-button";
+import { RetrySyncButton } from "@/components/planner/retry-sync-button";
 import { MeetingForm } from "@/components/planner/meeting-form";
 import { MeetingOutcomeNotes } from "@/components/planner/meeting-outcome-notes";
 import { MeetingFollowUpComposer } from "@/components/planner/meeting-followup-composer";
@@ -79,7 +80,12 @@ export default async function MeetingDetailPage({
           <span className="text-sm text-ink-500">Calendar projection:</span>
           <SyncStatusBadge view={view} />
           <MeetStatusBadge view={view} />
-          <MeetLink url={view?.meetUrl ?? null} />
+          <MeetingJoinButton
+            meetUrl={view?.meetUrl ?? null}
+            startsAt={m.starts_at}
+            endsAt={m.ends_at}
+          />
+          <RetrySyncButton meetingId={m.id} syncState={view?.syncState} />
           {view?.lastSyncAt && (
             <span className="text-xs text-ink-400">
               Last synced{" "}
