@@ -79,8 +79,12 @@ describe("buildActivityRows — grouping is display-only, never destructive", ()
     const events = [ev("a"), ev("b"), file(), file(), ev("c")];
     const rows = buildActivityRows(events);
     // First row is 'a', last is 'c' — order intact around the group.
-    expect(rows[0].kind === "event" && rows[0].event.type).toBe("a");
-    expect(rows[rows.length - 1].kind === "event" && rows[rows.length - 1].event.type).toBe("c");
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    expect(first.kind).toBe("event");
+    expect(last.kind).toBe("event");
+    if (first.kind === "event") expect(first.event.type).toBe("a");
+    if (last.kind === "event") expect(last.event.type).toBe("c");
   });
 
   it("only file_uploaded is groupable", () => {
