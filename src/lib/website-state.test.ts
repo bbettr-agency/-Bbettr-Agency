@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveWebsiteState, isStorableUrl } from "./website-state";
+import { deriveWebsiteState, isStorableUrl, hasWebsite } from "./website-state";
 
 describe("deriveWebsiteState — one source of truth, live wins", () => {
   it("is 'none' when neither URL is set", () => {
@@ -34,6 +34,29 @@ describe("deriveWebsiteState — one source of truth, live wins", () => {
     expect(v.url).toBe("https://client.co.za");
     // Both are still exposed for callers that want to show each.
     expect(v.previewUrl).toBe("https://preview.test/site");
+  });
+});
+
+describe("hasWebsite — the client card render decision (Slice 2D regression)", () => {
+  it("renders for a preview-only client (the reported bug)", () => {
+    const v = deriveWebsiteState({ previewUrl: "https://preview.test/imatec" });
+    expect(v.state).toBe("preview");
+    expect(hasWebsite(v)).toBe(true);
+  });
+
+  it("renders for a live client, with live taking precedence over preview", () => {
+    const v = deriveWebsiteState({
+      previewUrl: "https://preview.test/imatec",
+      liveUrl: "https://imatec.co.za",
+    });
+    expect(v.state).toBe("live");
+    expect(v.url).toBe("https://imatec.co.za");
+    expect(hasWebsite(v)).toBe(true);
+  });
+
+  it("does NOT render when neither URL is set", () => {
+    expect(hasWebsite(deriveWebsiteState({}))).toBe(false);
+    expect(hasWebsite(deriveWebsiteState({ previewUrl: "  ", liveUrl: "" }))).toBe(false);
   });
 });
 

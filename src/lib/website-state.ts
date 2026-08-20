@@ -35,6 +35,11 @@ export function deriveWebsiteState(input: {
   return { state: "none", url: null, previewUrl, liveUrl };
 }
 
+/** Whether the client "Your Website" card should render (a real URL exists). */
+export function hasWebsite(view: WebsiteView): view is WebsiteView & { url: string } {
+  return view.state !== "none" && view.url !== null;
+}
+
 /**
  * A URL is acceptable to store only if it is a well-formed http(s) URL. Empty
  * input is allowed (it clears the field); anything else non-empty must parse.

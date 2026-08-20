@@ -181,6 +181,32 @@ export async function getClient(clientId: string) {
   return data;
 }
 
+/**
+ * Client-safe column whitelist for the portal Home overview. Explicit (not
+ * `select *`) so the client read fetches EXACTLY what Home needs — including the
+ * Bbettr website URLs (Slice 2D) — and never over-selects privileged client
+ * fields (notes, contact details, portal-grant audit columns, etc.). Exported
+ * so the whitelist is unit-tested.
+ */
+export const PORTAL_CLIENT_COLUMNS =
+  "id, name, onboarding_type, intake_status, estimated_launch_date, success_manager_id, website_preview_url, website_live_url" as const;
+
+/**
+ * The client's own record, projected to the client-safe Home columns. Runs under
+ * the client's RLS (reads only their own row). Used by the portal dashboard in
+ * place of the broad admin getClient(), so the website URLs are explicitly
+ * requested and nothing privileged leaks into the client render.
+ */
+export async function getPortalClient(clientId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("clients")
+    .select(PORTAL_CLIENT_COLUMNS)
+    .eq("id", clientId)
+    .single();
+  return data;
+}
+
 export async function getClientServices(clientId: string) {
   const supabase = await createClient();
   const { data } = await supabase

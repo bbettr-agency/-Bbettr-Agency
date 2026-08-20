@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import { ArrowRight, Megaphone, Route, Sparkles } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import {
-  getClient,
+  getPortalClient,
   getClientServices,
   getProjectStages,
   getUpdates,
@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   const profile = await requireClient();
   const [client, services, stages, updates, onboarding, actionItems, activity] =
     await Promise.all([
-      getClient(profile.client_id),
+      getPortalClient(profile.client_id),
       getClientServices(profile.client_id),
       getProjectStages(profile.client_id),
       getUpdates(profile.client_id, 3),

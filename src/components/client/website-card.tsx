@@ -1,7 +1,7 @@
 import { Globe, ExternalLink } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { deriveWebsiteState } from "@/lib/website-state";
+import { deriveWebsiteState, hasWebsite } from "@/lib/website-state";
 
 /**
  * Client Home "Your Website" card (Slice 2D). Reads the SAME clients columns the
@@ -17,7 +17,7 @@ export function WebsiteCard({
   liveUrl: string | null;
 }) {
   const v = deriveWebsiteState({ previewUrl, liveUrl });
-  if (v.state === "none" || !v.url) return null;
+  if (!hasWebsite(v)) return null;
 
   const live = v.state === "live";
 
