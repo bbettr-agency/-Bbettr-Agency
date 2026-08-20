@@ -28,11 +28,10 @@ import { resolveSuccessManager } from "@/lib/success-manager";
 import { computeReadiness } from "@/lib/readiness";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ReadinessChecklist } from "@/components/shared/readiness-checklist";
+import { ReadinessCard } from "@/components/client/readiness-card";
 import { SeenMarker } from "@/components/shared/seen-marker";
-import { PackageCheck, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -97,7 +96,6 @@ export default async function DashboardPage() {
   );
   const assetsReceived =
     stages.find((s) => s.name === "Assets Received")?.status === "completed";
-  const showChecklist = readiness.hasItems && !assetsReceived;
 
   // Once the project has launched, drop the "Onboarding Complete" card — the
   // roadmap / current-phase card tells the story from then on.
@@ -122,37 +120,9 @@ export default async function DashboardPage() {
         estimatedLaunchDate={client?.estimated_launch_date ?? null}
       />
 
-      {/* Asset readiness checklist — what we still need from the client */}
-      {showChecklist && (
-        <Card className={readiness.allReady ? "border-emerald-200" : "border-brand-200"}>
-          <CardHeader className="flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
-              <PackageCheck className="h-4.5 w-4.5 text-brand-500" />
-              <CardTitle>
-                {readiness.allReady ? "Everything received" : "What we still need from you"}
-              </CardTitle>
-            </div>
-            <Badge tone={readiness.allReady ? "success" : "warning"} dot>
-              {readiness.totalDone}/{readiness.totalItems} received
-            </Badge>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {readiness.allReady ? (
-              <p className="flex items-center gap-2 text-sm text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" />
-                Thank you — we have everything we need and your team is reviewing
-                it now.
-              </p>
-            ) : (
-              <p className="text-sm text-ink-500">
-                Please provide the items marked <strong>Pending</strong> so we
-                can begin. You can add them from your onboarding forms and files.
-              </p>
-            )}
-            <ReadinessChecklist readiness={readiness} />
-          </CardContent>
-        </Card>
-      )}
+      {/* What we still need from you — progressive (Slice 2C): full checklist
+          while much is missing, a compact summary when little remains. */}
+      <ReadinessCard readiness={readiness} assetsReceived={assetsReceived} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Progress tracker */}
