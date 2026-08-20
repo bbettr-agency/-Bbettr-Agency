@@ -23,7 +23,6 @@ import {
 } from "@/lib/admin-queries";
 import { getBillingDetails } from "@/lib/billing-details-queries";
 import { ClientDetail } from "@/components/admin/client-detail";
-import { DangerZone } from "@/components/admin/danger-zone";
 
 const PORTAL_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://portal.bbettragency.com";
@@ -102,8 +101,6 @@ export default async function ClientDetailPage({
         updateReactions={updateReactions}
         updateQuestions={updateQuestions}
       />
-
-      <DangerZone clientId={client.id} clientName={client.name} />
     </div>
   );
 }

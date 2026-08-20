@@ -2,8 +2,9 @@
 
 import { format } from "date-fns";
 import Link from "next/link";
-import { Mail, Phone, User, FileText, ChevronRight } from "lucide-react";
+import { Mail, Phone, User, FileText, ChevronRight, AlertTriangle, CalendarClock, UserRound } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
 import {
   WorkspaceRail,
@@ -35,7 +36,9 @@ import { computeReadiness } from "@/lib/readiness";
 import { UpdateComposer } from "@/components/admin/update-composer";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
 import { UpdateQuestionsPanel } from "@/components/admin/update-questions-panel";
-import { PortalAccessCard } from "@/components/admin/portal-access-card";
+import { PortalAccessSummary } from "@/components/admin/portal-access-summary";
+import { DangerZone } from "@/components/admin/danger-zone";
+import { deriveFocus, deriveAttention } from "@/components/admin/command-centre-state";
 import { ClipboardList } from "lucide-react";
 import type {
   PortalAccess,
@@ -134,6 +137,38 @@ export function ClientDetail({
     documents: contracts.length + files.length + reports.length,
   };
 
+  // ── Command Centre derived state (Slice 2A) — EXISTING DATA ONLY ──────────
+  // Current focus / next milestone from the roadmap.
+  const focus = deriveFocus(stages, client.estimated_launch_date);
+
+  // Attention: overdue invoices (derived, per currency), open client questions,
+  // and outstanding required assets (waiting-on-client). No Planner reads.
+  const overdueByCurrency: Record<string, number> = {};
+  for (const inv of billing.invoices) {
+    if (inv.derivedStatus === "overdue") {
+      overdueByCurrency[inv.currency] =
+        (overdueByCurrency[inv.currency] ?? 0) + inv.balance;
+    }
+  }
+  const openQuestions = updateQuestions.filter((q) => q.status === "open").length;
+  const readinessPending =
+    readiness.hasItems && !assetsReceived
+      ? Math.max(0, readiness.totalItems - readiness.totalDone)
+      : 0;
+  const attention = deriveAttention({
+    overdueByCurrency,
+    overdueCount: billing.kpis.overdueCount,
+    openQuestions,
+    readinessPending,
+  });
+
+  // Success Manager for display (assigned → default → none). Assignment itself
+  // stays in Work › Project settings; Command Centre only surfaces it.
+  const successManager =
+    teamMembers.find((m) => m.id === client.success_manager_id) ??
+    teamMembers.find((m) => m.is_default) ??
+    null;
+
   return (
     <div>
       {/* Sticky client header — breadcrumb-shaped, always visible while
@@ -194,55 +229,138 @@ export function ClientDetail({
         <div className="min-w-0 space-y-6">
           {active === "command-centre" && (
             <div className="space-y-6">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <Card className="lg:col-span-2">
+              {/* 1. OVERVIEW — relationship + current position, full width. */}
+              <Card>
+                <CardContent className="space-y-5 p-5">
+                  <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                    <Field label="Account status">
+                      <ClientStatusControl clientId={client.id} status={client.status} />
+                    </Field>
+                    <Field label="Success Manager">
+                      {successManager ? (
+                        <span className="flex items-center gap-1.5 text-sm font-medium text-ink-900">
+                          <UserRound className="h-4 w-4 shrink-0 text-ink-400" />
+                          <span className="truncate">
+                            {successManager.name}
+                            {successManager.role && (
+                              <span className="text-ink-400"> · {successManager.role}</span>
+                            )}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-sm text-ink-400">Unassigned</span>
+                      )}
+                    </Field>
+                    <Field label="Estimated launch">
+                      <span className="text-sm font-medium text-ink-900">
+                        {client.estimated_launch_date
+                          ? format(new Date(client.estimated_launch_date), "d MMM yyyy")
+                          : "—"}
+                      </span>
+                    </Field>
+                    <Field label="Client since">
+                      <span className="text-sm font-medium text-ink-900">
+                        {format(new Date(client.created_at), "d MMM yyyy")}
+                      </span>
+                    </Field>
+                  </div>
+
+                  <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-4">
+                    {focus.hasStages ? (
+                      focus.allComplete ? (
+                        <p className="text-sm font-medium text-emerald-700">
+                          All project stages complete.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                          <FocusCell label="Current focus" value={focus.currentLabel} />
+                          <FocusCell label="Next milestone" value={focus.nextLabel} />
+                          <div>
+                            <p className="text-xs font-medium text-ink-400">Target date</p>
+                            <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-900">
+                              <CalendarClock className="h-4 w-4 text-ink-400" />
+                              {focus.etaDate
+                                ? format(new Date(focus.etaDate), "d MMM yyyy")
+                                : "Not set"}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <p className="text-sm text-ink-400">
+                        No project roadmap yet — set it up in the Work section.
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 2. ATTENTION — prominent only when something needs it. */}
+              {attention.length > 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-800">
+                    <AlertTriangle className="h-4 w-4" />
+                    Needs attention
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {attention.map((a) => (
+                      <span
+                        key={a.kind}
+                        className={cn(
+                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                          a.tone === "danger"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-amber-100 text-amber-800"
+                        )}
+                      >
+                        {a.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="px-1 text-sm text-ink-400">Nothing needs attention right now.</p>
+              )}
+
+              {/* 3. SERVICES — full-width breathing room. */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Services</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ClientServicesManager
+                    clientId={client.id}
+                    clientName={client.name}
+                    services={services}
+                    onboardingServices={onboardingServices}
+                    onViewOnboarding={() => navigate("work")}
+                  />
+                </CardContent>
+              </Card>
+
+              {/* 4. CONTACT — compact, lower in the hierarchy. */}
+              <Card>
                 <CardHeader>
                   <CardTitle>Contact</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="grid gap-4 sm:grid-cols-3">
                   <InfoRow icon={User} label="Contact" value={client.contact_name} />
                   <InfoRow icon={Mail} label="Email" value={client.contact_email} />
                   <InfoRow icon={Phone} label="Phone" value={client.contact_phone} />
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Account & Services</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-ink-400">
-                      Account Status
-                    </p>
-                    <ClientStatusControl
-                      clientId={client.id}
-                      status={client.status}
-                    />
-                    <p className="mt-1.5 text-xs text-ink-400">
-                      Internal lifecycle label — the project&apos;s real progress
-                      is the roadmap in the Work section.
-                    </p>
-                  </div>
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-ink-400">
-                      Services
-                    </p>
-                    <ClientServicesManager
-                      clientId={client.id}
-                      clientName={client.name}
-                      services={services}
-                      onboardingServices={onboardingServices}
-                      onViewOnboarding={() => navigate("work")}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-              <PortalAccessCard
+
+              {/* 5. PORTAL ACCESS — compact default; full actions behind Manage. */}
+              <PortalAccessSummary
                 clientId={client.id}
                 portalUrl={portalUrl}
                 access={portalAccess}
               />
+
+              {/* 6. ADVANCED — Danger Zone lives ONCE, collapsed, at the bottom. */}
+              <Disclosure title="Advanced">
+                <DangerZone clientId={client.id} clientName={client.name} />
+              </Disclosure>
             </div>
           )}
 
@@ -377,6 +495,26 @@ export function ClientDetail({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A labelled Command Centre field: small caption above its value/control. */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1.5 text-xs font-medium text-ink-400">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+/** A compact current-focus / next-milestone cell. */
+function FocusCell({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-ink-400">{label}</p>
+      <p className="text-sm font-semibold text-ink-900">{value ?? "—"}</p>
     </div>
   );
 }
