@@ -22,14 +22,23 @@ export async function getTeamMembers() {
   return data ?? [];
 }
 
-/** Full activity timeline for a client (incl. internal events). Admin view. */
-export async function getClientActivity(clientId: string) {
+/**
+ * Activity timeline for a client (incl. internal events). Admin view.
+ *
+ * With `limit` it fetches only the most recent N (the fast Work-page default,
+ * Slice 2B); without it, the FULL history — used by loadClientActivityAction
+ * when an admin explicitly opens "View full history". No event is filtered out;
+ * ordering is always newest-first.
+ */
+export async function getClientActivity(clientId: string, limit?: number) {
   const supabase = await createClient();
-  const { data } = await supabase
+  let query = supabase
     .from("activity_events")
     .select("id, type, title, description, visibility, occurred_at, source")
     .eq("client_id", clientId)
     .order("occurred_at", { ascending: false });
+  if (limit !== undefined) query = query.limit(limit);
+  const { data } = await query;
   return data ?? [];
 }
 

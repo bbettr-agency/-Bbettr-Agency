@@ -77,6 +77,7 @@ interface ClientDetailProps {
     occurred_at: string;
     source: string;
   }[];
+  activityHasMore: boolean;
   contracts: ContractView[];
   dealLink: DealLink | null;
   linkableDeals: LinkableDeal[];
@@ -105,6 +106,7 @@ export function ClientDetail({
   billingDetails,
   updateReactions,
   updateQuestions,
+  activityHasMore,
 }: ClientDetailProps) {
   const readiness = computeReadiness(
     services.map((s) => s.service),
@@ -385,7 +387,11 @@ export function ClientDetail({
                   <CardTitle>Activity Timeline</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ActivityManager clientId={client.id} events={activity} />
+                  <ActivityManager
+                    clientId={client.id}
+                    events={activity}
+                    hasMore={activityHasMore}
+                  />
                 </CardContent>
               </Card>
 

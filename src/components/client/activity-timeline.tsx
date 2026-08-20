@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   Rocket,
   CreditCard,
@@ -14,10 +17,13 @@ import {
   CheckCircle2,
   Circle,
   History,
+  ChevronDown,
+  ChevronUp,
   type LucideIcon,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CLIENT_HOME_RECENT } from "@/components/admin/activity-presentation";
 
 /**
  * Premium client-facing activity timeline (newest first) — the curated project
@@ -54,6 +60,12 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
 };
 
 export function ActivityTimeline({ events }: { events: ActivityItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+  // A concise preview: the most recent few events, expandable to the rest of
+  // the (already-loaded, client-visible) set. Never a full historical ledger.
+  const shown = expanded ? events : events.slice(0, CLIENT_HOME_RECENT);
+  const canExpand = events.length > CLIENT_HOME_RECENT;
+
   return (
     <Card>
       <CardHeader className="flex-row items-center gap-2">
@@ -62,10 +74,11 @@ export function ActivityTimeline({ events }: { events: ActivityItem[] }) {
       </CardHeader>
       <CardContent>
         {events.length > 0 ? (
+          <>
           <ol className="relative">
-            {events.map((event, i) => {
+            {shown.map((event, i) => {
               const Icon = TYPE_ICONS[event.type] ?? Circle;
-              const isLast = i === events.length - 1;
+              const isLast = i === shown.length - 1;
               const occurred = new Date(event.occurred_at);
               return (
                 <li key={event.id} className="relative flex gap-4 pb-6 last:pb-0">
@@ -96,6 +109,23 @@ export function ActivityTimeline({ events }: { events: ActivityItem[] }) {
               );
             })}
           </ol>
+          {canExpand && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1 flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+            >
+              {expanded ? (
+                <>
+                  <ChevronUp className="h-4 w-4" /> Show less
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" /> Show more
+                </>
+              )}
+            </button>
+          )}
+          </>
         ) : (
           <p className="py-8 text-center text-sm text-ink-400">
             Your project activity will appear here.

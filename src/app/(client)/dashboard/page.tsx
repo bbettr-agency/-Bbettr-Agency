@@ -21,6 +21,7 @@ import { NextStepCard } from "@/components/client/next-step-card";
 import { SuccessManagerCard } from "@/components/client/success-manager-card";
 import { PackageOverview } from "@/components/client/package-overview";
 import { ActivityTimeline } from "@/components/client/activity-timeline";
+import { CLIENT_HOME_FETCH } from "@/components/admin/activity-presentation";
 import { IntakePending } from "@/components/client/intake-pending";
 import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
 import { resolveSuccessManager } from "@/lib/success-manager";
@@ -45,7 +46,7 @@ export default async function DashboardPage() {
       getUpdates(profile.client_id, 3),
       getOnboarding(profile.client_id),
       getOpenActionItems(profile.client_id),
-      getActivityTimeline(profile.client_id),
+      getActivityTimeline(profile.client_id, CLIENT_HOME_FETCH),
     ]);
 
   // New intake clients see a calm holding panel until their onboarding opens.
