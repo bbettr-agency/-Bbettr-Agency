@@ -21,6 +21,7 @@ import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { logActivity } from "@/lib/activity";
 import { getClientActivity } from "@/lib/admin-queries";
+import { isStorableUrl } from "@/lib/website-state";
 import { SERVICE_LIST, getService } from "@/lib/services";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { STAGE_TO_JOURNEY } from "@/lib/journey";
@@ -689,6 +690,34 @@ export async function setClientLaunchDateAction(
   const { error } = await supabase
     .from("clients")
     .update({ estimated_launch_date: date || null })
+    .eq("id", clientId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/**
+ * Set (or clear) the Bbettr-built website preview/live URLs for a client
+ * (Slice 2D). Empty inputs clear the field; non-empty values must be valid
+ * http(s) URLs. This is the SINGLE source of truth read by both the admin
+ * Command Centre line and the client Home "Your Website" card.
+ */
+export async function setClientWebsiteUrlsAction(
+  clientId: string,
+  previewUrl: string,
+  liveUrl: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  if (!isStorableUrl(previewUrl)) return { error: "Preview URL must be a valid http(s) link." };
+  if (!isStorableUrl(liveUrl)) return { error: "Live URL must be a valid http(s) link." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({
+      website_preview_url: previewUrl.trim() || null,
+      website_live_url: liveUrl.trim() || null,
+    })
     .eq("id", clientId);
   if (error) return { error: error.message };
   revalidateClient(clientId);
