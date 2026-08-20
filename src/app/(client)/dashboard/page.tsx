@@ -30,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ReadinessCard } from "@/components/client/readiness-card";
+import { WebsiteCard } from "@/components/client/website-card";
 import { SeenMarker } from "@/components/shared/seen-marker";
 import { CheckCircle2 } from "lucide-react";
 
@@ -123,6 +124,14 @@ export default async function DashboardPage() {
       {/* What we still need from you — progressive (Slice 2C): full checklist
           while much is missing, a compact summary when little remains. */}
       <ReadinessCard readiness={readiness} assetsReceived={assetsReceived} />
+
+      {/* Your Website (Slice 2D) — preview while in development, live once set.
+          Reads the same clients columns the admin manages; hidden until a URL
+          exists. */}
+      <WebsiteCard
+        previewUrl={client?.website_preview_url ?? null}
+        liveUrl={client?.website_live_url ?? null}
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Progress tracker */}

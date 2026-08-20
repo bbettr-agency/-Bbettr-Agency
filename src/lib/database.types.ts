@@ -204,6 +204,8 @@ export interface Database {
           portal_access_granted_at: string | null;
           portal_access_granted_by: string | null;
           welcome_email_sent_at: string | null;
+          website_preview_url: string | null;
+          website_live_url: string | null;
           created_at: string;
           updated_at: string;
         };

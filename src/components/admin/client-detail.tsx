@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import Link from "next/link";
-import { Mail, Phone, User, FileText, ChevronRight, AlertTriangle, CalendarClock, UserRound } from "lucide-react";
+import { Mail, Phone, User, FileText, ChevronRight, AlertTriangle, CalendarClock, UserRound, ExternalLink } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
@@ -39,6 +39,8 @@ import { UpdateQuestionsPanel } from "@/components/admin/update-questions-panel"
 import { PortalAccessSummary } from "@/components/admin/portal-access-summary";
 import { DangerZone } from "@/components/admin/danger-zone";
 import { deriveFocus, deriveAttention } from "@/components/admin/command-centre-state";
+import { WebsiteUrlsManager } from "@/components/admin/website-urls-manager";
+import { deriveWebsiteState } from "@/lib/website-state";
 import { ClipboardList } from "lucide-react";
 import type {
   PortalAccess,
@@ -171,6 +173,13 @@ export function ClientDetail({
     teamMembers.find((m) => m.is_default) ??
     null;
 
+  // Bbettr-built website (Slice 2D) — read-only surfacing in Command Centre;
+  // editing lives in Work › Website. Single source of truth on the client row.
+  const websiteView = deriveWebsiteState({
+    previewUrl: client.website_preview_url,
+    liveUrl: client.website_live_url,
+  });
+
   return (
     <div>
       {/* Sticky client header — breadcrumb-shaped, always visible while
@@ -294,6 +303,30 @@ export function ClientDetail({
                       </p>
                     )}
                   </div>
+
+                  {websiteView.state !== "none" && (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-ink-100 pt-4 text-sm">
+                      <span className="font-medium text-ink-500">Website</span>
+                      <span
+                        className={
+                          websiteView.state === "live"
+                            ? "font-medium text-emerald-700"
+                            : "text-ink-600"
+                        }
+                      >
+                        · {websiteView.state === "live" ? "Live" : "In development"}
+                      </span>
+                      <a
+                        href={websiteView.url ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto flex items-center gap-1 font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        {websiteView.state === "live" ? "Open" : "Open preview"}
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -433,6 +466,13 @@ export function ClientDetail({
                   estimatedLaunchDate={client.estimated_launch_date}
                   successManagerId={client.success_manager_id}
                   teamMembers={teamMembers}
+                />
+              </Disclosure>
+              <Disclosure title="Website">
+                <WebsiteUrlsManager
+                  clientId={client.id}
+                  previewUrl={client.website_preview_url}
+                  liveUrl={client.website_live_url}
                 />
               </Disclosure>
               <Disclosure title="Onboarding answers">
