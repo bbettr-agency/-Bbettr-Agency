@@ -305,12 +305,26 @@ export interface Database {
           client_id: string;
           service: ServiceType;
           onboarding_status: OnboardingStatus;
+          operational_status:
+            | "not_started"
+            | "setup"
+            | "in_progress"
+            | "active"
+            | "paused"
+            | null;
           created_at: string;
         };
         Insert: {
           client_id: string;
           service: ServiceType;
           onboarding_status?: OnboardingStatus;
+          operational_status?:
+            | "not_started"
+            | "setup"
+            | "in_progress"
+            | "active"
+            | "paused"
+            | null;
         };
         Update: Partial<Database["public"]["Tables"]["client_services"]["Row"]>;
         Relationships: [

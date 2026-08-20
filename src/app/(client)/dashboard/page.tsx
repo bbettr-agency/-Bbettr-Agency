@@ -20,6 +20,11 @@ import { ProjectJourney } from "@/components/client/project-journey";
 import { NextStepCard } from "@/components/client/next-step-card";
 import { SuccessManagerCard } from "@/components/client/success-manager-card";
 import { PackageOverview } from "@/components/client/package-overview";
+import {
+  resolveServiceOperational,
+  clientOperationalLabel,
+} from "@/lib/service-operational-state";
+import type { ServiceType } from "@/lib/database.types";
 import { ActivityTimeline } from "@/components/client/activity-timeline";
 import { CLIENT_HOME_FETCH } from "@/components/admin/activity-presentation";
 import { IntakePending } from "@/components/client/intake-pending";
@@ -98,6 +103,31 @@ export default async function DashboardPage() {
   const assetsReceived =
     stages.find((s) => s.name === "Assets Received")?.status === "completed";
 
+  // Friendly per-service operational-state labels for "Your Services" (Slice 2E).
+  // Website is derived from the roadmap + website URLs; ads/SEO from the stored
+  // operational_status (NULL resolved conservatively — never falsely Active).
+  const websiteSignals = {
+    liveUrl: client?.website_live_url ?? null,
+    previewUrl: client?.website_preview_url ?? null,
+    launchCompleted:
+      stages.find((s) => s.name === "Launch")?.status === "completed",
+    hasRoadmapProgress: stages.some(
+      (s) => s.status === "in_progress" || s.status === "completed"
+    ),
+  };
+  const serviceStatusLabels: Partial<Record<ServiceType, string>> = {};
+  for (const s of services) {
+    serviceStatusLabels[s.service] = clientOperationalLabel(
+      s.service,
+      resolveServiceOperational({
+        service: s.service,
+        operationalStatus: s.operational_status,
+        onboardingStatus: s.onboarding_status,
+        website: s.service === "website" ? websiteSignals : undefined,
+      })
+    );
+  }
+
   // Once the project has launched, drop the "Onboarding Complete" card — the
   // roadmap / current-phase card tells the story from then on.
   const launchComplete =
@@ -173,7 +203,10 @@ export default async function DashboardPage() {
       </div>
 
       {/* Package deliverables + growth opportunities */}
-      <PackageOverview purchased={services.map((s) => s.service)} />
+      <PackageOverview
+        purchased={services.map((s) => s.service)}
+        statuses={serviceStatusLabels}
+      />
 
       {/* Activity timeline */}
       <ActivityTimeline events={activity} />

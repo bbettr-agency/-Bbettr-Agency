@@ -22,6 +22,7 @@ import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { logActivity } from "@/lib/activity";
 import { getClientActivity } from "@/lib/admin-queries";
 import { isStorableUrl } from "@/lib/website-state";
+import { isOperationalStatus } from "@/lib/service-operational-state";
 import { SERVICE_LIST, getService } from "@/lib/services";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { STAGE_TO_JOURNEY } from "@/lib/journey";
@@ -719,6 +720,33 @@ export async function setClientWebsiteUrlsAction(
       website_live_url: liveUrl.trim() || null,
     })
     .eq("id", clientId);
+  if (error) return { error: error.message };
+  revalidateClient(clientId);
+  revalidatePath(`/admin/clients/${clientId}`);
+  return { ok: true };
+}
+
+/**
+ * Set a service's OPERATIONAL status (Slice 2E) for Google Ads / Meta Ads / SEO.
+ * Website is DERIVED (roadmap + URLs) and rejected here — it has no stored
+ * operational status. Value must be one of the canonical operational states.
+ */
+export async function setServiceOperationalStatusAction(
+  clientId: string,
+  service: ServiceType,
+  status: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  if (service === "website") {
+    return { error: "Website status is derived and cannot be set manually." };
+  }
+  if (!isOperationalStatus(status)) return { error: "Invalid operational status." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("client_services")
+    .update({ operational_status: status })
+    .eq("client_id", clientId)
+    .eq("service", service);
   if (error) return { error: error.message };
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
