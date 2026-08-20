@@ -2,19 +2,11 @@
 
 import { useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  Home,
-  ClipboardList,
-  ClipboardCheck,
-  Route,
-  FileSignature,
-  Megaphone,
-  BarChart3,
-  FolderOpen,
-  Wallet,
-  type LucideIcon,
-} from "lucide-react";
+import { Home, Route, Wallet, FolderOpen, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resolveSection, type SectionId } from "./client-workspace-sections";
+
+export { resolveSection, type SectionId };
 
 /**
  * Client-workspace navigation (v1.6 Phase B).
@@ -29,17 +21,6 @@ import { cn } from "@/lib/utils";
  * re-fetches the page. Switching stays exactly as instant as the old tabs.
  */
 
-export type SectionId =
-  | "overview"
-  | "intake"
-  | "onboarding"
-  | "progress"
-  | "contracts"
-  | "updates"
-  | "reports"
-  | "files"
-  | "billing";
-
 interface SectionDef {
   id: SectionId;
   label: string;
@@ -51,57 +32,34 @@ interface SectionGroup {
   items: SectionDef[];
 }
 
-/** Grouped catalog — order and grouping are the information architecture. */
+/** Four primary destinations — the order IS the information architecture. */
 const GROUPS: SectionGroup[] = [
-  { label: null, items: [{ id: "overview", label: "Overview", icon: Home }] },
   {
-    label: "Lifecycle",
+    label: null,
     items: [
-      { id: "intake", label: "Intake", icon: ClipboardList },
-      { id: "onboarding", label: "Onboarding", icon: ClipboardCheck },
-      { id: "progress", label: "Progress", icon: Route },
-    ],
-  },
-  {
-    label: "Money",
-    items: [{ id: "billing", label: "Billing", icon: Wallet }],
-  },
-  {
-    label: "Communication",
-    items: [
-      { id: "updates", label: "Updates", icon: Megaphone },
-      { id: "reports", label: "Reports", icon: BarChart3 },
-    ],
-  },
-  {
-    label: "Documents",
-    items: [
-      { id: "contracts", label: "Contracts", icon: FileSignature },
-      { id: "files", label: "Files", icon: FolderOpen },
+      { id: "command-centre", label: "Command Centre", icon: Home },
+      { id: "work", label: "Work", icon: Route },
+      { id: "money", label: "Money", icon: Wallet },
+      { id: "documents", label: "Documents", icon: FolderOpen },
     ],
   },
 ];
-
-const SECTION_IDS = GROUPS.flatMap((g) => g.items.map((i) => i.id));
 
 /** Optional per-section count badges (e.g. invoices, files). */
 export type SectionCounts = Partial<Record<SectionId, number>>;
 
 /**
- * The active section, read from ?section= (invalid/absent → overview), plus a
- * navigate function that updates the URL shallowly — pushState means the
- * browser back button walks section history, GitHub-style, with zero refetch.
+ * The active section, read from ?section= (invalid/absent → command-centre;
+ * legacy ids aliased to their new home), plus a navigate function that updates
+ * the URL shallowly — pushState means back walks section history with no refetch.
  */
 export function useWorkspaceSection(): [SectionId, (id: SectionId) => void] {
   const searchParams = useSearchParams();
-  const raw = searchParams.get("section");
-  const active: SectionId = SECTION_IDS.includes(raw as SectionId)
-    ? (raw as SectionId)
-    : "overview";
+  const active: SectionId = resolveSection(searchParams.get("section"));
 
   const navigate = useCallback((id: SectionId) => {
     const url = new URL(window.location.href);
-    if (id === "overview") url.searchParams.delete("section");
+    if (id === "command-centre") url.searchParams.delete("section");
     else url.searchParams.set("section", id);
     window.history.pushState(null, "", url.toString());
   }, []);

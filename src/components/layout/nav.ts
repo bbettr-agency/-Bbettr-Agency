@@ -5,7 +5,6 @@ import {
   FolderOpen,
   Megaphone,
   BarChart3,
-  Route,
   Users,
   Settings,
   Handshake,
@@ -41,17 +40,34 @@ export interface NavSection {
   items: NavItem[];
 }
 
-/** Client portal navigation. */
-export const CLIENT_NAV: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Onboarding", href: "/dashboard/onboarding", icon: ClipboardList },
-  { label: "Project Progress", href: "/dashboard/project", icon: Route },
-  { label: "Updates", href: "/dashboard/updates", icon: Megaphone },
+/**
+ * Client portal navigation (IA Slice 1). Primary destinations are Home,
+ * Onboarding (only while onboarding is still relevant), and Updates. Reports /
+ * Invoices / Contracts / Files are consolidated under a subordinate
+ * "Documents & billing" group so they stop competing for top-level attention —
+ * every route is preserved. Project Progress is removed from primary nav (the
+ * roadmap is the Home surface; the /dashboard/project route stays as the
+ * expanded-roadmap target and is still reachable via Home + notifications).
+ */
+const CLIENT_DOCUMENTS: NavItem[] = [
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3 },
-  { label: "Files", href: "/dashboard/files", icon: FolderOpen },
-  { label: "Contracts", href: "/dashboard/contracts", icon: FileSignature },
   { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
+  { label: "Contracts", href: "/dashboard/contracts", icon: FileSignature },
+  { label: "Files", href: "/dashboard/files", icon: FolderOpen },
 ];
+
+/** Build the client sidebar. Onboarding appears only while it's still relevant. */
+export function clientNavSections(opts: { onboardingActive: boolean }): NavSection[] {
+  const primary: NavItem[] = [{ label: "Home", href: "/dashboard", icon: LayoutDashboard }];
+  if (opts.onboardingActive) {
+    primary.push({ label: "Onboarding", href: "/dashboard/onboarding", icon: ClipboardList });
+  }
+  primary.push({ label: "Updates", href: "/dashboard/updates", icon: Megaphone });
+  return [
+    { items: primary },
+    { label: "Documents & billing", icon: FolderOpen, items: CLIENT_DOCUMENTS },
+  ];
+}
 
 /** Sales-rep navigation. */
 export const REP_NAV: NavItem[] = [
@@ -61,16 +77,18 @@ export const REP_NAV: NavItem[] = [
   { label: "My Earnings", href: "/rep/earnings", icon: Wallet },
 ];
 
-/** Admin operating-system navigation — top group. */
+/**
+ * Admin operating-system navigation — top group. The agency-wide Reports /
+ * Updates / Files pages are read-only roll-ups of the same data the per-client
+ * sections author, so they are demoted OUT of primary nav (routes preserved and
+ * still resolve for bookmarks); the /admin Overview already previews recents.
+ */
 const ADMIN_MAIN: NavSection = {
   items: [
     { label: "Overview", href: "/admin", icon: LayoutDashboard },
     { label: "Clients", href: "/admin/clients", icon: Users },
     { label: "Reps", href: "/admin/reps", icon: Headset },
     { label: "Invoice Requests", href: "/admin/invoices", icon: Receipt },
-    { label: "Reports", href: "/admin/reports", icon: BarChart3 },
-    { label: "Updates", href: "/admin/updates", icon: Megaphone },
-    { label: "Files", href: "/admin/files", icon: FolderOpen },
   ],
 };
 
@@ -112,8 +130,9 @@ export function adminNavSections(plannerEnabled: boolean): NavSection[] {
     : [ADMIN_MAIN, ADMIN_TAIL];
 }
 
-/** Client / rep sidebars are a single unlabeled group each. */
-export const CLIENT_SECTIONS: NavSection[] = [{ items: CLIENT_NAV }];
+/** Default client sidebar (onboarding shown). The layout passes the live flag. */
+export const CLIENT_SECTIONS: NavSection[] = clientNavSections({ onboardingActive: true });
+/** Rep sidebar is a single unlabeled group. */
 export const REP_SECTIONS: NavSection[] = [{ items: REP_NAV }];
 
 /** Hrefs that must match the path EXACTLY (they are prefixes of child routes). */

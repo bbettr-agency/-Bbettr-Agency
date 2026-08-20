@@ -130,14 +130,11 @@ export function ClientDetail({
   // Services that have a real onboarding submission → drives "View Onboarding".
   const onboardingServices = onboarding.map((s) => s.service);
 
+  // Aggregate the legacy per-section counts into the 4 primary destinations.
   const counts: SectionCounts = {
-    onboarding: onboarding.length,
-    progress: stages.length,
-    contracts: contracts.length,
-    updates: updates.length,
-    reports: reports.length,
-    files: files.length,
-    billing: billing.invoices.length,
+    work: stages.length + updates.length,
+    money: billing.invoices.length,
+    documents: contracts.length + files.length + reports.length,
   };
 
   return (
@@ -197,8 +194,8 @@ export function ClientDetail({
             <WorkspaceRail active={active} counts={counts} onNavigate={navigate} />
           </div>
         </aside>
-        <div className="min-w-0">
-          {active === "overview" && (
+        <div className="min-w-0 space-y-6">
+          {active === "command-centre" && (
             <div className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
               <Card className="lg:col-span-2">
@@ -238,7 +235,7 @@ export function ClientDetail({
                       clientName={client.name}
                       services={services}
                       onboardingServices={onboardingServices}
-                      onViewOnboarding={() => navigate("onboarding")}
+                      onViewOnboarding={() => navigate("work")}
                     />
                   </div>
                 </CardContent>
@@ -252,8 +249,10 @@ export function ClientDetail({
             </div>
           )}
 
-          {active === "onboarding" && (
-            <div className="space-y-4">
+          {active === "work" && (
+            <details className="rounded-xl border border-ink-100 bg-white p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-ink-700">Onboarding answers</summary>
+              <div className="space-y-4 pt-4">
               {onboarding.length > 0 ? (
                 onboarding.map((sub) => (
                   <Card key={sub.id}>
@@ -273,10 +272,11 @@ export function ClientDetail({
                   description="The client hasn't started their onboarding."
                 />
               )}
-            </div>
+              </div>
+            </details>
           )}
 
-          {active === "progress" && (
+          {active === "work" && (
             <div className="space-y-6">
               <AssetsReceivedControl
                 clientId={client.id}
@@ -315,12 +315,10 @@ export function ClientDetail({
             </div>
           )}
 
-          {active === "intake" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Intake</CardTitle>
-              </CardHeader>
-              <CardContent>
+          {active === "work" && (
+            <details className="rounded-xl border border-ink-100 bg-white p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-ink-700">Intake pipeline</summary>
+              <div className="pt-4">
                 <IntakePanel
                   clientId={client.id}
                   onboardingType={client.onboarding_type}
@@ -331,11 +329,11 @@ export function ClientDetail({
                   dealLink={dealLink}
                   linkableDeals={linkableDeals}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </details>
           )}
 
-          {active === "contracts" && (
+          {active === "documents" && (
             <Card>
               <CardHeader>
                 <CardTitle>Contracts</CardTitle>
@@ -346,7 +344,7 @@ export function ClientDetail({
             </Card>
           )}
 
-          {active === "updates" && (
+          {active === "work" && (
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="space-y-6">
                 <Card className="h-fit">
@@ -376,7 +374,7 @@ export function ClientDetail({
             </div>
           )}
 
-          {active === "reports" && (
+          {active === "documents" && (
             <div className="space-y-6">
               <Card>
                 <CardHeader>
@@ -396,7 +394,7 @@ export function ClientDetail({
             </div>
           )}
 
-          {active === "files" && (
+          {active === "documents" && (
             <FileManager
               clientId={client.id}
               initialFiles={files}
@@ -404,7 +402,7 @@ export function ClientDetail({
             />
           )}
 
-          {active === "billing" && (
+          {active === "money" && (
             <div className="space-y-6">
               <BillingDetailsCard
                 clientId={client.id}

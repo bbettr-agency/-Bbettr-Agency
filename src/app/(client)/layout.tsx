@@ -52,7 +52,11 @@ export default async function ClientLayout({
   for (const section of NOTIFY_SECTIONS) {
     if (notifications[section]) badges[SECTION_HREF[section]] = "dot";
   }
-  if (isOnboardingComplete(services ?? [])) {
+  // Onboarding is a task, not a permanent destination: once complete it drops
+  // out of the primary nav (its route stays reachable). While still active it
+  // shows in nav; the green "check" only ever applies in that shown state.
+  const onboardingActive = !isOnboardingComplete(services ?? []);
+  if (!onboardingActive) {
     badges["/dashboard/onboarding"] = "check";
   }
 
@@ -67,6 +71,7 @@ export default async function ClientLayout({
       roleLabel="Client"
       context={client?.name ?? "Your account"}
       badges={badges}
+      onboardingActive={onboardingActive}
       headerSlot={
         <NotificationBell
           notifications={feed.items}
