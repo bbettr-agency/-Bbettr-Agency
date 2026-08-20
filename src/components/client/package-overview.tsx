@@ -21,7 +21,14 @@ import type { ServiceType } from "@/lib/database.types";
  * client hasn't bought appear separately as Growth Opportunities. Presentation
  * only.
  */
-export function PackageOverview({ purchased }: { purchased: ServiceType[] }) {
+export function PackageOverview({
+  purchased,
+  statuses,
+}: {
+  purchased: ServiceType[];
+  /** Friendly resolved operational-state label per service (Slice 2E). */
+  statuses?: Partial<Record<ServiceType, string>>;
+}) {
   const { active, growth } = splitPackages(purchased);
   const [open, setOpen] = useState(false);
 
@@ -57,6 +64,7 @@ export function PackageOverview({ purchased }: { purchased: ServiceType[] }) {
               <div className="flex flex-wrap gap-2">
                 {active.map((svc) => {
                   const Icon = getService(svc.service).icon;
+                  const status = statuses?.[svc.service];
                   return (
                     <span
                       key={svc.service}
@@ -64,6 +72,9 @@ export function PackageOverview({ purchased }: { purchased: ServiceType[] }) {
                     >
                       <Icon className="h-4 w-4 text-brand-500" />
                       {svc.name}
+                      {status && (
+                        <span className="font-normal text-ink-400">— {status}</span>
+                      )}
                     </span>
                   );
                 })}

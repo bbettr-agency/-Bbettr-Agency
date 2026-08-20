@@ -180,6 +180,18 @@ export function ClientDetail({
     liveUrl: client.website_live_url,
   });
 
+  // Website operational-state signals (Slice 2E) — derived from the roadmap +
+  // website URLs; drives the read-only Website status in Services.
+  const websiteSignals = {
+    liveUrl: client.website_live_url,
+    previewUrl: client.website_preview_url,
+    launchCompleted:
+      stages.find((s) => s.name === "Launch")?.status === "completed",
+    hasRoadmapProgress: stages.some(
+      (s) => s.status === "in_progress" || s.status === "completed"
+    ),
+  };
+
   return (
     <div>
       {/* Sticky client header — breadcrumb-shaped, always visible while
@@ -367,6 +379,7 @@ export function ClientDetail({
                     clientId={client.id}
                     clientName={client.name}
                     services={services}
+                    websiteSignals={websiteSignals}
                     onboardingServices={onboardingServices}
                     onViewOnboarding={() => navigate("work")}
                   />
