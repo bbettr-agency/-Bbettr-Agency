@@ -59,4 +59,9 @@ describe("retryMeetingSyncAction — reconciles ONE meeting, honest outcome", ()
     vi.mocked(reconcileMeetingManually).mockResolvedValueOnce({ result: "skipped", reason: "not_configured" } as never);
     expect((await retryMeetingSyncAction(MID)).state).toBe("skipped");
   });
+
+  it("maps a contended single-flight lock (skipped:locked) → busy, NOT 'not connected'", async () => {
+    vi.mocked(reconcileMeetingManually).mockResolvedValueOnce({ result: "skipped", reason: "locked" } as never);
+    expect((await retryMeetingSyncAction(MID)).state).toBe("busy");
+  });
 });

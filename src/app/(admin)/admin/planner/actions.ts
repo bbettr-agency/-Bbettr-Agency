@@ -54,7 +54,7 @@ export interface RetrySyncResult {
   ok?: boolean;
   error?: string;
   /** Honest per-meeting outcome for the UI. */
-  state?: "synced" | "meet_pending" | "failed" | "disconnected" | "skipped";
+  state?: "synced" | "meet_pending" | "failed" | "disconnected" | "busy" | "skipped";
 }
 
 /**
@@ -78,7 +78,10 @@ export async function retryMeetingSyncAction(meetingId: string): Promise<RetrySy
   if (res.result === "failure") {
     return { ok: true, state: res.disconnected ? "disconnected" : "failed" };
   }
-  // skipped (not configured / locked / no change) — treat "not_configured" as a
-  // clear skipped signal; other skips mean nothing to do right now.
-  return { ok: true, state: "skipped" };
+  // skipped: distinguish an in-flight sync (single-flight lock held by a
+  // concurrent retry / scheduler tick) from "Google not connected" — reporting
+  // "not connected" for a lock contention would be dishonest.
+  if (res.reason === "locked") return { ok: true, state: "busy" };
+  return { ok: true, state: "skipped" }; // not_configured / no_change / no_entity
+
 }

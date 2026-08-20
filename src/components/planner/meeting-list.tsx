@@ -60,12 +60,14 @@ export function MeetingList({
                 <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <SyncStatusBadge view={view} />
                   <MeetStatusBadge view={view} />
-                  <MeetingJoinButton
-                    meetUrl={view?.meetUrl ?? null}
-                    startsAt={m.starts_at}
-                    endsAt={m.ends_at}
-                    now={clock}
-                  />
+                  {state !== "cancelled" && (
+                    <MeetingJoinButton
+                      meetUrl={view?.meetUrl ?? null}
+                      startsAt={m.starts_at}
+                      endsAt={m.ends_at}
+                      now={clock}
+                    />
+                  )}
                   <RetrySyncButton meetingId={m.id} syncState={view?.syncState} />
                 </div>
               </div>

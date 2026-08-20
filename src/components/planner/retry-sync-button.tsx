@@ -13,6 +13,7 @@ const OUTCOME: Record<string, string> = {
   meet_pending: "Synced — Meet still provisioning…",
   failed: "Still failing — try again shortly.",
   disconnected: "Google is disconnected — reconnect it first.",
+  busy: "Sync already in progress — try again in a moment.",
   skipped: "Google isn't connected — nothing to sync.",
 };
 

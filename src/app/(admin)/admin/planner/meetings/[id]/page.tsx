@@ -80,11 +80,14 @@ export default async function MeetingDetailPage({
           <span className="text-sm text-ink-500">Calendar projection:</span>
           <SyncStatusBadge view={view} />
           <MeetStatusBadge view={view} />
-          <MeetingJoinButton
-            meetUrl={view?.meetUrl ?? null}
-            startsAt={m.starts_at}
-            endsAt={m.ends_at}
-          />
+          {state !== "cancelled" && (
+            <MeetingJoinButton
+              meetUrl={view?.meetUrl ?? null}
+              startsAt={m.starts_at}
+              endsAt={m.ends_at}
+              now={new Date()}
+            />
+          )}
           <RetrySyncButton meetingId={m.id} syncState={view?.syncState} />
           {view?.lastSyncAt && (
             <span className="text-xs text-ink-400">
