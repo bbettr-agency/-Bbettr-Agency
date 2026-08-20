@@ -61,8 +61,16 @@ export const NOTIFY_SECTIONS = [
 ] as const;
 export type NotifySection = (typeof NOTIFY_SECTIONS)[number];
 
+/**
+ * The nav item a section's unread dot renders on. The `project` seen-state key
+ * is unchanged (still `project` in client_section_views), but Project Progress
+ * is no longer a primary nav item (IA Slice 1) — so unseen roadmap/stage
+ * activity rolls up to Home, whose Project Journey card surfaces the same
+ * content and clears it via the Home <SeenMarker section="project" />. The
+ * /dashboard/project deep-link route stays valid and also clears the dot.
+ */
 export const SECTION_HREF: Record<NotifySection, string> = {
-  project: "/dashboard/project",
+  project: "/dashboard",
   updates: "/dashboard/updates",
   reports: "/dashboard/reports",
   files: "/dashboard/files",

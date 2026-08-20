@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ReadinessChecklist } from "@/components/shared/readiness-checklist";
+import { SeenMarker } from "@/components/shared/seen-marker";
 import { PackageCheck, CheckCircle2 } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -104,6 +105,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Project Progress left primary nav (IA Slice 1): its unread dot now
+          rolls up to Home, and the Project Journey card below is the roadmap
+          the client sees — so opening Home clears the project seen-state. */}
+      <SeenMarker section="project" />
+
       {/* Action required — highest priority, top of the dashboard */}
       <ActionRequiredBanner items={actionItems} />
 

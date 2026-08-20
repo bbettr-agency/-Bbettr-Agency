@@ -6,6 +6,7 @@ import {
   CLIENT_SECTIONS,
   REP_SECTIONS,
 } from "./nav";
+import { SECTION_HREF, NOTIFY_SECTIONS } from "@/lib/queries";
 
 describe("adminNavSections", () => {
   it("includes the Planner section ONLY when the capability is enabled", () => {
@@ -89,5 +90,50 @@ describe("IA Slice 1 — client nav simplification", () => {
     }
     // Project Progress is intentionally demoted from nav (route preserved separately).
     expect(hrefs).not.toContain("/dashboard/project");
+  });
+});
+
+describe("IA Slice 1 — project notification rolls up to Home", () => {
+  const clientHrefs = () =>
+    new Set(
+      clientNavSections({ onboardingActive: true }).flatMap((s) =>
+        s.items.map((i) => i.href)
+      )
+    );
+  const homeHref = () =>
+    clientNavSections({ onboardingActive: true })[0].items.find(
+      (i) => i.label === "Home"
+    )!.href;
+
+  it("keeps `project` as a notify section (seen-state key is unchanged)", () => {
+    // The client_section_views key stays `project`; only its DISPLAY href moved.
+    expect(NOTIFY_SECTIONS).toContain("project");
+  });
+
+  it("routes the project unread dot onto the Home nav item", () => {
+    expect(SECTION_HREF.project).toBe("/dashboard");
+    expect(SECTION_HREF.project).toBe(homeHref());
+  });
+
+  it("simulates the layout badge loop: an unread project surfaces a dot on Home", () => {
+    const notifications: Record<(typeof NOTIFY_SECTIONS)[number], boolean> = {
+      project: true,
+      updates: false,
+      reports: false,
+      files: false,
+      invoices: false,
+    };
+    const badges: Record<string, "dot" | undefined> = {};
+    for (const section of NOTIFY_SECTIONS) {
+      if (notifications[section]) badges[SECTION_HREF[section]] = "dot";
+    }
+    expect(badges[homeHref()]).toBe("dot");
+  });
+
+  it("no notification dot is orphaned — every notify href maps to a real client nav destination", () => {
+    const hrefs = clientHrefs();
+    for (const section of NOTIFY_SECTIONS) {
+      expect(hrefs.has(SECTION_HREF[section])).toBe(true);
+    }
   });
 });
