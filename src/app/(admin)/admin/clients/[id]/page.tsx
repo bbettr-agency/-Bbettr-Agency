@@ -22,6 +22,7 @@ import {
   getClientUpdateQuestions,
 } from "@/lib/admin-queries";
 import { getBillingDetails } from "@/lib/billing-details-queries";
+import { ADMIN_RECENT_FETCH } from "@/components/admin/activity-presentation";
 import { ClientDetail } from "@/components/admin/client-detail";
 
 const PORTAL_URL =
@@ -65,7 +66,9 @@ export default async function ClientDetailPage({
     getOnboarding(id),
     getPortalAccess(id),
     getTeamMembers(),
-    getClientActivity(id),
+    // Bounded recent window for the fast Work-page paint; full history is loaded
+    // on demand via loadClientActivityAction when the admin opens it (Slice 2B).
+    getClientActivity(id, ADMIN_RECENT_FETCH),
     getClientContracts(id),
     getClientDealLink(id),
     getLinkableDeals(),
@@ -76,6 +79,9 @@ export default async function ClientDetailPage({
 
   // Reaction counts depend on the fetched update ids (read-only for admins).
   const updateReactions = await getUpdateReactions(updates.map((u) => u.id));
+
+  // The bounded fetch hit its cap ⇒ more history exists beyond the recent view.
+  const activityHasMore = activity.length >= ADMIN_RECENT_FETCH;
 
   return (
     // The workspace renders its own sticky, breadcrumb-shaped client header
@@ -93,6 +99,7 @@ export default async function ClientDetailPage({
         portalAccess={portalAccess}
         teamMembers={teamMembers}
         activity={activity}
+        activityHasMore={activityHasMore}
         contracts={contracts}
         dealLink={dealLink}
         linkableDeals={linkableDeals}

@@ -20,6 +20,7 @@ import {
 import { createInvoiceForRequest } from "@/lib/quickbooks";
 import { createPaymentForRequest, isPayfastConfigured } from "@/lib/payfast";
 import { logActivity } from "@/lib/activity";
+import { getClientActivity } from "@/lib/admin-queries";
 import { SERVICE_LIST, getService } from "@/lib/services";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
 import { STAGE_TO_JOURNEY } from "@/lib/journey";
@@ -762,6 +763,17 @@ export async function addActivityEventAction(
   revalidateClient(clientId);
   revalidatePath(`/admin/clients/${clientId}`);
   return { ok: true };
+}
+
+/**
+ * Load a client's COMPLETE activity history (admin-only). Called when an admin
+ * explicitly opens "View full history" — the Work page itself only fetches a
+ * bounded recent window (Slice 2B). Returns every event, newest-first; no event
+ * type is filtered out.
+ */
+export async function loadClientActivityAction(clientId: string) {
+  await requireAdmin();
+  return getClientActivity(clientId);
 }
 
 /** Delete a timeline event. */
