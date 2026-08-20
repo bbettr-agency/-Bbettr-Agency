@@ -10,7 +10,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   adminNavSections,
-  CLIENT_SECTIONS,
+  clientNavSections,
   REP_SECTIONS,
   EXACT_NAV_HREFS,
   type NavItem,
@@ -37,6 +37,12 @@ interface AppShellProps {
    * sub-menu. Never grants access on its own — routes/RLS still enforce admin.
    */
   canUsePlanner?: boolean;
+  /**
+   * Client only: whether onboarding is still relevant. When false, the
+   * Onboarding item drops out of the primary nav (route is preserved). Defaults
+   * to true (shown) for callers that don't compute it.
+   */
+  onboardingActive?: boolean;
   /** Optional top-bar content (e.g. the client notification bell). */
   headerSlot?: React.ReactNode;
   children: React.ReactNode;
@@ -48,6 +54,7 @@ export function AppShell({
   roleLabel,
   badges,
   canUsePlanner,
+  onboardingActive,
   headerSlot,
   children,
 }: AppShellProps) {
@@ -65,7 +72,7 @@ export function AppShell({
       ? adminNavSections(Boolean(canUsePlanner))
       : roleLabel === "Rep"
         ? REP_SECTIONS
-        : CLIENT_SECTIONS;
+        : clientNavSections({ onboardingActive: onboardingActive ?? true });
 
   const isActive = (href: string) => {
     if (href === pathname) return true;

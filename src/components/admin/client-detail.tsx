@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import Link from "next/link";
-import { Mail, Phone, User, FileText } from "lucide-react";
+import { Mail, Phone, User, FileText, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
 import {
@@ -22,7 +22,7 @@ import { ClientServicesManager } from "@/components/admin/client-services-manage
 import { StageManager } from "@/components/admin/stage-manager";
 import { ProjectSettingsManager } from "@/components/admin/project-settings-manager";
 import { ActivityManager } from "@/components/admin/activity-manager";
-import { ContractManager } from "@/components/admin/contract-manager";
+import { ClientDocumentsSection } from "@/components/admin/client-documents-section";
 import { IntakePanel } from "@/components/admin/intake-panel";
 import { BillingPanel } from "@/components/admin/billing-panel";
 import { BillingDetailsCard } from "@/components/admin/billing-details-card";
@@ -33,11 +33,8 @@ import { AssetsReceivedControl } from "@/components/admin/assets-received-contro
 import { RequestActionComposer } from "@/components/admin/request-action-composer";
 import { computeReadiness } from "@/lib/readiness";
 import { UpdateComposer } from "@/components/admin/update-composer";
-import { ReportComposer } from "@/components/admin/report-composer";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
 import { UpdateQuestionsPanel } from "@/components/admin/update-questions-panel";
-import { ReportCard } from "@/components/reports/report-card";
-import { FileManager } from "@/components/files/file-manager";
 import { PortalAccessCard } from "@/components/admin/portal-access-card";
 import { ClipboardList } from "lucide-react";
 import type {
@@ -130,14 +127,11 @@ export function ClientDetail({
   // Services that have a real onboarding submission → drives "View Onboarding".
   const onboardingServices = onboarding.map((s) => s.service);
 
+  // Aggregate the legacy per-section counts into the 4 primary destinations.
   const counts: SectionCounts = {
-    onboarding: onboarding.length,
-    progress: stages.length,
-    contracts: contracts.length,
-    updates: updates.length,
-    reports: reports.length,
-    files: files.length,
-    billing: billing.invoices.length,
+    work: stages.length + updates.length,
+    money: billing.invoices.length,
+    documents: contracts.length + files.length + reports.length,
   };
 
   return (
@@ -197,8 +191,8 @@ export function ClientDetail({
             <WorkspaceRail active={active} counts={counts} onNavigate={navigate} />
           </div>
         </aside>
-        <div className="min-w-0">
-          {active === "overview" && (
+        <div className="min-w-0 space-y-6">
+          {active === "command-centre" && (
             <div className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
               <Card className="lg:col-span-2">
@@ -226,7 +220,7 @@ export function ClientDetail({
                     />
                     <p className="mt-1.5 text-xs text-ink-400">
                       Internal lifecycle label — the project&apos;s real progress
-                      is the roadmap below in the Progress tab.
+                      is the roadmap in the Work section.
                     </p>
                   </div>
                   <div>
@@ -238,7 +232,7 @@ export function ClientDetail({
                       clientName={client.name}
                       services={services}
                       onboardingServices={onboardingServices}
-                      onViewOnboarding={() => navigate("onboarding")}
+                      onViewOnboarding={() => navigate("work")}
                     />
                   </div>
                 </CardContent>
@@ -252,50 +246,14 @@ export function ClientDetail({
             </div>
           )}
 
-          {active === "onboarding" && (
-            <div className="space-y-4">
-              {onboarding.length > 0 ? (
-                onboarding.map((sub) => (
-                  <Card key={sub.id}>
-                    <CardHeader className="flex-row items-center justify-between">
-                      <CardTitle>{getService(sub.service).name}</CardTitle>
-                      <OnboardingStatusBadge status={sub.status} />
-                    </CardHeader>
-                    <CardContent>
-                      <SubmissionView data={sub.data} />
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <EmptyState
-                  icon={ClipboardList}
-                  title="No onboarding submitted yet"
-                  description="The client hasn't started their onboarding."
-                />
-              )}
-            </div>
-          )}
-
-          {active === "progress" && (
+          {active === "work" && (
             <div className="space-y-6">
+              {/* CURRENT PROJECT / DELIVERY — the core, always visible first. */}
               <AssetsReceivedControl
                 clientId={client.id}
                 readiness={readiness}
                 assetsReceived={assetsReceived}
               />
-              <Card>
-                <CardHeader>
-                  <CardTitle>Client Experience</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ProjectSettingsManager
-                    clientId={client.id}
-                    estimatedLaunchDate={client.estimated_launch_date}
-                    successManagerId={client.success_manager_id}
-                    teamMembers={teamMembers}
-                  />
-                </CardContent>
-              </Card>
               <Card>
                 <CardHeader>
                   <CardTitle>Project Roadmap</CardTitle>
@@ -312,15 +270,71 @@ export function ClientDetail({
                   <ActivityManager clientId={client.id} events={activity} />
                 </CardContent>
               </Card>
-            </div>
-          )}
 
-          {active === "intake" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Intake</CardTitle>
-              </CardHeader>
-              <CardContent>
+              {/* CLIENT COMMUNICATION — quick actions + open questions. */}
+              <GroupLabel>Client communication</GroupLabel>
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="space-y-6">
+                  <Card className="h-fit">
+                    <CardHeader>
+                      <CardTitle>Post an update</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <UpdateComposer clientId={client.id} />
+                    </CardContent>
+                  </Card>
+                  <Card className="h-fit border-amber-200">
+                    <CardContent className="p-6">
+                      <RequestActionComposer clientId={client.id} />
+                    </CardContent>
+                  </Card>
+                </div>
+                <UpdateQuestionsPanel questions={updateQuestions} />
+              </div>
+
+              {/* SECONDARY / OCCASIONAL — progressive disclosure (collapsed). */}
+              <GroupLabel>Settings &amp; context</GroupLabel>
+              <Disclosure title="Update history">
+                {updates.length > 0 ? (
+                  <UpdatesTimeline updates={updates} reactions={updateReactions} />
+                ) : (
+                  <p className="py-4 text-center text-sm text-ink-400">
+                    No updates posted yet.
+                  </p>
+                )}
+              </Disclosure>
+              <Disclosure title="Project settings">
+                <ProjectSettingsManager
+                  clientId={client.id}
+                  estimatedLaunchDate={client.estimated_launch_date}
+                  successManagerId={client.success_manager_id}
+                  teamMembers={teamMembers}
+                />
+              </Disclosure>
+              <Disclosure title="Onboarding answers">
+                {onboarding.length > 0 ? (
+                  <div className="space-y-4">
+                    {onboarding.map((sub) => (
+                      <Card key={sub.id}>
+                        <CardHeader className="flex-row items-center justify-between">
+                          <CardTitle>{getService(sub.service).name}</CardTitle>
+                          <OnboardingStatusBadge status={sub.status} />
+                        </CardHeader>
+                        <CardContent>
+                          <SubmissionView data={sub.data} />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={ClipboardList}
+                    title="No onboarding submitted yet"
+                    description="The client hasn't started their onboarding."
+                  />
+                )}
+              </Disclosure>
+              <Disclosure title="Intake pipeline">
                 <IntakePanel
                   clientId={client.id}
                   onboardingType={client.onboarding_type}
@@ -331,80 +345,20 @@ export function ClientDetail({
                   dealLink={dealLink}
                   linkableDeals={linkableDeals}
                 />
-              </CardContent>
-            </Card>
-          )}
-
-          {active === "contracts" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Contracts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ContractManager clientId={client.id} contracts={contracts} />
-              </CardContent>
-            </Card>
-          )}
-
-          {active === "updates" && (
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="space-y-6">
-                <Card className="h-fit">
-                  <CardHeader>
-                    <CardTitle>Post an update</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <UpdateComposer clientId={client.id} />
-                  </CardContent>
-                </Card>
-                <Card className="h-fit border-amber-200">
-                  <CardContent className="p-6">
-                    <RequestActionComposer clientId={client.id} />
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="space-y-6">
-                <UpdateQuestionsPanel questions={updateQuestions} />
-                {updates.length > 0 ? (
-                  <UpdatesTimeline updates={updates} reactions={updateReactions} />
-                ) : (
-                  <p className="py-8 text-center text-sm text-ink-400">
-                    No updates posted yet.
-                  </p>
-                )}
-              </div>
+              </Disclosure>
             </div>
           )}
 
-          {active === "reports" && (
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Create / update a monthly report</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ReportComposer clientId={client.id} />
-                </CardContent>
-              </Card>
-              {reports.length > 0 && (
-                <div className="grid gap-6 xl:grid-cols-2">
-                  {reports.map((r) => (
-                    <ReportCard key={r.id} report={r} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {active === "files" && (
-            <FileManager
+          {active === "documents" && (
+            <ClientDocumentsSection
               clientId={client.id}
-              initialFiles={files}
-              isAdmin
+              contracts={contracts}
+              files={files}
+              reports={reports}
             />
           )}
 
-          {active === "billing" && (
+          {active === "money" && (
             <div className="space-y-6">
               <BillingDetailsCard
                 clientId={client.id}
@@ -424,6 +378,37 @@ export function ClientDetail({
         </div>
       </div>
     </div>
+  );
+}
+
+/** A labelled hairline that separates the delivery core from lower-priority groups. */
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+        {children}
+      </span>
+      <span className="h-px flex-1 bg-ink-100" />
+    </div>
+  );
+}
+
+/** Collapsed-by-default disclosure for occasional/legacy context inside Work. */
+function Disclosure({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-xl border border-ink-100 bg-white">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-ink-700 hover:text-ink-900 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="h-4 w-4 text-ink-400 transition-transform group-open:rotate-90" />
+        {title}
+      </summary>
+      <div className="border-t border-ink-100 p-4">{children}</div>
+    </details>
   );
 }
 
