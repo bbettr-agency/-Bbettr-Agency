@@ -28,6 +28,13 @@ describe("isPublicRoute (middleware auth surface)", () => {
     expect(isPublicRoute("/api/payfast/itn")).toBe(true);
   });
 
+  it("opens the public legal pages (Google OAuth Privacy/Terms URLs)", () => {
+    expect(isPublicRoute("/privacy")).toBe(true);
+    expect(isPublicRoute("/terms")).toBe(true);
+    // Protected areas that merely contain the words stay gated (prefix match).
+    expect(isPublicRoute("/admin/terms")).toBe(false);
+  });
+
   it("does not open a lookalike that merely contains 'reschedule' lower in the path", () => {
     expect(isPublicRoute("/admin/reschedule")).toBe(false); // prefix match only
   });
