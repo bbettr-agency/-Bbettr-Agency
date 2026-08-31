@@ -9,6 +9,10 @@ export const PUBLIC_ROUTES = [
   "/auth",
   "/forgot-password",
   "/reset-password",
+  // Public legal pages — reachable without a portal session, and used as the
+  // Google OAuth app's Privacy Policy / Terms of Service URLs.
+  "/privacy",
+  "/terms",
   // PayFast checkout hand-off + return/cancel + ITN — hit by the international
   // payer, who is not a logged-in portal user.
   "/pay",
