@@ -40,6 +40,11 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "var(--font-sans)", "sans-serif"],
+        // Editorial typeface — scoped ONLY to the public /start intake (the CSS
+        // variables are set by app/start/layout.tsx via next/font). Unused
+        // elsewhere, so this never changes Portal/admin typography.
+        editorial: ["var(--font-editorial-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        "editorial-display": ["var(--font-editorial-display)", "Georgia", "serif"],
       },
       borderRadius: {
         xl: "0.875rem",

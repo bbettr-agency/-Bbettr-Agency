@@ -35,6 +35,13 @@ describe("isPublicRoute (middleware auth surface)", () => {
     expect(isPublicRoute("/admin/terms")).toBe(false);
   });
 
+  it("opens the public prospect intake (generic + tokenised)", () => {
+    expect(isPublicRoute("/start")).toBe(true);
+    expect(isPublicRoute("/start/AbC123token")).toBe(true);
+    // A protected lookalike stays gated (prefix match only).
+    expect(isPublicRoute("/admin/start")).toBe(false);
+  });
+
   it("does not open a lookalike that merely contains 'reschedule' lower in the path", () => {
     expect(isPublicRoute("/admin/reschedule")).toBe(false); // prefix match only
   });
