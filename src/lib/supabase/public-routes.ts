@@ -13,6 +13,10 @@ export const PUBLIC_ROUTES = [
   // Google OAuth app's Privacy Policy / Terms of Service URLs.
   "/privacy",
   "/terms",
+  // Public shareable prospect intake (P2). Generic /start + tokenised
+  // /start/<token>. No portal session; writes (later slices) go through
+  // validated server actions + Turnstile + service-role, never anon RLS.
+  "/start",
   // PayFast checkout hand-off + return/cancel + ITN — hit by the international
   // payer, who is not a logged-in portal user.
   "/pay",
