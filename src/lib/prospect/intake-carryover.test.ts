@@ -42,6 +42,18 @@ describe("intake → onboarding carry-over mapping", () => {
     expect(picked).toEqual({});
   });
 
+  it("never carries reserved metadata (_prefill) into formal onboarding", () => {
+    const picked = pickCarryOverData(
+      {
+        website: "https://acme.test", // real seo key → carries
+        _prefill: { website: "https://admin-supplied.test" }, // reserved → must NOT carry
+      },
+      "seo"
+    );
+    expect(picked).toEqual({ website: "https://acme.test" });
+    expect("_prefill" in picked).toBe(false);
+  });
+
   it("LOCKED: carrying answers never implies onboarding has started", () => {
     // A pre-sales intake is a separate stage from formal onboarding. Conversion
     // seeds data only; the onboarding status stays not_started.
