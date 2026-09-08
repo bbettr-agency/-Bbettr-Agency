@@ -19,7 +19,7 @@ import { useTurnstile } from "./turnstile-widget";
 import { createIntakeDraftAction, saveIntakeDraftAction, submitIntakeAction } from "@/app/start/actions";
 import { BUSINESS_FIELDS } from "@/lib/prospect/intake-schema";
 import type { IntakeSectionId } from "@/lib/prospect/intake-steps";
-import { progressFor, getSection } from "@/lib/prospect/intake-steps";
+import { progressFor } from "@/lib/prospect/intake-steps";
 import type { FieldErrors } from "@/lib/prospect/intake-validation";
 import {
   advance,
@@ -31,6 +31,7 @@ import {
   canSubmitNow,
   classifyKind,
   isClosedOutcome,
+  applySaveResult,
   type SaveStatus,
 } from "@/lib/prospect/intake-flow-machine";
 
@@ -81,6 +82,7 @@ export function IntakeFlow({
   const dataRef = useRef(data);
   const tokenRef = useRef(token);
   const pendingRef = useRef(false);
+  const savingRef = useRef<Promise<boolean> | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Synchronous lock: closes the async-state gap so a fast double-click can never
   // fire a second create/submit before React re-renders `creating`/`submitting`.
@@ -105,41 +107,50 @@ export function IntakeFlow({
     setDataState(next);
   }, []);
 
+  // Single-flight autosave. The client is the source of truth for the live edit
+  // session (we never reconcile the server's normalized copy back onto the inputs
+  // — that would erase a partially-typed optional value like a not-yet-valid URL);
+  // the server is canonical at rest and on submit. On failure the edits stay
+  // pending so a retry/flush re-sends them and advance stays blocked.
   const performSave = useCallback(async (): Promise<boolean> => {
+    if (savingRef.current) return savingRef.current; // one save in flight at a time
     if (!tokenRef.current || !pendingRef.current) return true;
     pendingRef.current = false;
     setSaveStatus("saving");
     const snapshot = { ...dataRef.current };
     delete snapshot[HONEYPOT_FIELD];
-    try {
-      const res = await saveIntakeDraftAction(tokenRef.current, snapshot);
-      const outcome = classifyKind(res.kind);
-      if (res.kind === "success") {
-        setSaveStatus("saved");
-        // Keep the server canonical, but never clobber edits made mid-flight.
-        if (!pendingRef.current) setData(res.view.data as Data);
-        return true;
-      }
-      if (isClosedOutcome(outcome)) {
-        setClosed(outcome === "expired" ? "expired" : "closed");
+    const run = (async (): Promise<boolean> => {
+      try {
+        const res = await saveIntakeDraftAction(tokenRef.current as string, snapshot);
+        const t = applySaveResult(res.kind);
+        if (t.stillPending) pendingRef.current = true; // keep dirty → retryable, blocks advance
+        if (t.closed) setClosed(t.closed);
+        setSaveStatus(t.status);
+        return t.ok;
+      } catch {
+        pendingRef.current = true; // network error → still unsaved
+        setSaveStatus("error");
         return false;
+      } finally {
+        savingRef.current = null;
       }
-      setSaveStatus("error");
-      return false;
-    } catch {
-      setSaveStatus("error");
-      return false;
-    }
-  }, [setData]);
+    })();
+    savingRef.current = run;
+    return run;
+  }, []);
 
   const scheduleSave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void performSave(), AUTOSAVE_MS);
   }, [performSave]);
 
+  // Confirmed save before advancing: wait out any in-flight save, then flush a
+  // catch-up save for edits that landed while it ran. Bounded (≤2 round trips).
   const flushSave = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    return performSave();
+    let ok = await performSave();
+    if (ok && pendingRef.current) ok = await performSave();
+    return ok;
   }, [performSave]);
 
   const update = useCallback(
@@ -182,7 +193,6 @@ export function IntakeFlow({
         if (typeof window !== "undefined") {
           window.history.replaceState(window.history.state, "", `/start/${res.token}`);
         }
-        setData(res.view.data as Data);
         turnstile.reset(); // fresh token available for the later submit
         setCreating(false);
         setSaveStatus("saved");
@@ -204,7 +214,7 @@ export function IntakeFlow({
     } finally {
       writeLock.current = false;
     }
-  }, [creating, token, honeypot, turnstile, setData]);
+  }, [creating, token, honeypot, turnstile]);
 
   // ── Submit (from Review) ─────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
@@ -281,13 +291,8 @@ export function IntakeFlow({
 
   const goForward = useCallback(async () => {
     setNote(null);
-    const v = validateSection(section, dataRef.current);
-    if (!v.ok) {
-      setErrors(v.errors);
-      return;
-    }
-    setErrors({});
 
+    // Create and submit own their own validation (and surface their own notes).
     if (section === "business" && !token) {
       await doCreate();
       return;
@@ -296,6 +301,13 @@ export function IntakeFlow({
       await doSubmit();
       return;
     }
+
+    const v = validateSection(section, dataRef.current);
+    if (!v.ok) {
+      setErrors(v.errors);
+      return;
+    }
+    setErrors({});
 
     const ok = await flushSave(); // confirmed save before advancing
     if (!ok) return;

@@ -195,6 +195,29 @@ export function classifyKind(kind: string): ActionOutcome {
 export function isClosedOutcome(o: ActionOutcome): boolean {
   return o === "expired" || o === "closed";
 }
+
+/**
+ * How an autosave result must move the client's save state. Critically, ANY
+ * non-success, non-terminal result keeps the edits PENDING so a later flush/
+ * retry re-sends them and advancing stays blocked — a transient save failure
+ * must never let unsaved answers be silently dropped from a later submit.
+ */
+export interface SaveTransition {
+  ok: boolean;
+  /** Edits remain unsaved and must be retried before advancing. */
+  stillPending: boolean;
+  status: SaveStatus;
+  /** Non-null → the link is closed; switch to that terminal view. */
+  closed: "expired" | "closed" | null;
+}
+export function applySaveResult(kind: string): SaveTransition {
+  if (kind === "success") return { ok: true, stillPending: false, status: "saved", closed: null };
+  const o = classifyKind(kind);
+  if (isClosedOutcome(o)) {
+    return { ok: false, stillPending: false, status: "error", closed: o === "expired" ? "expired" : "closed" };
+  }
+  return { ok: false, stillPending: true, status: "error", closed: null };
+}
 /** Outcomes that are safe to retry without losing entered values. */
 export function isRetryableOutcome(o: ActionOutcome): boolean {
   return o === "verification" || o === "config" || o === "conflict" || o === "save_failed";

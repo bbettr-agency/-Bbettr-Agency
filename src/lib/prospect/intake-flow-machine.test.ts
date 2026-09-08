@@ -11,6 +11,7 @@ import {
   classifyKind,
   isClosedOutcome,
   isRetryableOutcome,
+  applySaveResult,
   serviceDetailPanels,
 } from "./intake-flow-machine";
 import { normalizeIntakeData } from "./intake-normalize";
@@ -147,5 +148,49 @@ describe("server-result classification", () => {
     expect(isRetryableOutcome("conflict")).toBe(true);
     expect(isRetryableOutcome("save_failed")).toBe(true);
     expect(isRetryableOutcome("success")).toBe(false);
+  });
+});
+
+describe("applySaveResult — a failed autosave must never silently drop edits", () => {
+  it("success clears pending and reports ok", () => {
+    expect(applySaveResult("success")).toEqual({
+      ok: true,
+      stillPending: false,
+      status: "saved",
+      closed: null,
+    });
+  });
+
+  it("transient failure KEEPS edits pending (so a later flush re-sends them)", () => {
+    // Regression: previously a failed save left pending=false, so a subsequent
+    // Continue/flush was a no-op and the edits never reached the submitted row.
+    expect(applySaveResult("save_failed")).toEqual({
+      ok: false,
+      stillPending: true,
+      status: "error",
+      closed: null,
+    });
+    // An unexpected/unknown kind is treated as a retryable failure, not success.
+    expect(applySaveResult("weird")).toEqual({
+      ok: false,
+      stillPending: true,
+      status: "error",
+      closed: null,
+    });
+  });
+
+  it("a dead link is terminal (switch to closed view), not a retryable pending save", () => {
+    expect(applySaveResult("expired")).toEqual({
+      ok: false,
+      stillPending: false,
+      status: "error",
+      closed: "expired",
+    });
+    expect(applySaveResult("invalid_or_closed")).toEqual({
+      ok: false,
+      stillPending: false,
+      status: "error",
+      closed: "closed",
+    });
   });
 });
