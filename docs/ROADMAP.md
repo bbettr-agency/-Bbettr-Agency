@@ -3,6 +3,13 @@
 Captured at the end of the V1 launch session. Nothing here is a launch blocker;
 ordered by impact.
 
+> **Current programme (2026-09): Prospect Intake (public `/start`).** A separate,
+> active workstream not part of the original V2 list below. Authoritative spec:
+> [`PROSPECT_INTAKE.md`](./PROSPECT_INTAKE.md). P1 + P2-A…P2-D are **shipped**
+> (migrations `0058`/`0059`); **P2-E — stale/expired draft cleanup** is the
+> active slice. The V2 items below remain valid future work; they are not
+> superseded by the prospect-intake programme.
+
 ## ✅ Shipped
 - **Email notifications** — Event → DB notification → branded Resend email
   (update / report / stage advanced / assets-needed / action-required) +

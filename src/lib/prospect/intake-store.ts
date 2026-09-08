@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ProspectIntakeStore, StoredIntake } from "./intake-server";
 import type { PromotedColumns } from "./intake-normalize";
+import type { CleanupStore } from "./intake-cleanup";
 
 /**
  * Real service-role ProspectIntakeStore (P2-C). The ONLY place public-intake DB
@@ -78,6 +79,41 @@ export function createProspectIntakeStore(): ProspectIntakeStore {
         .select("id")
         .maybeSingle();
       return Boolean(row);
+    },
+  };
+}
+
+/**
+ * Real service-role CleanupStore (P2-E). Both methods filter by the exact
+ * eligibility predicate (status='draft' AND token_expires_at < nowIso); the
+ * delete RE-ASSERTS it so a row that left `draft` after selection is never
+ * removed. Service-role only, server-side, never anon. No schema change.
+ */
+export function createProspectCleanupStore(): CleanupStore {
+  const admin = createAdminClient();
+  return {
+    async findExpiredDraftIds(nowIso, limit) {
+      const { data, error } = await admin
+        .from(TABLE)
+        .select("id")
+        .eq("status", "draft")
+        .lt("token_expires_at", nowIso)
+        .limit(limit);
+      if (error) throw new Error("cleanup_find_failed");
+      return (data ?? []).map((r) => r.id as string);
+    },
+
+    async deleteDraftsByIds(ids, nowIso) {
+      if (ids.length === 0) return 0;
+      const { data, error } = await admin
+        .from(TABLE)
+        .delete()
+        .in("id", ids)
+        .eq("status", "draft") // re-assert eligibility at the mutation boundary
+        .lt("token_expires_at", nowIso)
+        .select("id");
+      if (error) throw new Error("cleanup_delete_failed");
+      return (data ?? []).length;
     },
   };
 }
