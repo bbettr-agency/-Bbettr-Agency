@@ -24,20 +24,20 @@ export function IntakeIntro() {
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-600">
           Get started
         </p>
-        <h1 className="mt-3 font-display text-3xl font-bold leading-[1.12] text-ink-900 sm:text-4xl">
+        <h1 className="mt-3 font-display text-[2rem] font-bold leading-[1.1] text-ink-900 sm:text-4xl lg:mt-4 lg:text-5xl">
           Tell us about your business.
         </h1>
-        <p className="mt-4 max-w-md text-base leading-relaxed text-ink-500">
+        <p className="mt-4 max-w-[34rem] text-base leading-relaxed text-ink-500 lg:mt-5 lg:text-lg">
           Answer a few quick questions and we&rsquo;ll recommend the best next
           step.
         </p>
-        <div className="mt-8">
+        <div className="mt-8 lg:mt-10">
           <Button size="lg" onClick={() => setStarted(true)} className="w-full sm:w-auto">
             Get started
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
-        <p className="mt-5 text-xs text-ink-400">
+        <p className="mt-5 text-xs text-ink-400 lg:mt-6">
           Takes about 3 minutes ·{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-ink-600">
             How we use your details
@@ -60,7 +60,7 @@ export function IntakeIntro() {
       <h2 className="font-display text-2xl font-bold text-ink-900 sm:text-3xl">
         Tell us about your business.
       </h2>
-      <p className="mt-3 text-base leading-relaxed text-ink-500">
+      <p className="mt-3 text-base leading-relaxed text-ink-500 lg:text-lg">
         A few basics so we know who we&rsquo;re speaking with.
       </p>
     </IntakeShell>
