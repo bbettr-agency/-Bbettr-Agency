@@ -4,6 +4,7 @@ import {
   derivePromotedColumns,
   normalizeIntake,
   normalizeWebsiteUrl,
+  mergeIntakePatch,
 } from "./intake-normalize";
 
 describe("normalizeWebsiteUrl", () => {
@@ -111,6 +112,69 @@ describe("normalizeIntakeData — deterministic, safe, canonical", () => {
     });
     expect(d.email).toBe("current@acme.co.za"); // current wins
     expect(d._prefill).toEqual({ email: "admin@acme.co.za", business_name: "Admin Co" }); // preserved, sanitized
+  });
+});
+
+describe("mergeIntakePatch — the P2-C partial-save contract", () => {
+  // A realistic previously-saved complete state, server-owned _prefill included.
+  const existing = normalizeIntakeData({
+    contact_name: "Ada",
+    business_name: "Acme",
+    email: "ada@acme.co.za",
+    selected_services: ["seo"],
+    keywords: ["plumber", "geyser"],
+    goals: ["More leads"],
+    _prefill: { email: "admin@acme.co.za", business_name: "Admin Co" },
+  });
+
+  it("a partial patch preserves existing answers from other sections", () => {
+    // Patch only step 5 — everything else must survive.
+    const next = mergeIntakePatch(existing, { investment_band: "Under R5,000" });
+    expect(next.investment_band).toBe("Under R5,000");
+    expect(next.contact_name).toBe("Ada");
+    expect(next.email).toBe("ada@acme.co.za");
+    expect(next.keywords).toEqual(["plumber", "geyser"]);
+    expect(next.goals).toEqual(["More leads"]);
+  });
+
+  it("deselecting a service does NOT erase that service's stored answers", () => {
+    // Prospect switches services away from seo; keywords must remain in data.
+    const next = mergeIntakePatch(existing, { selected_services: ["website"], services_uncertain: false });
+    expect(next.selected_services).toEqual(["website"]);
+    expect(next.keywords).toEqual(["plumber", "geyser"]); // preserved, just inactive
+  });
+
+  it("_prefill survives an ordinary prospect field update", () => {
+    const next = mergeIntakePatch(existing, { email: "new@acme.co.za" });
+    expect(next.email).toBe("new@acme.co.za");
+    expect(next._prefill).toEqual({ email: "admin@acme.co.za", business_name: "Admin Co" });
+  });
+
+  it("a prospect patch CANNOT replace or inject _prefill (server-owned)", () => {
+    const next = mergeIntakePatch(existing, {
+      email: "x@acme.co.za",
+      _prefill: { email: "attacker@evil.test" }, // must be ignored
+    });
+    expect(next._prefill).toEqual({ email: "admin@acme.co.za", business_name: "Admin Co" });
+  });
+
+  it("drops unknown/untrusted patch keys and client-supplied promoted columns", () => {
+    const next = mergeIntakePatch(existing, { hacker: "x", email: "ok@acme.co.za" });
+    expect(next.hacker).toBeUndefined();
+    expect(next.email).toBe("ok@acme.co.za");
+  });
+
+  it("promoted columns are derived AFTER the complete merged object is normalized", () => {
+    const merged = mergeIntakePatch(existing, { business_name: "Renamed" });
+    const cols = derivePromotedColumns(merged);
+    expect(cols.business_name).toBe("Renamed");
+    expect(cols.email).toBe(merged.email); // straight from normalized complete data
+    expect(cols.selected_services).toBe(merged.selected_services);
+  });
+
+  it("handles an empty/absent existing base gracefully", () => {
+    const next = mergeIntakePatch(undefined, { contact_name: "First", business_name: "B", email: "a@b.co" });
+    expect(next.contact_name).toBe("First");
   });
 });
 

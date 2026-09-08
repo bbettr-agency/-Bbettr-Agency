@@ -24,6 +24,9 @@ import {
   RUNNING_OPTIONS,
   PREFILL_KEY,
   SERVICES_UNCERTAIN_KEY,
+  SELECTED_SERVICES_KEY,
+  KNOWN_FIELD_NAMES,
+  isReservedIntakeKey,
 } from "./intake-schema";
 
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
@@ -198,4 +201,38 @@ export function normalizeIntake(input: unknown): {
 } {
   const data = normalizeIntakeData(input);
   return { data, columns: derivePromotedColumns(data) };
+}
+
+/** Keys a browser autosave patch is allowed to touch — form fields + services. */
+const PATCHABLE_KEYS: ReadonlySet<string> = new Set<string>([
+  ...KNOWN_FIELD_NAMES,
+  SELECTED_SERVICES_KEY,
+  SERVICES_UNCERTAIN_KEY,
+]);
+
+/**
+ * The partial-save contract (P2-C will use this — NEVER normalizeIntakeData(patch)).
+ *
+ * Merge a bounded, untrusted browser PATCH onto the EXISTING canonical data,
+ * then normalize the COMPLETE merged object — so a partial autosave can never
+ * erase answers from other sections. Only patchable form/service keys are
+ * applied; unknown keys and reserved server-owned metadata (any "_"-prefixed
+ * key, e.g. _prefill) in the patch are ignored, and existing reserved metadata
+ * is preserved. Caller derives promoted columns from the returned data.
+ */
+export function mergeIntakePatch(
+  existingData: unknown,
+  patch: unknown
+): Record<string, unknown> {
+  const base = asRecord(existingData); // sanitized current data (keeps _prefill)
+  const p = asRecord(patch);
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(p)) {
+    if (isReservedIntakeKey(key)) continue; // client can never touch _prefill etc.
+    if (!PATCHABLE_KEYS.has(key)) continue; // only form/service keys
+    merged[key] = value;
+  }
+  // Reserved metadata stays server-owned: base's _prefill is retained (the patch
+  // could not overwrite it above), and normalize preserves it.
+  return normalizeIntakeData(merged);
 }
