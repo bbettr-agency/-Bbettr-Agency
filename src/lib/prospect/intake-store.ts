@@ -40,33 +40,41 @@ export function createProspectIntakeStore(): ProspectIntakeStore {
     },
 
     async findByTokenHash(tokenHash) {
+      // updated_at is the optimistic-concurrency version — selected verbatim and
+      // carried, unmodified, into the submit CAS below.
       const { data } = await admin
         .from(TABLE)
-        .select("id, status, source, token_expires_at, data")
+        .select("id, status, source, token_expires_at, updated_at, data")
         .eq("token_hash", tokenHash)
         .maybeSingle();
       return (data as StoredIntake | null) ?? null;
     },
 
     async updateDraftData(id, data, columns) {
+      // Atomic draft-only guard AT the mutation boundary: a save can never write
+      // a row that has already left `draft` (e.g. a submit that won the claim).
       const { data: row } = await admin
         .from(TABLE)
         .update({ data, ...columnsPatch(columns) })
         .eq("id", id)
-        .eq("status", "draft") // guard: never mutate a non-draft
+        .eq("status", "draft")
         .select("id")
         .maybeSingle();
       return Boolean(row);
     },
 
-    async claimSubmit(id, data, columns, submittedAt) {
-      // Atomic conditional claim — only the request that flips draft→submitted
-      // gets a row back; a concurrent submit sees zero rows (already claimed).
+    async claimSubmit(id, expectedUpdatedAt, submittedAt) {
+      // Compare-and-swap: transition draft→submitted ONLY if this exact version
+      // is still current. Writes nothing but status + submitted_at, so no data
+      // snapshot can ever be carried back into the row. A save that landed after
+      // the read bumped updated_at (trigger), so the guard matches zero rows and
+      // the caller re-reads/re-validates. Only the winning request gets a row.
       const { data: row } = await admin
         .from(TABLE)
-        .update({ status: "submitted", submitted_at: submittedAt, data, ...columnsPatch(columns) })
+        .update({ status: "submitted", submitted_at: submittedAt })
         .eq("id", id)
         .eq("status", "draft")
+        .eq("updated_at", expectedUpdatedAt)
         .select("id")
         .maybeSingle();
       return Boolean(row);

@@ -9,11 +9,18 @@ import {
   type StoredIntake,
   type TurnstileVerifier,
   type PromotedColumns,
+  type SubmitNotification,
 } from "./intake-server";
 import { issueIntakeToken, hashIntakeToken } from "./intake-token";
-import { normalizeIntakeData } from "./intake-normalize";
+import { normalizeIntakeData, derivePromotedColumns } from "./intake-normalize";
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
+// The fake store models the REAL store contract faithfully for the concurrency
+// properties under test: (a) `updated_at` is an opaque version bumped on EVERY
+// successful write (models the BEFORE UPDATE trigger); (b) updateDraftData is
+// guarded WHERE status='draft'; (c) claimSubmit is a CAS on (status='draft' AND
+// updated_at=expected) that writes NO data. So the version guard — not mocked
+// call ordering — decides who wins.
 interface Row extends StoredIntake {
   token_hash: string;
   columns?: PromotedColumns;
@@ -23,9 +30,11 @@ function makeStore(seed: Row[] = []) {
   const byId = new Map<string, Row>();
   const byHash = new Map<string, string>();
   let seq = 0;
+  let ver = 0;
+  const nextVer = () => `v${++ver}`;
   const insertSpy = vi.fn();
   for (const r of seed) {
-    byId.set(r.id, { ...r });
+    byId.set(r.id, { ...r, updated_at: r.updated_at ?? nextVer() });
     byHash.set(r.token_hash, r.id);
   }
   const store: ProspectIntakeStore = {
@@ -33,7 +42,7 @@ function makeStore(seed: Row[] = []) {
       insertSpy(input);
       const id = `id${++seq}`;
       byId.set(id, {
-        id, status: "draft", source: input.source,
+        id, status: "draft", source: input.source, updated_at: nextVer(),
         token_expires_at: input.token_expires_at, data: input.data,
         token_hash: input.token_hash, columns: input.columns,
       });
@@ -44,22 +53,26 @@ function makeStore(seed: Row[] = []) {
       const id = byHash.get(h);
       if (!id) return null;
       const r = byId.get(id)!;
-      return { id: r.id, status: r.status, source: r.source, token_expires_at: r.token_expires_at, data: r.data };
+      return {
+        id: r.id, status: r.status, source: r.source,
+        token_expires_at: r.token_expires_at, updated_at: r.updated_at, data: r.data,
+      };
     },
     async updateDraftData(id, data, columns) {
       const r = byId.get(id);
-      if (!r || r.status !== "draft") return false;
-      r.data = data; r.columns = columns;
+      if (!r || r.status !== "draft") return false; // atomic draft-only guard
+      r.data = data; r.columns = columns; r.updated_at = nextVer(); // trigger bumps version
       return true;
     },
-    async claimSubmit(id, data, columns, at) {
+    async claimSubmit(id, expectedUpdatedAt, at) {
       const r = byId.get(id);
-      if (!r || r.status !== "draft") return false;
-      r.status = "submitted"; r.data = data; r.columns = columns; r.submitted_at = at;
-      return true;
+      if (!r || r.status !== "draft") return false; // already transitioned
+      if (r.updated_at !== expectedUpdatedAt) return false; // CAS miss — a write landed
+      r.status = "submitted"; r.submitted_at = at; r.updated_at = nextVer();
+      return true; // claim writes NO data/columns — they stay as last saved
     },
   };
-  return { store, byId, byHash, insertSpy };
+  return { store, byId, byHash, insertSpy, nextVer };
 }
 const okVerifier: TurnstileVerifier = { verify: async () => ({ ok: true, configured: true }) };
 const failVerifier: TurnstileVerifier = { verify: async () => ({ ok: false, configured: true }) };
@@ -67,16 +80,22 @@ const unconfigured: TurnstileVerifier = { verify: async () => ({ ok: false, conf
 
 function seedDraft(overrides: Partial<Row> = {}, now = new Date("2026-01-01T00:00:00Z")) {
   const tok = issueIntakeToken(now);
-  const data = normalizeIntakeData({
-    contact_name: "Ada", business_name: "Acme", email: "ada@acme.co.za",
-    selected_services: ["seo"], keywords: ["plumber"],
-    _prefill: { email: "admin@acme.co.za" },
-    ...(overrides.data as object),
-  });
+  const { data: dataOverride, ...restOverrides } = overrides;
+  // A submittable draft has already been saved, so its data + promoted columns
+  // are in sync (columns are written alongside data by save/create — never by
+  // the claim). updated_at is the seed version ("v0"); makeStore advances it.
+  const data =
+    (dataOverride as Record<string, unknown> | undefined) ??
+    normalizeIntakeData({
+      contact_name: "Ada", business_name: "Acme", email: "ada@acme.co.za",
+      selected_services: ["seo"], keywords: ["plumber"],
+      _prefill: { email: "admin@acme.co.za" },
+    });
   const row: Row = {
-    id: "seed1", status: "draft", source: "generic",
-    token_expires_at: tok.expiresAt, token_hash: tok.tokenHash, data,
-    ...overrides,
+    id: "seed1", status: "draft", source: "generic", updated_at: "v0",
+    token_expires_at: tok.expiresAt, token_hash: tok.tokenHash,
+    data, columns: derivePromotedColumns(data),
+    ...restOverrides,
   };
   return { row, rawToken: tok.rawToken, now };
 }
@@ -190,7 +209,7 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("valid draft submits once, sets submitted_at, syncs columns, notifies once", async () => {
+  it("valid draft submits once, sets submitted_at, preserves saved data+columns, notifies once", async () => {
     const { row, rawToken, now } = seedDraft();
     const { store, byId } = makeStore([row]);
     const notify = vi.fn(async () => {});
@@ -199,7 +218,8 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     const saved = byId.get("seed1")!;
     expect(saved.status).toBe("submitted");
     expect(saved.submitted_at).toBe(now.toISOString());
-    expect(saved.columns!.business_name).toBe("Acme");
+    expect(saved.data.business_name).toBe("Acme"); // claim never rewrote data
+    expect(saved.columns!.business_name).toBe("Acme"); // columns from the saved draft
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
@@ -215,16 +235,24 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("concurrent double-submit notifies EXACTLY once (atomic claim)", async () => {
-    // Store where both requests resolve a draft, but only the first claim wins.
+  it("D. two concurrent submits → one transition, one notification, other gets already_submitted", async () => {
+    // Both resolve draft/v1; only the first claim wins. After it wins, the row
+    // reads `submitted`, so the loser's re-resolve returns already_submitted.
     const { row, rawToken, now } = seedDraft();
     let claimed = false;
     const store: ProspectIntakeStore = {
       insertDraft: async () => ({ id: "x" }),
-      findByTokenHash: async () => ({ id: row.id, status: "draft", source: "generic", token_expires_at: row.token_expires_at, data: row.data }),
+      findByTokenHash: async () => ({
+        id: row.id,
+        status: claimed ? "submitted" : "draft",
+        source: "generic",
+        token_expires_at: row.token_expires_at,
+        updated_at: "v1",
+        data: row.data,
+      }),
       updateDraftData: async () => true,
       claimSubmit: async () => {
-        if (claimed) return false;
+        if (claimed) return false; // second claim sees the row already transitioned
         claimed = true;
         return true;
       },
@@ -261,6 +289,112 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     );
     expect(r.kind).toBe("success");
     expect(onNotifyError).not.toHaveBeenCalled();
+  });
+});
+
+describe("submitIntake — versioned CAS concurrency (adversarial interleavings)", () => {
+  // Inject exactly ONE concurrent save between submit's first read and its claim
+  // by wrapping findByTokenHash: capture the pre-save snapshot, mutate the row +
+  // bump the version (models the trigger), return the STALE snapshot to submit.
+  function injectOneSave(
+    store: ProspectIntakeStore,
+    byId: Map<string, Row>,
+    mutate: (data: Record<string, unknown>) => Record<string, unknown>,
+    version = "vSAVE"
+  ) {
+    const orig = store.findByTokenHash.bind(store);
+    let done = false;
+    store.findByTokenHash = async (h) => {
+      const snap = await orig(h); // captures current data ref + updated_at (by value)
+      if (!done) {
+        done = true;
+        const cur = byId.get("seed1")!;
+        const next = mutate({ ...cur.data });
+        cur.data = next;
+        cur.columns = derivePromotedColumns(next);
+        cur.updated_at = version; // a save landed → version moves
+      }
+      return snap;
+    };
+  }
+
+  it("A. save wins between read and claim → CAS misses, submit re-validates and submits the NEW version (B preserved)", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store, byId } = makeStore([row]);
+    injectOneSave(store, byId, (d) =>
+      normalizeIntakeData({ ...d, business_name: "Newer Co", investment_band: "Under R5,000" })
+    );
+    const notify = vi.fn(async (_n: SubmitNotification) => {});
+    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now);
+    expect(r.kind).toBe("success");
+    const saved = byId.get("seed1")!;
+    expect(saved.status).toBe("submitted");
+    expect(saved.data.business_name).toBe("Newer Co"); // stale A never written back over B
+    expect(saved.columns!.business_name).toBe("Newer Co");
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0].businessName).toBe("Newer Co"); // notified on the ACTUAL row
+  });
+
+  it("B. save invalidates the draft before claim → CAS misses, re-validation fails, no stale-valid submission", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store, byId } = makeStore([row]);
+    injectOneSave(store, byId, (d) => {
+      const next = { ...d };
+      delete next.email; // B fails validateForSubmit
+      return next;
+    });
+    const notify = vi.fn(async () => {});
+    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now);
+    expect(r.kind).toBe("validation_error"); // evaluated against B, not stale-valid A
+    expect(byId.get("seed1")!.status).toBe("draft"); // never transitioned
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("C. once a submit has claimed, the store's atomic draft-only guard makes a later save a no-op", async () => {
+    const { row, now } = seedDraft();
+    const { store, byId } = makeStore([row]);
+    // A submit won the claim (row left draft)...
+    const claimed = await store.claimSubmit("seed1", byId.get("seed1")!.updated_at, now.toISOString());
+    expect(claimed).toBe(true);
+    expect(byId.get("seed1")!.status).toBe("submitted");
+    // ...now a save whose pre-read saw `draft` executes its mutation. The guard
+    // is AT the mutation boundary (WHERE status='draft'), not a stale pre-read.
+    const wrote = await store.updateDraftData(
+      "seed1",
+      normalizeIntakeData({ business_name: "Hijack Co" }),
+      derivePromotedColumns({ business_name: "Hijack Co" })
+    );
+    expect(wrote).toBe(false); // no-op
+    expect(byId.get("seed1")!.data.business_name).toBe("Acme"); // submitted data untouched
+  });
+
+  it("C(service). a save after submit resolves already_submitted and never mutates the row", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store, byId } = makeStore([row]);
+    const notify = vi.fn(async () => {});
+    expect((await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now)).kind).toBe("success");
+    const before = JSON.stringify(byId.get("seed1")!.data);
+    const late = await saveIntakeDraft(store, rawToken, { business_name: "Hijack Co" }, now);
+    expect(late.kind).toBe("already_submitted");
+    expect(JSON.stringify(byId.get("seed1")!.data)).toBe(before); // unchanged
+  });
+
+  it("E. sustained save contention exhausts the retry bound → conflict, row stays draft, no notification", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store, byId } = makeStore([row]);
+    // A save bumps the version before EVERY claim → CAS can never match.
+    const orig = store.findByTokenHash.bind(store);
+    let n = 0;
+    store.findByTokenHash = async (h) => {
+      const snap = await orig(h);
+      byId.get("seed1")!.updated_at = `vSAVE${++n}`; // moves after we captured snap
+      return snap; // stale version handed to submit
+    };
+    const notify = vi.fn(async () => {});
+    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now);
+    expect(r.kind).toBe("conflict"); // never submits an unvalidated version
+    expect(byId.get("seed1")!.status).toBe("draft");
+    expect(notify).not.toHaveBeenCalled();
   });
 });
 

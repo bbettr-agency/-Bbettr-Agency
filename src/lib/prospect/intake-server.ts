@@ -39,6 +39,14 @@ export interface StoredIntake {
   status: ProspectIntakeStatus;
   source: ProspectSource;
   token_expires_at: string;
+  /**
+   * Optimistic-concurrency version. `prospect_intakes.updated_at` is bumped by a
+   * BEFORE UPDATE trigger (`set_updated_at`) on EVERY write, so it doubles as a
+   * compare-and-swap token: submit only transitions the row if this exact
+   * DB-returned value is still current — proving no save landed after the read.
+   * It is carried through verbatim (never reformatted / truncated in JS).
+   */
+  updated_at: string;
   /** Full canonical data incl. server-owned reserved keys (e.g. _prefill). */
   data: Record<string, unknown>;
 }
@@ -52,10 +60,21 @@ export interface ProspectIntakeStore {
     columns: PromotedColumns;
   }): Promise<{ id: string }>;
   findByTokenHash(tokenHash: string): Promise<StoredIntake | null>;
-  /** Guarded update (WHERE status='draft'); returns true only if a draft row was updated. */
+  /**
+   * Atomic draft-only update (WHERE status='draft'). Returns true ONLY if a live
+   * draft row was actually written. The status guard lives at the DB mutation
+   * boundary — never on a stale pre-read — so a save can never mutate a row that
+   * another request has already transitioned out of `draft`.
+   */
   updateDraftData(id: string, data: Record<string, unknown>, columns: PromotedColumns): Promise<boolean>;
-  /** Atomic claim (WHERE status='draft'); true ONLY for the request that claimed it. */
-  claimSubmit(id: string, data: Record<string, unknown>, columns: PromotedColumns, submittedAt: string): Promise<boolean>;
+  /**
+   * Compare-and-swap submit claim: transition draft→submitted ONLY WHERE
+   * status='draft' AND updated_at = expectedUpdatedAt. Writes NOTHING but
+   * status + submitted_at, so it can never carry a stale data snapshot back into
+   * the row. Returns true ONLY for the single request whose validated version is
+   * still current at the claim boundary.
+   */
+  claimSubmit(id: string, expectedUpdatedAt: string, submittedAt: string): Promise<boolean>;
 }
 
 export interface TurnstileVerifier {
@@ -78,7 +97,9 @@ export type IntakeErrorKind =
   | "expired"
   | "already_submitted"
   | "save_failed"
-  | "configuration_error";
+  | "configuration_error"
+  /** Sustained save contention exhausted the submit retry bound — safe to retry. */
+  | "conflict";
 
 export interface PublicIntakeView {
   status: ProspectIntakeStatus;
@@ -246,7 +267,10 @@ export async function saveIntakeDraft(
   return { kind: "success", view: publicView("draft", merged) };
 }
 
-// ── Submit (atomic claim; notify exactly once) ──────────────────────────────
+// ── Submit (versioned CAS claim; notify exactly once) ────────────────────────
+
+/** Bounded submit retries under save contention — never an unbounded spin. */
+const MAX_SUBMIT_ATTEMPTS = 3;
 
 export async function submitIntake(
   store: ProspectIntakeStore,
@@ -262,34 +286,51 @@ export async function submitIntake(
   if (!tv.configured) return { kind: "configuration_error" };
   if (!tv.ok) return { kind: "verification_failed" };
 
-  const r = await resolveIntake(store, args.rawToken, now);
-  if (r.kind === "already_submitted") return { kind: "already_submitted", view: publicView("submitted", r.row.data) };
-  if (r.kind === "expired") return { kind: "expired" };
-  if (r.kind !== "ok") return { kind: "invalid_or_closed" };
+  const submittedAt = now.toISOString();
 
-  // Normalize the COMPLETE existing data, then enforce full submission rules.
-  const data = normalizeIntakeData(r.row.data);
-  const v = validateForSubmit(data);
-  if (!v.ok) return { kind: "validation_error", errors: v.errors };
-  const columns = derivePromotedColumns(data);
+  // Compare-and-swap submit with bounded retry. Each attempt resolves the CURRENT
+  // row, validates the COMPLETE current data, then claims ONLY that exact version
+  // (WHERE status='draft' AND updated_at=<the read snapshot>). A save that lands
+  // between our read and our claim moves updated_at, the CAS misses, and we
+  // re-read / re-validate / re-claim the NEW version. The row that transitions
+  // draft→submitted is therefore ALWAYS exactly the version we validated — never
+  // a stale snapshot, and a concurrent save is never overwritten.
+  for (let attempt = 0; attempt < MAX_SUBMIT_ATTEMPTS; attempt++) {
+    const r = await resolveIntake(store, args.rawToken, now);
+    if (r.kind === "already_submitted") return { kind: "already_submitted", view: publicView("submitted", r.row.data) };
+    if (r.kind === "expired") return { kind: "expired" };
+    if (r.kind !== "ok") return { kind: "invalid_or_closed" };
 
-  // Atomic claim: only the request that flips draft→submitted proceeds to notify.
-  const claimed = await store.claimSubmit(r.row.id, data, columns, now.toISOString()).catch(() => false);
-  if (!claimed) return { kind: "already_submitted", view: publicView("submitted", data) };
+    // Validate the COMPLETE current snapshot (never a bare patch or earlier read).
+    const data = normalizeIntakeData(r.row.data);
+    const v = validateForSubmit(data);
+    if (!v.ok) return { kind: "validation_error", errors: v.errors };
 
-  // Notification is best-effort: the intake is ALREADY submitted (the claim
-  // succeeded), so a notify failure must NOT revert it and the prospect still
-  // gets success. The failure is surfaced to the injected server-side sink for
-  // logging (no token/PII/answer data) — it is never exposed to the public.
-  try {
-    await notify({
-      businessName: columns.business_name,
-      contactName: columns.contact_name,
-      selectedServices: columns.selected_services,
-      uncertain: data.services_uncertain === true,
-    });
-  } catch (err) {
-    onNotifyError?.(err);
+    // CAS on the DB-returned updated_at. The claim writes NO data/columns — its
+    // only effect is the lifecycle transition of this precise version.
+    const claimed = await store.claimSubmit(r.row.id, r.row.updated_at, submittedAt).catch(() => false);
+    if (!claimed) continue; // a save or a concurrent submit moved the row — re-resolve
+
+    // Won the claim. The row's persisted data IS `data` (CAS proved it unchanged
+    // since validation), so notify from the validated snapshot reflects the row
+    // that actually became submitted. Notification is best-effort: a submitted
+    // intake must NOT revert if it fails; the prospect still gets success and the
+    // failure is logged server-side via the injected sink (no token/PII/data).
+    const columns = derivePromotedColumns(data);
+    try {
+      await notify({
+        businessName: columns.business_name,
+        contactName: columns.contact_name,
+        selectedServices: columns.selected_services,
+        uncertain: data.services_uncertain === true,
+      });
+    } catch (err) {
+      onNotifyError?.(err);
+    }
+    return { kind: "success", view: publicView("submitted", data) };
   }
-  return { kind: "success", view: publicView("submitted", data) };
+
+  // Sustained contention beyond the retry bound: never submit an unvalidated
+  // version. The row is untouched and the caller may safely retry.
+  return { kind: "conflict" };
 }
