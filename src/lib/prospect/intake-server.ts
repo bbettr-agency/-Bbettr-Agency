@@ -253,7 +253,9 @@ export async function submitIntake(
   verifier: TurnstileVerifier,
   args: { rawToken: unknown; honeypot?: unknown; turnstileToken?: string | null },
   notify: (n: SubmitNotification) => Promise<void>,
-  now: Date = new Date()
+  now: Date = new Date(),
+  /** Server-side sink for a swallowed notify failure (log WITHOUT PII/token). */
+  onNotifyError?: (err: unknown) => void
 ): Promise<SubmitResult> {
   if (isHoneypotFilled(args.honeypot)) return { kind: "verification_failed" };
   const tv = await verifier.verify(args.turnstileToken);
@@ -275,7 +277,10 @@ export async function submitIntake(
   const claimed = await store.claimSubmit(r.row.id, data, columns, now.toISOString()).catch(() => false);
   if (!claimed) return { kind: "already_submitted", view: publicView("submitted", data) };
 
-  // Notification is best-effort: a submitted intake must NOT revert if it fails.
+  // Notification is best-effort: the intake is ALREADY submitted (the claim
+  // succeeded), so a notify failure must NOT revert it and the prospect still
+  // gets success. The failure is surfaced to the injected server-side sink for
+  // logging (no token/PII/answer data) — it is never exposed to the public.
   try {
     await notify({
       businessName: columns.business_name,
@@ -283,8 +288,8 @@ export async function submitIntake(
       selectedServices: columns.selected_services,
       uncertain: data.services_uncertain === true,
     });
-  } catch {
-    // Swallowed here; the caller logs it. Submission stands.
+  } catch (err) {
+    onNotifyError?.(err);
   }
   return { kind: "success", view: publicView("submitted", data) };
 }

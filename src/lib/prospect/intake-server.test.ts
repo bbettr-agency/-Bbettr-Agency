@@ -239,15 +239,28 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     expect(kinds).toEqual(["already_submitted", "success"]);
   });
 
-  it("notification failure does NOT revert a successful submission", async () => {
+  it("notification failure does NOT revert a submission and is logged via the sink", async () => {
     const { row, rawToken, now } = seedDraft();
     const { store, byId } = makeStore([row]);
     const notify = vi.fn(async () => {
       throw new Error("notify down");
     });
-    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now);
+    const onNotifyError = vi.fn();
+    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now, onNotifyError);
+    expect(r.kind).toBe("success"); // prospect still gets success
+    expect(byId.get("seed1")!.status).toBe("submitted"); // stays submitted (no revert)
+    expect(onNotifyError).toHaveBeenCalledTimes(1); // failure surfaced for server-side logging
+  });
+
+  it("does NOT invoke the notify-error sink when notification succeeds", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store } = makeStore([row]);
+    const onNotifyError = vi.fn();
+    const r = await submitIntake(
+      store, okVerifier, { rawToken, turnstileToken: "t" }, vi.fn(async () => {}), now, onNotifyError
+    );
     expect(r.kind).toBe("success");
-    expect(byId.get("seed1")!.status).toBe("submitted"); // stays submitted
+    expect(onNotifyError).not.toHaveBeenCalled();
   });
 });
 

@@ -74,7 +74,12 @@ export async function submitIntakeAction(args: {
     createProspectIntakeStore(),
     verifier,
     { rawToken: args.rawToken, honeypot: args.honeypot, turnstileToken: args.turnstileToken },
-    notify
+    notify,
+    undefined,
+    // Notify failed AFTER a successful submit — the intake stands. Log the
+    // failure server-side only (no token/PII/answer data); prospect still
+    // receives success and no second submission is required.
+    () => console.error("[intake] submit notify_failed (submission stands)")
   );
   if (res.kind === "configuration_error") console.error("[intake] submit configuration_error");
   return res;
