@@ -35,6 +35,7 @@
     "test:tasks-0058": "node supabase/tests/tasks-0058-prospect-intakes.test.mjs",
     "test:tasks-0059": "node supabase/tests/tasks-0059-prospect-intake-notification-type.test.mjs",
     "test:parity": "node supabase/tests/schema-parity.test.mjs",
+    "test:prospect-cleanup": "node supabase/tests/prospect-intake-cleanup.test.mjs",
     "test:tasks-c1": "node supabase/tests/tasks-command-adapter.test.mjs",
     "test:tasks-inbox-read": "node supabase/tests/tasks-inbox-read.test.mjs",
     "test": "vitest run",

@@ -1,6 +1,6 @@
 # Session Handover — Bbettr Agency Client Portal
 
-_Last updated: 2026-08 — Feature A (Client Billing Details) shipped · Production: https://portal.bbettragency.com_
+_Last updated: 2026-09 — Prospect Intake Programme P2-A…P2-D merged; P2-E (stale-draft cleanup) is the active slice · Production: https://portal.bbettragency.com_
 
 This is the single source of truth for picking the project back up. All project
 docs live under [`docs/`](./).
@@ -11,15 +11,31 @@ docs live under [`docs/`](./).
 
 ---
 
-## ⭐ CURRENT CHECKPOINT — Planner + Meetings + Billing era (resume here)
+## ⭐ CURRENT CHECKPOINT — Prospect Intake Programme (resume here)
 
 ### Where we are right now
-- **`main` = `58eb30f`** (== `origin/main`), working tree clean.
-- **Production database migration history: through `0055`.** Production app is
-  **deployed** and current with `main`.
-- **Feature A — Client Billing Details is COMPLETE**: merged, migration `0055`
-  applied to production, deployed, and **manually tested & confirmed working** by
-  Eloff. Treat Feature A as done unless Eloff explicitly asks for changes.
+- **`main` = `c89f6b6`** (== `origin/main`), working tree clean.
+- **Production database migration history: through `0059`.** Migrations `0056`
+  (client website URLs), `0057` (service operational status), `0058`
+  (`prospect_intakes`), `0059` (prospect-intake notification type) are applied.
+- **Prospect Intake Programme (public `/start`)** — the authoritative spec is
+  [`PROSPECT_INTAKE.md`](./PROSPECT_INTAKE.md). Status:
+  - **P1** (table + token + lifecycle, migrations 0058/0059) — ✅ merged, migrated.
+  - **P2-C — secure server + Turnstile + versioned CAS submit** — ✅ merged (main `0f0de15`).
+  - **P2-D — interactive six-section flow + resume + review + submit UI** — ✅ merged (main `c89f6b6`).
+  - **P2-E — stale/expired draft cleanup** — ⏳ **active slice** (see PROSPECT_INTAKE.md → P2-E).
+- **Deployment gate:** the public write path fails closed until Vercel prod has
+  `NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`; P2-E additionally
+  needs `PROSPECT_CLEANUP_CRON_SECRET` + a scheduler before cleanup runs.
+
+> The **Feature B (Task Progress Scale)** section further below is an EARLIER
+> planned feature that was **not** started; the active next slice is **P2-E**,
+> not Feature B. Feature B remains a valid future item if reprioritised.
+
+### Historical note (superseded)
+- Feature A — Client Billing Details (migration `0055`) shipped earlier and is
+  done; the earlier "main = 58eb30f / through 0055" checkpoint has since advanced
+  through the website-URL, service-status, and prospect-intake work above.
 
 ### Recently completed & shipped (all merged, migrated, deployed, manually tested)
 1. **Public self-service meeting rescheduling — "Slice D"** — migration **`0053`**.
@@ -44,16 +60,23 @@ docs live under [`docs/`](./).
    card + edit modal; own-row RLS (client writes own; `client_id` from session,
    never browser); whitelisted `BillingDetailsView` (no leakage); zero backfill.
 
-### Migration ledger (production is at 0055)
+### Migration ledger (production is at 0059)
 | # | File | Feature | Prod applied |
 |---|---|---|---|
 | 0053 | `0053_meeting_no_show_reschedule.sql` | Self-service reschedule | ✅ |
 | 0054 | `0054_meeting_completed_lifecycle.sql` | Post-meeting lifecycle | ✅ |
 | 0055 | `0055_client_billing_details.sql` | Client billing details | ✅ |
+| 0056 | `0056_client_website_urls.sql` | Client website URLs | ✅ |
+| 0057 | `0057_client_service_operational_status.sql` | Service operational status | ✅ |
+| 0058 | `0058_prospect_intakes.sql` | Prospect intakes table | ✅ |
+| 0059 | `0059_prospect_intake_notification_type.sql` | Prospect-intake notification type | ✅ |
 
-DB proofs: `npm run test:tasks-0053` (40/40), `test:tasks-0054` (33/33),
-`test:tasks-0055` (40/40). Also `test:rls` (56/56), `test:parity`, and the full
-`npm run test` (Vitest) all green on `main`.
+**P2-E adds no migration** — cleanup is an app-route + service-role design and
+needs no schema change.
+
+DB proofs: `test:tasks-0053…0059` all green; plus `test:prospect-cleanup`
+(P2-E behaviour proof, no migration), `test:rls` (56/56), `test:parity`, and the
+full `npm run test` (Vitest) all green on the P2-E branch.
 
 ---
 
