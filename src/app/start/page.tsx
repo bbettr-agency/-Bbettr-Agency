@@ -1,11 +1,11 @@
-import { IntakeIntro } from "@/components/prospect/intake-intro";
+import { IntakeFlow } from "@/components/prospect/intake-flow";
 
 /**
- * Generic public intake entry (P2-A). Renders the intro only — NO database row
- * is created on GET. The secure draft-creation boundary (completing "Your
- * business" → Turnstile-verified insert → tokenised /start/<token>) arrives in
- * P2-C/D.
+ * Generic public intake entry (P2-D). Renders the interactive flow starting at
+ * the intro — NO database row is created on GET. The secure draft-creation
+ * boundary fires only after a valid "Your business" step (Turnstile-verified
+ * service-role insert), which then transitions the URL to /start/<token>.
  */
 export default function StartPage() {
-  return <IntakeIntro />;
+  return <IntakeFlow mode="generic" />;
 }
