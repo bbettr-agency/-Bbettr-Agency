@@ -49,6 +49,9 @@ export function pickCarryOverData(
   const allowed = onboardingFieldNames(service);
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(intakeData)) {
+    // Reserved metadata (e.g. _prefill) is never a real onboarding field and
+    // must never carry into formal onboarding — exclude any "_"-prefixed key.
+    if (key.startsWith("_")) continue;
     if (allowed.has(key) && value !== undefined) out[key] = value;
   }
   return out;
