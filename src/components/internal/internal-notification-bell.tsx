@@ -16,6 +16,7 @@ import {
   Route,
   MessageSquare,
   CheckCheck,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ const TYPE_ICON: Record<InternalNotificationType, LucideIcon> = {
   commission_recorded: Wallet,
   deal_status: Route,
   admin_comment: MessageSquare,
+  prospect_intake_submitted: Sparkles,
 };
 
 export function InternalNotificationBell({

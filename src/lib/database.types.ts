@@ -35,7 +35,8 @@ export type InternalNotificationType =
   | "invoice_rejected"
   | "commission_recorded"
   | "deal_status"
-  | "admin_comment";
+  | "admin_comment"
+  | "prospect_intake_submitted";
 
 export type ClientStatus =
   | "lead"
@@ -213,6 +214,49 @@ export interface Database {
           name: string;
         };
         Update: Partial<Database["public"]["Tables"]["clients"]["Row"]>;
+        Relationships: [];
+      };
+      // Pre-client public intake (0058). Separate from clients until explicit
+      // admin conversion. Admin-managed under RLS; anon denied; public writes via
+      // service-role after token validation. `status`/`source` mirror the pure
+      // lifecycle unions in src/lib/prospect/intake-lifecycle.ts.
+      prospect_intakes: {
+        Row: {
+          id: string;
+          token_hash: string;
+          token_expires_at: string;
+          source: "generic" | "personalised";
+          status: "draft" | "submitted" | "converted" | "dismissed";
+          business_name: string | null;
+          contact_name: string | null;
+          email: string | null;
+          phone: string | null;
+          selected_services: string[];
+          data: Record<string, unknown>;
+          created_by: string | null;
+          converted_client_id: string | null;
+          created_at: string;
+          updated_at: string;
+          submitted_at: string | null;
+          converted_at: string | null;
+        };
+        Insert: {
+          token_hash: string;
+          token_expires_at: string;
+          source: "generic" | "personalised";
+          status?: "draft" | "submitted" | "converted" | "dismissed";
+          business_name?: string | null;
+          contact_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          selected_services?: string[];
+          data?: Record<string, unknown>;
+          created_by?: string | null;
+          converted_client_id?: string | null;
+          submitted_at?: string | null;
+          converted_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["prospect_intakes"]["Row"]>;
         Relationships: [];
       };
       // Client-owned billing profile (0055) — 1:1 with clients, shared across
