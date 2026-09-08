@@ -1,17 +1,15 @@
 import { Logo } from "@/components/brand/logo";
-import { INTAKE_SECTIONS } from "@/lib/prospect/intake-steps";
 import { IntakeProgress } from "./intake-progress";
 import type { ProgressView } from "@/lib/prospect/intake-steps";
 
 /**
- * Editorial split-layout frame for the public prospect intake (P2-A).
+ * Public prospect-intake shell (P2-A, redesigned).
  *
- * Desktop (lg+): a fixed brand panel on the left (dark, with the section index)
- * and a restrained content column on the right — not a stretched mobile form.
- * Mobile/tablet: a slim brand bar on top, content below in a single column.
- *
- * Typography is the scoped editorial pairing (Playfair Display + DM Sans) set by
- * app/start/layout.tsx; this frame just uses `font-editorial*` utilities.
+ * A light, focused, single-column composition that belongs to the Bbettr Portal
+ * — not a dark 50/50 split, not a floating card. A compact brand header sits on
+ * an off-white page with ONE restrained brand-blue ambient glow; the content is
+ * a controlled ~640px column centred around the vertical middle. Portal
+ * typography (Inter body / Sora headings) is inherited.
  */
 export function IntakeShell({
   progress,
@@ -22,56 +20,31 @@ export function IntakeShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-ink-50 lg:grid lg:grid-cols-[minmax(0,42%)_minmax(0,58%)]">
-      {/* Left brand panel — desktop only */}
-      <aside className="relative hidden overflow-hidden bg-ink-900 text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            backgroundImage:
-              "radial-gradient(60% 90% at 15% 0%, rgba(56,182,255,0.28), transparent 60%)",
-          }}
-        />
-        <div className="relative">
-          <Logo variant="light" />
-        </div>
-        <div className="relative">
-          <p className="font-editorial-display text-3xl font-semibold leading-tight xl:text-4xl">
-            Marketing that makes you&nbsp;Bbettr.
-          </p>
-          <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/60">
-            A few quick questions so we understand your business and what you
-            need. No commitment — we&rsquo;ll review it and recommend the best
-            next step.
-          </p>
-        </div>
-        <ol className="relative space-y-2.5 text-sm text-white/50">
-          {INTAKE_SECTIONS.map((s) => (
-            <li key={s.id} className="flex items-center gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/15 text-[11px] font-medium text-white/70">
-                {s.index}
-              </span>
-              {s.label}
-            </li>
-          ))}
-        </ol>
-      </aside>
+    <div className="relative min-h-screen bg-ink-50 text-ink-900">
+      {/* One subtle brand ambient glow — the only decorative element. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[70vh]"
+        style={{
+          backgroundImage:
+            "radial-gradient(60% 60% at 50% 0%, rgba(56,182,255,0.10), transparent 70%)",
+        }}
+      />
 
-      {/* Mobile brand bar */}
-      <header className="flex items-center justify-between border-b border-ink-100 bg-white px-5 py-4 lg:hidden">
+      {/* Compact brand header */}
+      <header className="relative mx-auto flex w-full max-w-3xl items-center px-5 py-5 sm:px-8">
         <Logo />
       </header>
 
-      {/* Content column */}
-      <main className="flex flex-col px-5 py-8 sm:px-8 lg:px-12 lg:py-14">
-        <div className="mx-auto w-full max-w-md">
+      {/* Focused content column, composed around the vertical centre. */}
+      <main className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pb-16 sm:px-8">
+        <div className="mx-auto w-full max-w-xl py-10 sm:py-16 lg:py-20">
           {progress && (
-            <div className="mb-8">
+            <div className="mb-9">
               <IntakeProgress progress={progress} />
             </div>
           )}
-          <div className="animate-fade-in">{children}</div>
+          <div className="motion-safe:animate-fade-in">{children}</div>
         </div>
       </main>
     </div>
