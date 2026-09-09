@@ -46,7 +46,8 @@ async function notify(n: SubmitNotification): Promise<void> {
     type: "prospect_intake_submitted",
     title: `New intake — ${n.businessName ?? "Unknown business"}`,
     body: `${n.contactName ?? "A prospect"} · ${describeServices(n)}`,
-    link: "/admin",
+    // Deep-link straight to this intake's admin detail (P3-A).
+    link: `/admin/intakes/${n.intakeId}`,
   });
 }
 

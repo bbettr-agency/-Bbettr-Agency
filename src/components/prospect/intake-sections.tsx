@@ -26,12 +26,10 @@ import {
 import { Check, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export const SERVICE_LABELS: Record<ServiceType, string> = {
-  website: "Website Design",
-  google_ads: "Google Ads",
-  meta_ads: "Meta Ads",
-  seo: "SEO",
-};
+// Single source of truth for service display names (also used by the admin
+// Intakes surface); imported for local use + re-exported for existing importers.
+import { SERVICE_LABELS } from "@/lib/prospect/intake-present";
+export { SERVICE_LABELS };
 
 type Data = Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");

@@ -223,6 +223,16 @@ describe("submitIntake — Turnstile + atomic single notification", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it("notification carries the submitted intake's id (for the admin deep link)", async () => {
+    const { row, rawToken, now } = seedDraft();
+    const { store } = makeStore([row]);
+    const notify = vi.fn(async (_n: SubmitNotification) => {});
+    const r = await submitIntake(store, okVerifier, { rawToken, turnstileToken: "t" }, notify, now);
+    expect(r.kind).toBe("success");
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0].intakeId).toBe("seed1"); // the row id → /admin/intakes/<id>
+  });
+
   it("rejects an incomplete submission (no email) with no transition/notify", async () => {
     const bad = seedDraft({ data: normalizeIntakeData({ contact_name: "Ada", business_name: "Acme", selected_services: ["seo"] }) as unknown as Record<string, unknown> });
     // remove email entirely

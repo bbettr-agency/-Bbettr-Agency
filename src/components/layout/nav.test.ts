@@ -51,7 +51,8 @@ describe("client / rep navigation", () => {
 describe("IA Slice 1 — admin nav simplification", () => {
   it("demotes the agency-wide Reports/Updates/Files roll-ups out of primary nav", () => {
     const labels = adminNavSections(true)[0].items.map((i) => i.label);
-    expect(labels).toEqual(["Overview", "Clients", "Reps", "Invoice Requests"]);
+    // Intakes (prospect triage, P3-A) sits between Clients and Reps in primary nav.
+    expect(labels).toEqual(["Overview", "Clients", "Intakes", "Reps", "Invoice Requests"]);
     for (const gone of ["Reports", "Updates", "Files"]) {
       expect(labels).not.toContain(gone);
     }
