@@ -87,6 +87,7 @@ const ADMIN_MAIN: NavSection = {
   items: [
     { label: "Overview", href: "/admin", icon: LayoutDashboard },
     { label: "Clients", href: "/admin/clients", icon: Users },
+    { label: "Intakes", href: "/admin/intakes", icon: Inbox },
     { label: "Reps", href: "/admin/reps", icon: Headset },
     { label: "Invoice Requests", href: "/admin/invoices", icon: Receipt },
   ],

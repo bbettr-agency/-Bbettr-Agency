@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isTerminalStatus,
   canTransition,
+  canDismiss,
   tokenCapability,
   canSubmit,
   canConvert,
@@ -95,5 +96,21 @@ describe("service selection", () => {
     expect(isSubmittableSelection([])).toBe(false); // must pick at least one
     expect(isSubmittableSelection(["website", "bogus"])).toBe(false); // contains unknown
     expect(isSubmittableSelection(["seo", "seo"])).toBe(false); // duplicate ⇒ not clean
+  });
+});
+
+describe("canDismiss — admin triage rule (submitted only), delegating to canTransition", () => {
+  it("allows dismissing ONLY a submitted intake", () => {
+    expect(canDismiss("submitted")).toBe(true);
+  });
+  it("never allows dismissing draft, converted, or dismissed via this rule", () => {
+    expect(canDismiss("draft")).toBe(false); // drafts are not surfaced as leads
+    expect(canDismiss("converted")).toBe(false);
+    expect(canDismiss("dismissed")).toBe(false);
+  });
+  it("stays consistent with the canonical transition (never exceeds it)", () => {
+    for (const s of PROSPECT_INTAKE_STATUSES) {
+      if (canDismiss(s)) expect(canTransition(s, "dismissed")).toBe(true);
+    }
   });
 });

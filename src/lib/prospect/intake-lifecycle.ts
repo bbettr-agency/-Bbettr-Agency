@@ -77,6 +77,18 @@ export function canSubmit(status: ProspectIntakeStatus, expired: boolean): boole
   return status === "draft" && !expired;
 }
 
+/**
+ * Admin triage rule (P3-A): an admin may dismiss only a SUBMITTED intake.
+ * Delegates the transition legality to `canTransition` so the lifecycle stays
+ * the single source of truth — this only narrows it to the submitted state the
+ * triage surface acts on (drafts are never surfaced as actionable leads).
+ */
+export function canDismiss(status: string): boolean {
+  // Accepts the DB-derived status string; only the known-valid "submitted"
+  // literal is passed to canTransition, so the canonical rule stays authoritative.
+  return status === "submitted" && canTransition("submitted", "dismissed");
+}
+
 // ── Conversion idempotency primitives (used by P4, defined now) ─────────────
 
 export interface ConvertibleIntake {

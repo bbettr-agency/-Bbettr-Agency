@@ -82,6 +82,8 @@ export interface TurnstileVerifier {
 }
 
 export interface SubmitNotification {
+  /** The submitted intake's row id — lets the admin notification deep-link to it. */
+  intakeId: string;
   businessName: string | null;
   contactName: string | null;
   selectedServices: string[];
@@ -319,6 +321,7 @@ export async function submitIntake(
     const columns = derivePromotedColumns(data);
     try {
       await notify({
+        intakeId: r.row.id,
         businessName: columns.business_name,
         contactName: columns.contact_name,
         selectedServices: columns.selected_services,
