@@ -217,7 +217,7 @@ export function FileManager({
                   </h3>
                   <span className="text-xs text-ink-400">{group.files.length}</span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))]">
                   {group.files.map((file) => {
                     const Icon = iconFor(file.mime_type);
                     const subLabel = subcategoryLabel(
@@ -227,7 +227,7 @@ export function FileManager({
                     return (
                       <Card
                         key={file.id}
-                        className="group flex items-center gap-3 p-3.5 transition-shadow hover:shadow-card-hover"
+                        className="group flex items-start gap-3 p-3.5 transition-shadow hover:shadow-card-hover"
                       >
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-500">
                           <Icon className="h-5 w-5" />
@@ -235,7 +235,8 @@ export function FileManager({
                         <div className="min-w-0 flex-1">
                           <button
                             onClick={() => open(file)}
-                            className="block truncate text-left text-sm font-medium text-ink-900 hover:text-brand-600"
+                            title={file.name}
+                            className="line-clamp-2 break-words text-left text-sm font-medium text-ink-900 hover:text-brand-600"
                           >
                             {file.name}
                           </button>
