@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import Link from "next/link";
-import { Mail, Phone, User, FileText, ChevronRight, AlertTriangle, CalendarClock, UserRound, ExternalLink } from "lucide-react";
+import { Mail, Phone, User, ChevronRight, AlertTriangle, CalendarClock, UserRound, ExternalLink } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
@@ -18,6 +18,7 @@ import {
   OnboardingStatusBadge,
 } from "@/components/ui/status-badge";
 import { getService } from "@/lib/services";
+import { OnboardingSummary } from "@/components/onboarding/onboarding-summary";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { ClientServicesManager } from "@/components/admin/client-services-manager";
 import { StageManager } from "@/components/admin/stage-manager";
@@ -498,7 +499,7 @@ export function ClientDetail({
                           <OnboardingStatusBadge status={sub.status} />
                         </CardHeader>
                         <CardContent>
-                          <SubmissionView data={sub.data} />
+                          <OnboardingSummary service={sub.service} data={sub.data} />
                         </CardContent>
                       </Card>
                     ))}
@@ -631,47 +632,5 @@ function InfoRow({
   );
 }
 
-/** Render arbitrary onboarding JSONB as readable key/value pairs. */
-function SubmissionView({ data }: { data: Record<string, unknown> }) {
-  const entries = Object.entries(data).filter(
-    ([, v]) => v !== null && v !== undefined && v !== ""
-  );
-  if (entries.length === 0)
-    return <p className="text-sm text-ink-400">No answers yet.</p>;
-
-  return (
-    <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-      {entries.map(([key, value]) => (
-        <div key={key}>
-          <dt className="text-xs font-medium uppercase tracking-wide text-ink-400">
-            {key.replace(/_/g, " ")}
-          </dt>
-          <dd className="mt-0.5 text-sm text-ink-800">{renderValue(value)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function renderValue(value: unknown): React.ReactNode {
-  if (Array.isArray(value)) {
-    if (value.length === 0) return "—";
-    // Array of uploaded files {name, path}
-    if (typeof value[0] === "object" && value[0] !== null && "name" in (value[0] as object)) {
-      return (
-        <ul className="space-y-0.5">
-          {(value as { name: string }[]).map((f, i) => (
-            <li key={i} className="flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5 text-ink-400" /> {f.name}
-            </li>
-          ))}
-        </ul>
-      );
-    }
-    return (value as unknown[]).map((v) => String(v)).join(", ");
-  }
-  if (typeof value === "object" && value !== null) {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
+/* Submitted onboarding is now rendered by <OnboardingSummary> (schema-driven,
+   human-labelled, no raw key/value or JSON dump). */

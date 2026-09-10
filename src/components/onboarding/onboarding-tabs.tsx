@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { OnboardingStatusBadge } from "@/components/ui/status-badge";
 import { OnboardingForm } from "@/components/onboarding/onboarding-form";
+import { OnboardingSummary } from "@/components/onboarding/onboarding-summary";
 import { getService } from "@/lib/services";
 import type { OnboardingState } from "@/app/(client)/dashboard/onboarding/actions";
 import type {
@@ -101,21 +102,29 @@ export function OnboardingTabs({
             <OnboardingStatusBadge status={status} />
           </div>
 
-          {status === "submitted" || status === "approved" ? (
-            <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              You&apos;ve submitted this onboarding. You can still review your
-              answers below — contact your account manager to make changes.
-            </div>
-          ) : null}
-
-          <OnboardingForm
-            key={active}
-            clientId={clientId}
-            service={def}
-            initialData={(submission?.data as Record<string, unknown>) ?? {}}
-            readOnly={status === "approved"}
-            onSubmitted={handleSubmitted}
-          />
+          {status === "approved" ? (
+            // Approved is final/read-only → a clean brief instead of the form.
+            <OnboardingSummary
+              service={active}
+              data={(submission?.data as Record<string, unknown>) ?? {}}
+            />
+          ) : (
+            <>
+              {status === "submitted" && (
+                <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                  You&apos;ve submitted this onboarding. You can still review your
+                  answers below — contact your account manager to make changes.
+                </div>
+              )}
+              <OnboardingForm
+                key={active}
+                clientId={clientId}
+                service={def}
+                initialData={(submission?.data as Record<string, unknown>) ?? {}}
+                onSubmitted={handleSubmitted}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
