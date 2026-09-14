@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import Link from "next/link";
-import { Mail, Phone, User, ChevronRight, AlertTriangle, CalendarClock, UserRound, ExternalLink } from "lucide-react";
+import { Mail, Phone, User, ChevronRight, AlertTriangle, CalendarClock, UserRound, ExternalLink, Download } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ClientStatusBadge } from "@/components/ui/status-badge";
@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/status-badge";
 import { getService } from "@/lib/services";
 import { OnboardingSummary } from "@/components/onboarding/onboarding-summary";
+import { isDownloadableOnboardingStatus } from "@/lib/onboarding-pdf";
+import { Button } from "@/components/ui/button";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { ClientServicesManager } from "@/components/admin/client-services-manager";
 import { StageManager } from "@/components/admin/stage-manager";
@@ -494,9 +496,21 @@ export function ClientDetail({
                   <div className="space-y-4">
                     {onboarding.map((sub) => (
                       <Card key={sub.id}>
-                        <CardHeader className="flex-row items-center justify-between">
+                        <CardHeader className="flex-row items-center justify-between gap-3">
                           <CardTitle>{getService(sub.service).name}</CardTitle>
-                          <OnboardingStatusBadge status={sub.status} />
+                          <div className="flex shrink-0 items-center gap-2">
+                            <OnboardingStatusBadge status={sub.status} />
+                            {isDownloadableOnboardingStatus(sub.status) && (
+                              <Button asChild variant="outline" size="sm">
+                                <a
+                                  href={`/admin/clients/${client.id}/onboarding/${sub.service}/pdf`}
+                                  aria-label={`Download ${getService(sub.service).name} onboarding PDF`}
+                                >
+                                  <Download className="h-4 w-4" /> Download PDF
+                                </a>
+                              </Button>
+                            )}
+                          </div>
                         </CardHeader>
                         <CardContent>
                           <OnboardingSummary service={sub.service} data={sub.data} />
