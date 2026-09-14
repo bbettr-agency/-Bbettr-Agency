@@ -1,11 +1,9 @@
-import { createElement } from "react";
 import { NextResponse } from "next/server";
-import { renderToBuffer } from "@react-pdf/renderer";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isValidService } from "@/lib/prospect/intake-lifecycle";
 import { buildOnboardingPdfModel, onboardingPdfFilename } from "@/lib/onboarding-pdf";
-import { OnboardingPdfDocument } from "@/components/pdf/onboarding-pdf-document";
+import { renderOnboardingPdf } from "@/lib/onboarding-pdf-render";
 
 /**
  * Admin-only onboarding PDF export. Not a public/permanent URL: it requires an
@@ -60,15 +58,10 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  // OnboardingPdfDocument returns a <Document>; cast to renderToBuffer's expected
-  // element type (react-pdf types the arg as the Document element specifically).
-  const element = createElement(OnboardingPdfDocument, { model }) as unknown as Parameters<
-    typeof renderToBuffer
-  >[0];
-  const buffer = await renderToBuffer(element);
+  const bytes = await renderOnboardingPdf(model);
   const filename = onboardingPdfFilename(client.name, model.meta.serviceName);
 
-  return new NextResponse(new Uint8Array(buffer), {
+  return new NextResponse(Buffer.from(bytes), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
