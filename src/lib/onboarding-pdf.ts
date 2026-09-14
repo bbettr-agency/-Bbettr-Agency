@@ -22,9 +22,21 @@ export interface OnboardingPdfModel {
   presented: PresentedOnboarding;
 }
 
-/** Only a submitted or approved onboarding may be exported (never a draft). */
-export function isDownloadableOnboardingStatus(status: OnboardingStatus): boolean {
-  return status === "submitted" || status === "approved";
+/**
+ * Whether an onboarding submission has content worth exporting.
+ *
+ * Exportability is based on the ACTUAL onboarding data (does the schema-driven
+ * summary render anything?), NOT the submit-state or any project/delivery status.
+ * A client can have complete answers while the submission is still `in_progress`
+ * (e.g. final submit gated on billing) — the admin already sees those answers on
+ * screen, so the PDF (the same content) must be available. Empty / not-started
+ * submissions have no content and are correctly excluded (no empty PDF).
+ */
+export function isOnboardingExportable(
+  service: ServiceType,
+  data: Record<string, unknown> | null | undefined
+): boolean {
+  return presentOnboarding(service, data).hasContent;
 }
 
 /** Slugify a display string into a safe filename segment (no path chars). */

@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/status-badge";
 import { getService } from "@/lib/services";
 import { OnboardingSummary } from "@/components/onboarding/onboarding-summary";
-import { isDownloadableOnboardingStatus } from "@/lib/onboarding-pdf";
+import { isOnboardingExportable } from "@/lib/onboarding-pdf";
 import { Button } from "@/components/ui/button";
 import { ClientStatusControl } from "@/components/admin/client-status-control";
 import { ClientServicesManager } from "@/components/admin/client-services-manager";
@@ -500,7 +500,7 @@ export function ClientDetail({
                           <CardTitle>{getService(sub.service).name}</CardTitle>
                           <div className="flex shrink-0 items-center gap-2">
                             <OnboardingStatusBadge status={sub.status} />
-                            {isDownloadableOnboardingStatus(sub.status) && (
+                            {isOnboardingExportable(sub.service, sub.data) && (
                               <Button asChild variant="outline" size="sm">
                                 <a
                                   href={`/admin/clients/${client.id}/onboarding/${sub.service}/pdf`}

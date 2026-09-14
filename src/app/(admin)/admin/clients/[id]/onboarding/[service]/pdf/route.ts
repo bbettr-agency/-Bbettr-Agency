@@ -4,11 +4,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isValidService } from "@/lib/prospect/intake-lifecycle";
-import {
-  buildOnboardingPdfModel,
-  isDownloadableOnboardingStatus,
-  onboardingPdfFilename,
-} from "@/lib/onboarding-pdf";
+import { buildOnboardingPdfModel, onboardingPdfFilename } from "@/lib/onboarding-pdf";
 import { OnboardingPdfDocument } from "@/components/pdf/onboarding-pdf-document";
 
 /**
@@ -46,7 +42,7 @@ export async function GET(
     supabase.from("clients").select("name").eq("id", id).maybeSingle(),
   ]);
 
-  if (!sub || !client || !isDownloadableOnboardingStatus(sub.status)) {
+  if (!sub || !client) {
     return new NextResponse("Not found", { status: 404 });
   }
 
@@ -57,6 +53,12 @@ export async function GET(
     status: sub.status,
     submittedAt: sub.submitted_at,
   });
+
+  // Export is based on actual content, not submit-state: no answers → nothing to
+  // export (avoids an empty PDF); a filled draft (in_progress) IS exportable.
+  if (!model.presented.hasContent) {
+    return new NextResponse("Not found", { status: 404 });
+  }
 
   // OnboardingPdfDocument returns a <Document>; cast to renderToBuffer's expected
   // element type (react-pdf types the arg as the Document element specifically).

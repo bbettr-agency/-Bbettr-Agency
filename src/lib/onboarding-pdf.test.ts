@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   onboardingPdfFilename,
   buildOnboardingPdfModel,
-  isDownloadableOnboardingStatus,
+  isOnboardingExportable,
 } from "./onboarding-pdf";
 import { presentOnboarding } from "./onboarding-present";
 
@@ -25,12 +25,18 @@ describe("onboardingPdfFilename — safe + sensible", () => {
   });
 });
 
-describe("isDownloadableOnboardingStatus — drafts never export", () => {
-  it("only submitted/approved are downloadable", () => {
-    expect(isDownloadableOnboardingStatus("submitted")).toBe(true);
-    expect(isDownloadableOnboardingStatus("approved")).toBe(true);
-    expect(isDownloadableOnboardingStatus("in_progress")).toBe(false);
-    expect(isDownloadableOnboardingStatus("not_started")).toBe(false);
+describe("isOnboardingExportable — content-based, not submit-state", () => {
+  it("is exportable whenever real answers exist, regardless of status", () => {
+    // A filled draft (in_progress) still exports — the admin already sees these
+    // answers on screen; the PDF is the same content. (This is the bug fix: the
+    // button was hidden for in_progress submissions that had complete answers.)
+    expect(isOnboardingExportable("website", { business_name: "Acme", contact_email: "a@b.co" })).toBe(true);
+  });
+  it("is NOT exportable when there is no renderable content (empty / not started)", () => {
+    expect(isOnboardingExportable("website", {})).toBe(false);
+    expect(isOnboardingExportable("website", null)).toBe(false);
+    // Only reserved/unknown-empty keys → still nothing to show.
+    expect(isOnboardingExportable("website", { _internal: { x: 1 } })).toBe(false);
   });
 });
 
