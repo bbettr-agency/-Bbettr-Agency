@@ -23,7 +23,9 @@ export const supabaseEmailService: PortalEmailService = {
 
     if (kind === "password_reset") {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${APP_URL}/reset-password`,
+        // Server confirm route establishes the recovery session (device-independent),
+        // then forwards to /reset-password.
+        redirectTo: `${APP_URL}/auth/confirm?next=/reset-password`,
       });
       return error ? { ok: false, error: error.message } : { ok: true };
     }
