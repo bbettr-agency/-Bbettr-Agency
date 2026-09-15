@@ -18,7 +18,9 @@ export function ForgotPasswordForm() {
     startTransition(async () => {
       const supabase = createClient();
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        // Land on the server confirm route so the recovery session is established
+        // server-side (works on any device/browser), then it forwards to /reset-password.
+        redirectTo: `${window.location.origin}/auth/confirm?next=/reset-password`,
       });
       if (error) setError(error.message);
       else setSent(true);
