@@ -45,6 +45,12 @@ interface AppShellProps {
   onboardingActive?: boolean;
   /** Optional top-bar content (e.g. the client notification bell). */
   headerSlot?: React.ReactNode;
+  /**
+   * Optional control rendered at the top of the sidebar (client workspace
+   * switcher, S4B). Provided only for multi-workspace clients; otherwise the
+   * shell looks and behaves exactly as before.
+   */
+  workspaceControl?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -56,6 +62,7 @@ export function AppShell({
   canUsePlanner,
   onboardingActive,
   headerSlot,
+  workspaceControl,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -91,6 +98,7 @@ export function AppShell({
           roleLabel={roleLabel}
           isActive={isActive}
           badges={badges}
+          workspaceControl={workspaceControl}
         />
       </aside>
 
@@ -131,6 +139,7 @@ export function AppShell({
               roleLabel={roleLabel}
               isActive={isActive}
               badges={badges}
+              workspaceControl={workspaceControl}
               onNavigate={() => setMobileOpen(false)}
             />
           </aside>
@@ -160,6 +169,7 @@ function SidebarInner({
   roleLabel,
   isActive,
   badges,
+  workspaceControl,
   onNavigate,
 }: {
   sections: NavSection[];
@@ -168,6 +178,7 @@ function SidebarInner({
   roleLabel: "Client" | "Admin" | "Rep";
   isActive: (href: string) => boolean;
   badges?: NavBadges;
+  workspaceControl?: React.ReactNode;
   onNavigate?: () => void;
 }) {
   return (
@@ -175,6 +186,9 @@ function SidebarInner({
       <div className="flex h-16 items-center px-6">
         <Logo />
       </div>
+
+      {/* Workspace switcher (S4B) — multi-workspace clients only. */}
+      {workspaceControl}
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {sections.map((section, si) => (

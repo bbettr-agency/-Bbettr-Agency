@@ -94,3 +94,58 @@ export function isSafeReturnPath(path: string | null | undefined): path is strin
     !path.includes("://")
   );
 }
+
+/**
+ * The client portal's workspace-agnostic routes: their URLs carry NO entity id,
+ * so the same path is valid in every workspace. Keeping the user here after a
+ * switch can never 404 or leak cross-tenant existence.
+ */
+export const SAFE_CLIENT_ROUTES: ReadonlySet<string> = new Set([
+  "/dashboard",
+  "/dashboard/onboarding",
+  "/dashboard/project",
+  "/dashboard/updates",
+  "/dashboard/reports",
+  "/dashboard/files",
+  "/dashboard/invoices",
+  "/dashboard/contracts",
+]);
+
+/**
+ * Where to land after switching workspace (S4B). Keep the user on their current
+ * route when it's a known workspace-agnostic client route; otherwise fall back
+ * to the dashboard. This means an unexpected/nested/entity route (none exist
+ * today, but future-proofed) redirects to a safe parent rather than a path that
+ * may not exist in the target workspace.
+ */
+export function safeSwitchReturnPath(pathname: string | null | undefined): string {
+  const path = (pathname ?? "").split("?")[0].split("#")[0];
+  return SAFE_CLIENT_ROUTES.has(path) ? path : "/dashboard";
+}
+
+export interface WorkspaceOption {
+  id: string;
+  name: string;
+}
+
+export interface WorkspaceMenu {
+  /** Display name of the active workspace, or null if it isn't in the list. */
+  activeName: string | null;
+  /** Workspaces sorted by name, each flagged with whether it's active. */
+  options: (WorkspaceOption & { isActive: boolean })[];
+}
+
+/**
+ * Build the switcher's view model from the active workspace id and the user's
+ * workspaces. Pure and deterministic (name-sorted), so the UI never shows a UUID
+ * and the active workspace is unambiguous.
+ */
+export function buildWorkspaceMenu(
+  activeId: string,
+  workspaces: readonly WorkspaceOption[]
+): WorkspaceMenu {
+  const options = [...workspaces]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((w) => ({ ...w, isActive: w.id === activeId }));
+  return { activeName: options.find((o) => o.isActive)?.name ?? null, options };
+}

@@ -12,6 +12,7 @@ import { getPortalSettings } from "@/lib/settings";
 import { MaintenanceScreen } from "@/components/client/maintenance-screen";
 import { NotificationBell } from "@/components/client/notification-bell";
 import { IntakeLoginAdvance } from "@/components/client/intake-login-advance";
+import { WorkspaceSwitcher } from "@/components/client/workspace-switcher";
 
 export default async function ClientLayout({
   children,
@@ -20,8 +21,10 @@ export default async function ClientLayout({
 }) {
   // requireClientWorkspace redirects admins to /admin, so this layout (and the
   // maintenance gate below) only ever applies to client users. `clientId` is the
-  // resolved ACTIVE workspace (S3) that the whole shell renders against.
-  const { profile, clientId } = await requireClientWorkspace();
+  // resolved ACTIVE workspace (S3) that the whole shell renders against;
+  // `memberships`/`hasMultiple` drive the S4B workspace switcher.
+  const { profile, clientId, memberships, hasMultiple } =
+    await requireClientWorkspace();
 
   // Maintenance mode gate — clients see the notice; admins are unaffected
   // (they never reach this layout). Auth/login routes are a separate group.
@@ -67,12 +70,33 @@ export default async function ClientLayout({
     client?.onboarding_type === "new" &&
     client?.intake_status === "portal_access_sent";
 
+  // S4B: workspace switcher — ONLY for clients who belong to >1 workspace. Names
+  // are read under the client's own RLS (they may read clients they're a member
+  // of, S2). Single-workspace clients get no switcher and an unchanged shell.
+  let workspaceOptions: { id: string; name: string }[] = [];
+  if (hasMultiple) {
+    const { data: memberClients } = await supabase
+      .from("clients")
+      .select("id, name")
+      .in("id", memberships);
+    workspaceOptions = (memberClients ?? []).map((c) => ({
+      id: c.id as string,
+      name: (c.name as string) ?? "Workspace",
+    }));
+  }
+  const showSwitcher = hasMultiple && workspaceOptions.length > 1;
+
   return (
     <AppShell
       roleLabel="Client"
       context={client?.name ?? "Your account"}
       badges={badges}
       onboardingActive={onboardingActive}
+      workspaceControl={
+        showSwitcher ? (
+          <WorkspaceSwitcher activeId={clientId} workspaces={workspaceOptions} />
+        ) : undefined
+      }
       headerSlot={
         <NotificationBell
           notifications={feed.items}
