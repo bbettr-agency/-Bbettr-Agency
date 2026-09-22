@@ -1,12 +1,14 @@
 /**
- * Pure derivation of the Bbettr-built website's display state (Slice 2D) — no
- * I/O, no JSX. One source of truth (clients.website_preview_url +
- * website_live_url) drives BOTH the admin read-only line and the client Home
- * card, so the URL is never maintained twice.
+ * Pure derivation of the Bbettr-built website's display state — no I/O, no JSX.
+ * The same clients.website_preview_url + website_live_url drive BOTH the admin
+ * read-only line and the client Home card, so a URL is never maintained twice.
  *
- * Precedence: a live URL means the site is Live (even if a preview also exists);
- * otherwise a preview URL means In Development; otherwise there is nothing to
- * show. Blank/whitespace values are treated as absent.
+ * CANONICAL RULE (CX1): whether a site is "Live" is decided by PROJECT STAGES
+ * (the Launch stage being completed), NOT by the mere presence of a live URL —
+ * the URLs are supporting CTAs, not lifecycle truth. So a live URL set before
+ * Launch is complete does NOT show as Live (it's flagged via `dataWarning` for
+ * an admin to reconcile), which keeps the website card and the project journey
+ * from contradicting each other. Blank/whitespace values are treated as absent.
  */
 export type WebsiteState = "none" | "preview" | "live";
 
@@ -16,6 +18,8 @@ export interface WebsiteView {
   url: string | null;
   previewUrl: string | null;
   liveUrl: string | null;
+  /** A live URL exists but the project hasn't launched — data to reconcile. */
+  dataWarning?: "live_url_without_launch";
 }
 
 function clean(u: string | null | undefined): string | null {
@@ -27,11 +31,29 @@ function clean(u: string | null | undefined): string | null {
 export function deriveWebsiteState(input: {
   previewUrl?: string | null;
   liveUrl?: string | null;
+  /** Canonical: the project's Launch stage is completed. Default false. */
+  launched?: boolean;
 }): WebsiteView {
   const liveUrl = clean(input.liveUrl);
   const previewUrl = clean(input.previewUrl);
-  if (liveUrl) return { state: "live", url: liveUrl, previewUrl, liveUrl };
-  if (previewUrl) return { state: "preview", url: previewUrl, previewUrl, liveUrl: null };
+  const launched = input.launched === true;
+
+  if (launched) {
+    // Launched per project stages → Live; open the live URL (fall back to preview).
+    return { state: "live", url: liveUrl ?? previewUrl, previewUrl, liveUrl };
+  }
+  // Not launched: a live URL alone does NOT mean live. Any URL shows the site as
+  // In Development (openable); a stray live URL is flagged for reconciliation.
+  const url = previewUrl ?? liveUrl;
+  if (url) {
+    return {
+      state: "preview",
+      url,
+      previewUrl,
+      liveUrl,
+      ...(liveUrl ? { dataWarning: "live_url_without_launch" as const } : {}),
+    };
+  }
   return { state: "none", url: null, previewUrl, liveUrl };
 }
 

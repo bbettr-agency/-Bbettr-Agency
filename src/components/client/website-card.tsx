@@ -12,11 +12,14 @@ import { deriveWebsiteState, hasWebsite } from "@/lib/website-state";
 export function WebsiteCard({
   previewUrl,
   liveUrl,
+  launched,
 }: {
   previewUrl: string | null;
   liveUrl: string | null;
+  /** Canonical: the project's Launch stage is completed (project-state). */
+  launched: boolean;
 }) {
-  const v = deriveWebsiteState({ previewUrl, liveUrl });
+  const v = deriveWebsiteState({ previewUrl, liveUrl, launched });
   if (!hasWebsite(v)) return null;
 
   const live = v.state === "live";

@@ -66,13 +66,15 @@ export interface WebsiteSignals {
 }
 
 /**
- * Website operational state, DERIVED. A live URL or a completed Launch is the
- * strongest signal (Live); a preview URL or meaningful roadmap progress means In
- * Development; otherwise Not Started. Single function ⇒ no contradiction.
+ * Website operational state, DERIVED. CANONICAL (CX1): "Live" comes ONLY from the
+ * project's Launch stage being completed — a live URL alone never makes it Live,
+ * so this can't contradict the project journey. Any URL or roadmap progress means
+ * In Development; otherwise Not Started. Single function ⇒ no contradiction.
  */
 export function deriveWebsiteOperational(sig: WebsiteSignals): OperationalStatus {
-  if (nonEmpty(sig.liveUrl) || sig.launchCompleted) return "active"; // display "Live"
-  if (nonEmpty(sig.previewUrl) || sig.hasRoadmapProgress) return "in_progress";
+  if (sig.launchCompleted) return "active"; // display "Live" — canonical stage signal
+  if (nonEmpty(sig.previewUrl) || nonEmpty(sig.liveUrl) || sig.hasRoadmapProgress)
+    return "in_progress";
   return "not_started";
 }
 

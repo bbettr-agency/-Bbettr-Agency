@@ -11,9 +11,9 @@ import {
   getOnboarding,
   getOpenActionItems,
   getActivityTimeline,
-  computeProgress,
   isOnboardingComplete,
 } from "@/lib/queries";
+import { canonicalProjectState } from "@/lib/project-state";
 import { ActionRequiredBanner } from "@/components/client/action-required-banner";
 import { WelcomeHero } from "@/components/client/welcome-hero";
 import { ProjectJourney } from "@/components/client/project-journey";
@@ -28,7 +28,6 @@ import type { ServiceType } from "@/lib/database.types";
 import { ActivityTimeline } from "@/components/client/activity-timeline";
 import { CLIENT_HOME_FETCH } from "@/components/admin/activity-presentation";
 import { IntakePending } from "@/components/client/intake-pending";
-import { currentJourneyLabel, toClientJourney } from "@/lib/journey";
 import { resolveSuccessManager } from "@/lib/success-manager";
 import { computeReadiness } from "@/lib/readiness";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,9 +69,12 @@ export default async function DashboardPage() {
     );
   }
 
-  const progress = computeProgress(stages);
-  const journey = toClientJourney(stages);
-  const currentStage = currentJourneyLabel(journey);
+  // Canonical project state (CX1) — the single source every card below consumes.
+  const project = canonicalProjectState(stages, {
+    estimatedLaunchDate: client?.estimated_launch_date ?? null,
+  });
+  const progress = project.progressPercent;
+  const currentStage = project.current?.label ?? null; // client-safe label
   const onboardingComplete = isOnboardingComplete(services);
 
   // Success Manager: assigned → default → fallback (settings-backed).
@@ -81,18 +83,17 @@ export default async function DashboardPage() {
   );
 
   // Next Step: derive from the journey + the active stage's ETA (else launch date).
-  const activeStep = journey.find((j) => j.status === "in_progress") ?? null;
-  const allComplete =
-    journey.length > 0 && journey.every((j) => j.status === "completed");
-  const nextStepState = allComplete
+  const nextStepState = project.allComplete
     ? "complete"
-    : activeStep
+    : project.current?.status === "in_progress"
       ? "in_progress"
-      : journey.some((j) => j.status === "pending")
+      : project.stages.some((s) => s.status === "pending")
         ? "pending"
         : "none";
-  const nextStepDate =
-    activeStep?.targetDate ?? client?.estimated_launch_date ?? null;
+  // Date semantics (CX1): Next Step shows ONLY the current stage's target date (a
+  // stage-completion concept), never the project's estimated launch date — so the
+  // Hero (estimated launch) and Next Step can no longer show two different dates.
+  const nextStepDate = project.currentStageTargetDate;
 
   // Asset readiness: show the client what we still need, until an admin has
   // confirmed the "Assets Received" stage.
@@ -109,9 +110,8 @@ export default async function DashboardPage() {
   const websiteSignals = {
     liveUrl: client?.website_live_url ?? null,
     previewUrl: client?.website_preview_url ?? null,
-    launchCompleted:
-      stages.find((s) => s.name === "Launch")?.status === "completed",
-    hasRoadmapProgress: stages.some(
+    launchCompleted: project.launched, // canonical Launch-stage completion
+    hasRoadmapProgress: project.stages.some(
       (s) => s.status === "in_progress" || s.status === "completed"
     ),
   };
@@ -130,8 +130,7 @@ export default async function DashboardPage() {
 
   // Once the project has launched, drop the "Onboarding Complete" card — the
   // roadmap / current-phase card tells the story from then on.
-  const launchComplete =
-    stages.find((s) => s.name === "Launch")?.status === "completed";
+  const launchComplete = project.launched;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -161,6 +160,7 @@ export default async function DashboardPage() {
       <WebsiteCard
         previewUrl={client?.website_preview_url ?? null}
         liveUrl={client?.website_live_url ?? null}
+        launched={project.launched}
       />
 
       <div className="grid gap-6 lg:grid-cols-3">

@@ -181,6 +181,8 @@ export function ClientDetail({
   const websiteView = deriveWebsiteState({
     previewUrl: client.website_preview_url,
     liveUrl: client.website_live_url,
+    // Canonical (CX1): "Live" is decided by the Launch stage, not the URL alone.
+    launched: stages.some((s) => s.name === "Launch" && s.status === "completed"),
   });
 
   // Website operational-state signals (Slice 2E) — derived from the roadmap +
