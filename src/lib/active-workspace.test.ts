@@ -3,6 +3,8 @@ import {
   resolveActiveWorkspace,
   canActivateWorkspace,
   isSafeReturnPath,
+  safeSwitchReturnPath,
+  buildWorkspaceMenu,
   ACTIVE_WORKSPACE_COOKIE,
 } from "./active-workspace";
 
@@ -105,5 +107,41 @@ describe("isSafeReturnPath", () => {
 describe("cookie name", () => {
   it("is a stable, non-sensitive name", () => {
     expect(ACTIVE_WORKSPACE_COOKIE).toBe("bbettr_active_workspace");
+  });
+});
+
+describe("safeSwitchReturnPath (S4B route safety)", () => {
+  it("keeps the user on a known workspace-agnostic client route", () => {
+    for (const p of ["/dashboard", "/dashboard/onboarding", "/dashboard/project", "/dashboard/updates", "/dashboard/reports", "/dashboard/files", "/dashboard/invoices", "/dashboard/contracts"]) {
+      expect(safeSwitchReturnPath(p)).toBe(p);
+    }
+  });
+  it("strips query/hash before matching", () => {
+    expect(safeSwitchReturnPath("/dashboard/updates?x=1#top")).toBe("/dashboard/updates");
+  });
+  it("falls back to /dashboard for unknown / nested / entity-looking routes", () => {
+    expect(safeSwitchReturnPath("/dashboard/updates/some-id")).toBe("/dashboard");
+    expect(safeSwitchReturnPath("/admin/clients/123")).toBe("/dashboard");
+    expect(safeSwitchReturnPath("")).toBe("/dashboard");
+    expect(safeSwitchReturnPath(null)).toBe("/dashboard");
+    expect(safeSwitchReturnPath("//evil.com")).toBe("/dashboard");
+  });
+});
+
+describe("buildWorkspaceMenu (S4B switcher view model)", () => {
+  const A = "00000000-0000-0000-0000-0000000000aa";
+  const B = "00000000-0000-0000-0000-0000000000bb";
+  it("sorts by name, flags the active one, exposes its display name (never a UUID)", () => {
+    const menu = buildWorkspaceMenu(B, [
+      { id: A, name: "MLI Automotive" },
+      { id: B, name: "MLI Parts" },
+    ]);
+    expect(menu.activeName).toBe("MLI Parts");
+    expect(menu.options.map((o) => o.name)).toEqual(["MLI Automotive", "MLI Parts"]);
+    expect(menu.options.find((o) => o.id === B)?.isActive).toBe(true);
+    expect(menu.options.find((o) => o.id === A)?.isActive).toBe(false);
+  });
+  it("activeName is null when the active id isn't among the workspaces", () => {
+    expect(buildWorkspaceMenu("zzz", [{ id: A, name: "A" }]).activeName).toBeNull();
   });
 });
