@@ -12,10 +12,12 @@ let existingProfile: { id: string; full_name: string | null } | null = null;
 let alreadyMember: { client_id: string } | null = null;
 const calls = {
   cmInsert: [] as unknown[],
+  cmUpsert: [] as unknown[],
   cmDelete: [] as { user_id?: string; client_id?: string }[],
   invite: [] as { email: string; opts: unknown }[],
   createUser: [] as unknown[],
   deleteUser: [] as unknown[],
+  profileInsert: [] as unknown[],
   profileUpdate: [] as unknown[],
 };
 
@@ -41,8 +43,15 @@ function svcBuilder(table: string) {
   const chain: Record<string, unknown> = {};
   const self = () => chain;
   chain.select = self; chain.eq = self;
+  // client_members membership pre-check returns `alreadyMember`; profiles lookup
+  // in ensureClientProfileAndMembership returns null (→ profile insert path).
   chain.maybeSingle = async () => (table === "client_members" ? { data: alreadyMember } : { data: null });
-  chain.insert = async (row: unknown) => { if (table === "client_members") calls.cmInsert.push(row); return { error: null }; };
+  chain.insert = async (row: unknown) => {
+    if (table === "client_members") calls.cmInsert.push(row);
+    if (table === "profiles") calls.profileInsert.push(row);
+    return { error: null };
+  };
+  chain.upsert = async (row: unknown) => { if (table === "client_members") calls.cmUpsert.push(row); return { error: null }; };
   chain.delete = () => ({ eq: (_c: string, _v: string) => ({ eq: (_c2: string, _v2: string) => { calls.cmDelete.push({}); return Promise.resolve({ error: null }); } }) });
   chain.update = () => ({ eq: async () => { calls.profileUpdate.push(true); return { error: null }; } });
   return chain;
@@ -69,7 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   existingProfile = null;
   alreadyMember = null;
-  calls.cmInsert = []; calls.cmDelete = []; calls.invite = []; calls.createUser = []; calls.deleteUser = []; calls.profileUpdate = [];
+  calls.cmInsert = []; calls.cmUpsert = []; calls.cmDelete = []; calls.invite = []; calls.createUser = []; calls.deleteUser = []; calls.profileInsert = []; calls.profileUpdate = [];
   requireAdmin.mockResolvedValue({ id: "admin-1", role: "admin" });
 });
 
@@ -105,6 +114,13 @@ describe("grantWorkspaceAccessAction", () => {
     expect("password" in opts).toBe(false);
     expect("password" in (opts.data as Record<string, unknown>)).toBe(false);
     expect(calls.createUser).toHaveLength(0);
+    // THE FIX: after invite, the profile + membership are provisioned EXPLICITLY
+    // from the returned user id — not left to the DB trigger (which in prod did
+    // not read client_id from the invite, leaving zero memberships → the loop).
+    expect(calls.profileInsert).toEqual([
+      { id: "new-user", email: "new@example.com", role: "client", client_id: "B" },
+    ]);
+    expect(calls.cmUpsert).toEqual([{ user_id: "new-user", client_id: "B" }]);
   });
 
   it("rejects an invalid email before any privileged call", async () => {

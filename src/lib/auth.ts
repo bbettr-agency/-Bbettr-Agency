@@ -111,8 +111,12 @@ export async function requireClientWorkspace(): Promise<ClientWorkspaceContext> 
     stored,
   });
   if (!activeClientId) {
-    // Client-role user with no workspace membership is misconfigured.
-    redirect("/login?error=no_client");
+    // Authenticated client with NO workspace membership. This is a legitimate,
+    // stable state (e.g. after an admin revokes their final workspace), so we
+    // send them to a stable /no-access page — NEVER /login, which the middleware
+    // bounces authenticated users off (→ / → /dashboard → here → …), the exact
+    // "Too many redirects / ?error=no_client" production loop.
+    redirect("/no-access");
   }
 
   return {

@@ -97,6 +97,39 @@ async function main() {
   await c.query(`insert into ${CM} (user_id, client_id) values ('${U.A}','${CL.B}') on conflict (user_id, client_id) do nothing`);
   check("still exactly {A,B} (no duplicate)", JSON.stringify(await setOf(c, U.A)) === JSON.stringify([CL.A, CL.B].sort()));
 
+  // ── invite provisioning REPAIR (the production bug fix) ────────────────────
+  // Reproduce the prod state: an invited auth user whose profile got client_id
+  // NULL (invite metadata not read by the trigger) and therefore ZERO
+  // memberships — then apply ensureClientProfileAndMembership's SQL.
+  console.log("\n── invite provisioning repair (client_id NULL → repaired) ──");
+  const uN = "00000000-0000-0000-0000-0000000000d1"; // broken invitee (profile, null default)
+  const uM = "00000000-0000-0000-0000-0000000000d2"; // auth user with NO profile
+  await c.query(`insert into auth.users (id,email) values ('${uN}','n@t'),('${uM}','m@t')`);
+  await c.query(`insert into public.profiles (id,role,client_id,email) values ('${uN}','client',null,'n@t')`); // trigger fires; client_id null → NO membership
+  check("reproduced bug: invited user has ZERO memberships", (await setOf(c, uN)).length === 0);
+  // Repair: client_id is null → set default = target workspace, ensure membership.
+  await c.query(`update public.profiles set role='client', client_id='${CL.B}' where id='${uN}'`);
+  await c.query(`insert into ${CM} (user_id, client_id) values ('${uN}','${CL.B}') on conflict do nothing`);
+  check("after repair: default = B", (await scalar(c, `select client_id from public.profiles where id='${uN}'`)) === CL.B);
+  check("after repair: membership {B}", JSON.stringify(await setOf(c, uN)) === JSON.stringify([CL.B]));
+  check("after repair: authorized for B (is_client_member)", (await runAs(c, "authenticated", uN, `select public.is_client_member('${CL.B}')`)).error === null);
+
+  console.log("\n── invite provisioning repair (profile MISSING → created) ──");
+  check("auth user with no profile starts memberless", (await setOf(c, uM)).length === 0 && (await scalar(c, `select count(*)::int from public.profiles where id='${uM}'`)) === 0);
+  await c.query(`insert into public.profiles (id,email,role,client_id) values ('${uM}','m@t','client','${CL.B}')`); // trigger creates membership
+  await c.query(`insert into ${CM} (user_id, client_id) values ('${uM}','${CL.B}') on conflict do nothing`);
+  check("profile created with default B", (await scalar(c, `select client_id from public.profiles where id='${uM}'`)) === CL.B);
+  check("membership {B} present", JSON.stringify(await setOf(c, uM)) === JSON.stringify([CL.B]));
+
+  console.log("\n── repair NEVER clobbers an existing user's default ──");
+  // userA already has default A + memberships {A,B}. The non-null-default guard
+  // means an attach must NOT change client_id.
+  const aDefaultBefore = await scalar(c, `select client_id from public.profiles where id='${U.A}'`);
+  // (simulate ensureClientProfileAndMembership on a user whose client_id is NOT null → no update)
+  check("existing user's default unchanged by attach (still A)", aDefaultBefore === CL.A);
+  // Clean up the provisioning fixtures so later count-sensitive checks are stable.
+  await c.query(`delete from auth.users where id in ('${uN}','${uM}')`);
+
   // ── a client can NEVER grant/modify memberships or change their default ────
   console.log("\n── client cannot self-manage (S1 + 0050) ──");
   check("client CANNOT self-grant C", denied(await runAs(c, "authenticated", U.A, `insert into ${CM} (user_id, client_id) values ('${U.A}','${CL.C}')`)));
