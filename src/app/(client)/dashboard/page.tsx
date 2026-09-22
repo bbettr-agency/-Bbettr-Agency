@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { format } from "date-fns";
-import { ArrowRight, Megaphone, Route, Sparkles } from "lucide-react";
+import { ArrowRight, Route } from "lucide-react";
 import { requireClient } from "@/lib/auth";
 import {
   getPortalClient,
@@ -10,52 +9,43 @@ import {
   getUpdates,
   getOnboarding,
   getOpenActionItems,
-  getActivityTimeline,
   isOnboardingComplete,
 } from "@/lib/queries";
 import { canonicalProjectState } from "@/lib/project-state";
-import { ActionRequiredBanner } from "@/components/client/action-required-banner";
-import { WelcomeHero } from "@/components/client/welcome-hero";
-import { ProjectJourney } from "@/components/client/project-journey";
-import { NextStepCard } from "@/components/client/next-step-card";
-import { SuccessManagerCard } from "@/components/client/success-manager-card";
-import { PackageOverview } from "@/components/client/package-overview";
+import { buildClientOverview, type OverviewServiceInput } from "@/lib/client-overview";
+import { computeReadiness } from "@/lib/readiness";
 import {
   resolveServiceOperational,
   clientOperationalLabel,
 } from "@/lib/service-operational-state";
-import type { ServiceType } from "@/lib/database.types";
-import { ActivityTimeline } from "@/components/client/activity-timeline";
-import { CLIENT_HOME_FETCH } from "@/components/admin/activity-presentation";
+import { OverviewAttention } from "@/components/client/overview/attention";
+import { ProjectStateHeader } from "@/components/client/overview/project-state-header";
+import { LatestUpdate } from "@/components/client/overview/latest-update";
+import { ServicesSummary } from "@/components/client/overview/services-summary";
+import { ProjectJourney } from "@/components/client/project-journey";
+import { SuccessManagerCard } from "@/components/client/success-manager-card";
 import { IntakePending } from "@/components/client/intake-pending";
 import { resolveSuccessManager } from "@/lib/success-manager";
-import { computeReadiness } from "@/lib/readiness";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { ReadinessCard } from "@/components/client/readiness-card";
-import { WebsiteCard } from "@/components/client/website-card";
 import { SeenMarker } from "@/components/shared/seen-marker";
-import { CheckCircle2 } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const profile = await requireClient();
-  const [client, services, stages, updates, onboarding, actionItems, activity] =
+  const [client, services, stages, updates, onboarding, actionItems] =
     await Promise.all([
       getPortalClient(profile.client_id),
       getClientServices(profile.client_id),
       getProjectStages(profile.client_id),
-      getUpdates(profile.client_id, 3),
+      getUpdates(profile.client_id, 1),
       getOnboarding(profile.client_id),
       getOpenActionItems(profile.client_id),
-      getActivityTimeline(profile.client_id, CLIENT_HOME_FETCH),
     ]);
 
   // New intake clients see a calm holding panel until their onboarding opens.
-  // Legacy + existing clients (intake_status onboarding_started/submitted) get
-  // the full dashboard. Defensive content gate — onboarding access is unchanged.
+  // Legacy + existing clients get the full dashboard. Access gate is unchanged.
   if (
     client?.onboarding_type === "new" &&
     client.intake_status !== "onboarding_started" &&
@@ -69,236 +59,118 @@ export default async function DashboardPage() {
     );
   }
 
-  // Canonical project state (CX1) — the single source every card below consumes.
+  // Canonical project state (CX1) — the single source the Overview consumes.
   const project = canonicalProjectState(stages, {
     estimatedLaunchDate: client?.estimated_launch_date ?? null,
   });
-  const progress = project.progressPercent;
-  const currentStage = project.current?.label ?? null; // client-safe label
-  const onboardingComplete = isOnboardingComplete(services);
 
   // Success Manager: assigned → default → fallback (settings-backed).
   const successManager = await resolveSuccessManager(
     client?.success_manager_id ?? null
   );
 
-  // Next Step: derive from the journey + the active stage's ETA (else launch date).
-  const nextStepState = project.allComplete
-    ? "complete"
-    : project.current?.status === "in_progress"
-      ? "in_progress"
-      : project.stages.some((s) => s.status === "pending")
-        ? "pending"
-        : "none";
-  // Date semantics (CX1): Next Step shows ONLY the current stage's target date (a
-  // stage-completion concept), never the project's estimated launch date — so the
-  // Hero (estimated launch) and Next Step can no longer show two different dates.
-  const nextStepDate = project.currentStageTargetDate;
+  // Per-service friendly status + resolved operational enum (drives the header
+  // aggregate and the services summary).
+  const websiteSignals = {
+    liveUrl: client?.website_live_url ?? null,
+    previewUrl: client?.website_preview_url ?? null,
+    launchCompleted: project.launched,
+    hasRoadmapProgress: project.stages.some(
+      (s) => s.status === "in_progress" || s.status === "completed"
+    ),
+  };
+  const overviewServices: OverviewServiceInput[] = services.map((s) => {
+    const operational = resolveServiceOperational({
+      service: s.service,
+      operationalStatus: s.operational_status,
+      onboardingStatus: s.onboarding_status,
+      website: s.service === "website" ? websiteSignals : undefined,
+    });
+    return {
+      service: s.service,
+      name: SERVICE_NAME[s.service],
+      statusLabel: clientOperationalLabel(s.service, operational),
+      operational,
+    };
+  });
 
-  // Asset readiness: show the client what we still need, until an admin has
-  // confirmed the "Assets Received" stage.
+  // Outstanding required assets/access — surfaced as an action only after the
+  // admin hasn't yet received them (mirrors the previous readiness behaviour).
   const readiness = computeReadiness(
     services.map((s) => s.service),
     onboarding
   );
   const assetsReceived =
     stages.find((s) => s.name === "Assets Received")?.status === "completed";
+  const readinessPending = assetsReceived
+    ? 0
+    : Math.max(0, readiness.totalItems - readiness.totalDone);
 
-  // Friendly per-service operational-state labels for "Your Services" (Slice 2E).
-  // Website is derived from the roadmap + website URLs; ads/SEO from the stored
-  // operational_status (NULL resolved conservatively — never falsely Active).
-  const websiteSignals = {
-    liveUrl: client?.website_live_url ?? null,
-    previewUrl: client?.website_preview_url ?? null,
-    launchCompleted: project.launched, // canonical Launch-stage completion
-    hasRoadmapProgress: project.stages.some(
-      (s) => s.status === "in_progress" || s.status === "completed"
-    ),
-  };
-  const serviceStatusLabels: Partial<Record<ServiceType, string>> = {};
-  for (const s of services) {
-    serviceStatusLabels[s.service] = clientOperationalLabel(
-      s.service,
-      resolveServiceOperational({
-        service: s.service,
-        operationalStatus: s.operational_status,
-        onboardingStatus: s.onboarding_status,
-        website: s.service === "website" ? websiteSignals : undefined,
-      })
-    );
-  }
-
-  // Once the project has launched, drop the "Onboarding Complete" card — the
-  // roadmap / current-phase card tells the story from then on.
-  const launchComplete = project.launched;
+  const overview = buildClientOverview({
+    clientName: profile.full_name ?? client?.name ?? "there",
+    project,
+    website: {
+      previewUrl: client?.website_preview_url ?? null,
+      liveUrl: client?.website_live_url ?? null,
+    },
+    services: overviewServices,
+    onboardingComplete: isOnboardingComplete(services),
+    readinessPending,
+    actionItems: actionItems.map((a) => ({
+      id: a.id,
+      title: a.title,
+      body: a.body,
+      link: a.link,
+    })),
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Project Progress left primary nav (IA Slice 1): its unread dot now
-          rolls up to Home, and the Project Journey card below is the roadmap
-          the client sees — so opening Home clears the project seen-state. */}
+      {/* Opening Home clears the project seen-state (the journey lives here). */}
       <SeenMarker section="project" />
 
-      {/* Action required — highest priority, top of the dashboard */}
-      <ActionRequiredBanner items={actionItems} />
+      {/* 1. Do you need anything? — one authoritative action / reassurance strip */}
+      <OverviewAttention attention={overview.attention} />
 
-      {/* Welcome hero */}
-      <WelcomeHero
-        clientName={profile.full_name ?? client?.name ?? "Welcome"}
-        completion={progress}
-        currentStage={currentStage}
-        estimatedLaunchDate={client?.estimated_launch_date ?? null}
-      />
+      {/* 2 & 3. Where are we? / What happens next? — the primary anchor */}
+      <ProjectStateHeader clientName={overview.clientName} header={overview.header} />
 
-      {/* What we still need from you — progressive (Slice 2C): full checklist
-          while much is missing, a compact summary when little remains. */}
-      <ReadinessCard readiness={readiness} assetsReceived={assetsReceived} />
+      {/* 4. What is Bbettr doing? — the single latest curated update */}
+      <LatestUpdate update={updates[0] ?? null} />
 
-      {/* Your Website (Slice 2D) — preview while in development, live once set.
-          Reads the same clients columns the admin manages; hidden until a URL
-          exists. */}
-      <WebsiteCard
-        previewUrl={client?.website_preview_url ?? null}
-        liveUrl={client?.website_live_url ?? null}
-        launched={project.launched}
-      />
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Progress tracker */}
-        <Card className="lg:col-span-2">
+      {/* 5. How does the whole project fit together? — secondary journey */}
+      {overview.showJourney && (
+        <Card>
           <CardHeader className="flex-row items-center justify-between">
             <div className="flex items-center gap-2">
               <Route className="h-4.5 w-4.5 text-brand-500" />
-              <CardTitle>Project Journey</CardTitle>
+              <CardTitle>Project journey</CardTitle>
             </div>
             <Button asChild variant="ghost" size="sm">
               <Link href="/dashboard/project">
-                View project <ArrowRight className="h-4 w-4" />
+                View full project <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
           </CardHeader>
           <CardContent>
-            {stages.length > 0 ? (
-              <ProjectJourney stages={stages} />
-            ) : (
-              <EmptyState
-                icon={Route}
-                title="No project stages yet"
-                description="Your Bbettr Agency team will set up your project roadmap shortly."
-              />
-            )}
+            <ProjectJourney stages={stages} />
           </CardContent>
         </Card>
+      )}
 
-        {/* Right rail: what's next + who's looking after you */}
-        <div className="space-y-6">
-          <NextStepCard
-            stageLabel={currentStage}
-            state={nextStepState}
-            estimatedCompletion={nextStepDate}
-            actionItems={actionItems}
-          />
-          <SuccessManagerCard manager={successManager} />
-        </div>
-      </div>
+      {/* 6. Services — for multi-service / services-only clients only */}
+      {overview.showServices && <ServicesSummary services={overview.services} />}
 
-      {/* Package deliverables + growth opportunities */}
-      <PackageOverview
-        purchased={services.map((s) => s.service)}
-        statuses={serviceStatusLabels}
-      />
-
-      {/* Activity timeline */}
-      <ActivityTimeline events={activity} />
-
-      {/* Latest updates */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Megaphone className="h-4.5 w-4.5 text-brand-500" />
-            <CardTitle>Latest Updates</CardTitle>
-          </div>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/dashboard/updates">
-              View all <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {updates.length > 0 ? (
-            updates.map((u) => (
-              <Link
-                key={u.id}
-                href="/dashboard/updates"
-                className="block rounded-xl border border-ink-100 p-3.5 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
-              >
-                <p className="text-xs text-ink-400">
-                  {format(new Date(u.published_at), "d MMM yyyy")}
-                </p>
-                <p className="mt-0.5 text-sm font-semibold text-ink-900">
-                  {u.title}
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs text-ink-500">{u.body}</p>
-              </Link>
-            ))
-          ) : (
-            <div className="flex flex-col items-center gap-2 py-8 text-center sm:col-span-2 lg:col-span-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-500">
-                <Megaphone className="h-5 w-5" />
-              </span>
-              <p className="text-sm font-semibold text-ink-900">
-                Your project feed starts soon
-              </p>
-              <p className="max-w-sm text-xs text-ink-400">
-                We post here as work happens — you&apos;ll see a dot in the
-                sidebar whenever something new lands.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Onboarding nudge (incomplete) → completion message (complete, pre-launch) */}
-      {!onboardingComplete ? (
-        <Card className="border-brand-200 bg-brand-50/40">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500 text-white">
-                <Sparkles className="h-5 w-5" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-ink-900">
-                  Complete your onboarding
-                </p>
-                <p className="text-sm text-ink-500">
-                  Help us get started by filling in the details for your services.
-                </p>
-              </div>
-            </div>
-            <Button asChild>
-              <Link href="/dashboard/onboarding">
-                Continue onboarding <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : !launchComplete ? (
-        <Card className="border-emerald-200 bg-emerald-50/40">
-          <CardContent className="flex items-start gap-3 p-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
-              <CheckCircle2 className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-ink-900">
-                Onboarding Complete
-              </p>
-              <p className="text-sm text-ink-500">
-                Our team is now preparing your project.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      {/* 7. Who's looking after you — quiet, secondary */}
+      <SuccessManagerCard manager={successManager} />
     </div>
   );
 }
+
+/** Client-facing service display names (kept in step with the services catalog). */
+const SERVICE_NAME: Record<OverviewServiceInput["service"], string> = {
+  website: "Website Design",
+  google_ads: "Google Ads",
+  meta_ads: "Meta Ads",
+  seo: "SEO",
+};
