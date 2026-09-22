@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { memberAccessStatus, type MemberAccessStatus } from "@/lib/portal-access";
 import type {
   Client,
   ClientService,
@@ -89,6 +90,75 @@ export async function getPortalAccess(clientId: string): Promise<PortalAccess> {
 }
 
 /** Aggregated shape used by the admin client list. */
+export interface WorkspaceMember {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  /** "active" once they've signed in, else "invited" (account pending first login). */
+  status: MemberAccessStatus;
+  /** This workspace is the user's legacy/default (profiles.client_id). */
+  isDefault: boolean;
+  lastSignInAt: string | null;
+}
+
+/**
+ * The portal users who have membership to a client workspace (S4A). Admin-only:
+ * reads client_members + profiles under the admin RLS policies (admins see all),
+ * and resolves last_sign_in via the service-role admin API for status. Never
+ * exposes passwords, hashes or auth tokens — only display identity.
+ */
+export async function getWorkspaceMembers(clientId: string): Promise<WorkspaceMember[]> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("client_members")
+    .select("user_id")
+    .eq("client_id", clientId);
+  const ids = (rows ?? []).map((r) => r.user_id as string);
+  if (ids.length === 0) return [];
+
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, client_id")
+    .in("id", ids);
+  const byId = new Map((profiles ?? []).map((p) => [p.id as string, p]));
+
+  let admin: ReturnType<typeof createAdminClient> | null = null;
+  try {
+    admin = createAdminClient();
+  } catch {
+    admin = null; // service role unavailable — status falls back to "invited"
+  }
+
+  const members: WorkspaceMember[] = [];
+  for (const id of ids) {
+    const p = byId.get(id);
+    let lastSignInAt: string | null = null;
+    if (admin) {
+      try {
+        const { data } = await admin.auth.admin.getUserById(id);
+        lastSignInAt = data.user?.last_sign_in_at ?? null;
+      } catch {
+        // ignore — best-effort status only
+      }
+    }
+    members.push({
+      userId: id,
+      name: (p?.full_name as string | null) ?? null,
+      email: (p?.email as string | null) ?? null,
+      status: memberAccessStatus(lastSignInAt),
+      isDefault: (p?.client_id as string | null) === clientId,
+      lastSignInAt,
+    });
+  }
+
+  // Default workspace user first, then active before invited, then by email.
+  return members.sort((a, b) => {
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+    return (a.email ?? "").localeCompare(b.email ?? "");
+  });
+}
+
 export interface ClientSummary extends Client {
   services: ClientService["service"][];
   onboarding_done: number;

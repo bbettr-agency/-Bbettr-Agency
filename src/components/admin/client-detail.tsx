@@ -40,6 +40,7 @@ import { UpdateComposer } from "@/components/admin/update-composer";
 import { UpdatesTimeline } from "@/components/updates/updates-timeline";
 import { UpdateQuestionsPanel } from "@/components/admin/update-questions-panel";
 import { PortalAccessSummary } from "@/components/admin/portal-access-summary";
+import { WorkspaceAccessCard } from "@/components/admin/workspace-access-card";
 import { DangerZone } from "@/components/admin/danger-zone";
 import { deriveFocus, deriveAttention } from "@/components/admin/command-centre-state";
 import { WebsiteUrlsManager } from "@/components/admin/website-urls-manager";
@@ -47,6 +48,7 @@ import { deriveWebsiteState } from "@/lib/website-state";
 import { ClipboardList } from "lucide-react";
 import type {
   PortalAccess,
+  WorkspaceMember,
   DealLink,
   LinkableDeal,
   ClientBilling,
@@ -72,6 +74,7 @@ interface ClientDetailProps {
   onboarding: OnboardingSubmission[];
   portalUrl: string;
   portalAccess: PortalAccess;
+  workspaceMembers: WorkspaceMember[];
   teamMembers: { id: string; name: string; role: string | null; is_default: boolean }[];
   activity: {
     id: string;
@@ -102,6 +105,7 @@ export function ClientDetail({
   onboarding,
   portalUrl,
   portalAccess,
+  workspaceMembers,
   teamMembers,
   activity,
   contracts,
@@ -408,6 +412,13 @@ export function ClientDetail({
                 clientId={client.id}
                 portalUrl={portalUrl}
                 access={portalAccess}
+              />
+
+              {/* 5b. WORKSPACE ACCESS (S4A) — who can sign in; grant/revoke/invite. */}
+              <WorkspaceAccessCard
+                clientId={client.id}
+                clientName={client.name}
+                members={workspaceMembers}
               />
 
               {/* 6. ADVANCED — Danger Zone lives ONCE, collapsed, at the bottom. */}
