@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SeenMarker } from "@/components/shared/seen-marker";
 import { Route, CheckCircle2, Clock, Circle } from "lucide-react";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { getProjectStages, computeProgress } from "@/lib/queries";
 import { toClientJourney } from "@/lib/journey";
 import { PageHeader } from "@/components/ui/page-header";
@@ -12,8 +12,8 @@ import { ProjectJourney } from "@/components/client/project-journey";
 export const metadata: Metadata = { title: "Project Progress" };
 
 export default async function ProjectPage() {
-  const profile = await requireClient();
-  const stages = await getProjectStages(profile.client_id);
+  const { clientId } = await requireClientWorkspace();
+  const stages = await getProjectStages(clientId);
   const progress = computeProgress(stages);
 
   // Client-facing journey labels only — never the internal operational names.

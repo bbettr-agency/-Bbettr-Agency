@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SeenMarker } from "@/components/shared/seen-marker";
 import { Megaphone } from "lucide-react";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { getUpdates, getUpdateReactions } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -10,9 +10,9 @@ import { UpdatesTimeline } from "@/components/updates/updates-timeline";
 export const metadata: Metadata = { title: "Updates" };
 
 export default async function UpdatesPage() {
-  const profile = await requireClient();
+  const { profile, clientId } = await requireClientWorkspace();
   // Cap the feed so a long-lived account never renders an unbounded timeline.
-  const updates = await getUpdates(profile.client_id, 50);
+  const updates = await getUpdates(clientId, 50);
   const reactions = await getUpdateReactions(
     updates.map((u) => u.id),
     profile.id

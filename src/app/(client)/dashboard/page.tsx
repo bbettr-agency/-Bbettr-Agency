@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Route } from "lucide-react";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import {
   getPortalClient,
   getClientServices,
@@ -33,15 +33,15 @@ import { SeenMarker } from "@/components/shared/seen-marker";
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
-  const profile = await requireClient();
+  const { profile, clientId } = await requireClientWorkspace();
   const [client, services, stages, updates, onboarding, actionItems] =
     await Promise.all([
-      getPortalClient(profile.client_id),
-      getClientServices(profile.client_id),
-      getProjectStages(profile.client_id),
-      getUpdates(profile.client_id, 1),
-      getOnboarding(profile.client_id),
-      getOpenActionItems(profile.client_id),
+      getPortalClient(clientId),
+      getClientServices(clientId),
+      getProjectStages(clientId),
+      getUpdates(clientId, 1),
+      getOnboarding(clientId),
+      getOpenActionItems(clientId),
     ]);
 
   // New intake clients see a calm holding panel until their onboarding opens.

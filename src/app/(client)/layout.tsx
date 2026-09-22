@@ -1,4 +1,4 @@
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   isOnboardingComplete,
@@ -18,9 +18,10 @@ export default async function ClientLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // requireClient redirects admins to /admin, so this layout (and the
-  // maintenance gate below) only ever applies to client users.
-  const profile = await requireClient();
+  // requireClientWorkspace redirects admins to /admin, so this layout (and the
+  // maintenance gate below) only ever applies to client users. `clientId` is the
+  // resolved ACTIVE workspace (S3) that the whole shell renders against.
+  const { profile, clientId } = await requireClientWorkspace();
 
   // Maintenance mode gate — clients see the notice; admins are unaffected
   // (they never reach this layout). Auth/login routes are a separate group.
@@ -36,14 +37,14 @@ export default async function ClientLayout({
       supabase
         .from("clients")
         .select("name, onboarding_type, intake_status")
-        .eq("id", profile.client_id)
+        .eq("id", clientId)
         .single(),
       supabase
         .from("client_services")
         .select("onboarding_status")
-        .eq("client_id", profile.client_id),
-      getClientNotifications(profile.client_id, profile.id),
-      getClientNotificationFeed(profile.client_id),
+        .eq("client_id", clientId),
+      getClientNotifications(clientId, profile.id),
+      getClientNotificationFeed(clientId),
     ]);
 
   // Sidebar indicators: a blue dot for sections with unseen activity, and a

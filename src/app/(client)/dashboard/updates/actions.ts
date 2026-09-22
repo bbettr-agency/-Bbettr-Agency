@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { sendClientQuestionEmail } from "@/lib/email/client-notifications";
 import { UPDATE_REACTION_EMOJIS } from "@/lib/update-reactions";
@@ -25,7 +25,7 @@ export async function toggleUpdateReactionAction(
   updateId: string,
   emoji: string
 ): Promise<UpdateActionResult> {
-  const profile = await requireClient();
+  const { profile, clientId } = await requireClientWorkspace();
   if (!UPDATE_REACTION_EMOJIS.includes(emoji)) {
     return { error: "That reaction isn't available." };
   }
@@ -36,7 +36,7 @@ export async function toggleUpdateReactionAction(
     .select("id, client_id")
     .eq("id", updateId)
     .maybeSingle();
-  if (!update || update.client_id !== profile.client_id) {
+  if (!update || update.client_id !== clientId) {
     return { error: "Update not found." };
   }
 
@@ -59,7 +59,7 @@ export async function toggleUpdateReactionAction(
   } else {
     const { error } = await supabase.from("update_reactions").insert({
       update_id: updateId,
-      client_id: profile.client_id,
+      client_id: clientId,
       profile_id: profile.id,
       emoji,
     });
@@ -81,7 +81,7 @@ export async function requestUpdateFollowupAction(
   channel: QuestionChannel,
   message: string
 ): Promise<UpdateActionResult> {
-  const profile = await requireClient();
+  const { profile, clientId } = await requireClientWorkspace();
   if (channel !== "callback" && channel !== "email") {
     return { error: "Choose a callback or an email." };
   }
@@ -92,14 +92,14 @@ export async function requestUpdateFollowupAction(
     .select("id, client_id, title")
     .eq("id", updateId)
     .maybeSingle();
-  if (!update || update.client_id !== profile.client_id) {
+  if (!update || update.client_id !== clientId) {
     return { error: "Update not found." };
   }
 
   const trimmed = message.trim() || null;
   const { error } = await supabase.from("update_questions").insert({
     update_id: updateId,
-    client_id: profile.client_id,
+    client_id: clientId,
     profile_id: profile.id,
     channel,
     message: trimmed,
@@ -110,7 +110,7 @@ export async function requestUpdateFollowupAction(
   const { data: client } = await supabase
     .from("clients")
     .select("name, contact_name, contact_email, contact_phone")
-    .eq("id", profile.client_id)
+    .eq("id", clientId)
     .maybeSingle();
 
   await sendClientQuestionEmail({
@@ -121,7 +121,7 @@ export async function requestUpdateFollowupAction(
     updateTitle: update.title,
     channel,
     message: trimmed,
-    clientAdminUrl: `${APP_URL}/admin/clients/${profile.client_id}`,
+    clientAdminUrl: `${APP_URL}/admin/clients/${clientId}`,
   });
 
   revalidatePath("/dashboard/updates");

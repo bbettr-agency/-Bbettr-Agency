@@ -1,7 +1,12 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/database.types";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  resolveActiveWorkspace,
+} from "@/lib/active-workspace";
 
 /**
  * Returns the authenticated user's profile (role + tenant binding), or null.
@@ -58,6 +63,64 @@ export async function requireClient(): Promise<Profile & { client_id: string }> 
     redirect("/login?error=no_client");
   }
   return profile as Profile & { client_id: string };
+}
+
+/**
+ * The resolved active-workspace context for a client session (Membership S3).
+ *
+ * `clientId` is the ACTIVE workspace the portal should display — the ONE value
+ * every client-facing tenant query must scope to, so a multi-workspace user
+ * never sees Overview=B while Files=A. It is resolved deterministically from the
+ * user's real memberships, their stored preference (validated every time), and
+ * their legacy default; it never grants access (S2 RLS remains the boundary).
+ */
+export interface ClientWorkspaceContext {
+  profile: Profile;
+  /** Active workspace id — use THIS for all client tenant queries/writes. */
+  clientId: string;
+  /** Every workspace this user is a member of (their own rows, via RLS). */
+  memberships: string[];
+  /** True when the user belongs to more than one workspace (S4 switcher). */
+  hasMultiple: boolean;
+}
+
+/**
+ * Require a client session and resolve its active workspace (S3). Admins/reps
+ * are redirected to their own home (admin authorization is never routed through
+ * membership). A client with ZERO memberships fails safe to /login?error=
+ * no_client — no unrelated workspace is ever guessed. Reads client_members under
+ * the caller's RLS, so only the user's own memberships are visible.
+ *
+ * Drop-in replacement for requireClient() on client surfaces: use `clientId`
+ * (active workspace) wherever `profile.client_id` (legacy) was used before.
+ */
+export async function requireClientWorkspace(): Promise<ClientWorkspaceContext> {
+  const profile = await requireProfile();
+  if (profile.role !== "client") redirect(homePath(profile.role));
+
+  const supabase = await createClient();
+  const { data } = await supabase.from("client_members").select("client_id");
+  const memberships = (data ?? []).map((r) => r.client_id as string);
+
+  const cookieStore = await cookies();
+  const stored = cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null;
+
+  const { activeClientId } = resolveActiveWorkspace({
+    memberships,
+    legacyClientId: profile.client_id ?? null,
+    stored,
+  });
+  if (!activeClientId) {
+    // Client-role user with no workspace membership is misconfigured.
+    redirect("/login?error=no_client");
+  }
+
+  return {
+    profile,
+    clientId: activeClientId,
+    memberships,
+    hasMultiple: memberships.length > 1,
+  };
 }
 
 /** Require a sales-rep session; redirect others to their own home. */

@@ -4,7 +4,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // client-level billing profile; draft saves are never blocked; existing
 // submissions aren't re-validated (the gate runs only on a fresh submit call).
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ requireClient: vi.fn(async () => ({ id: "p1", client_id: "client-A", role: "client" })) }));
+vi.mock("@/lib/auth", () => ({
+  // S3: saveOnboarding now resolves the ACTIVE workspace via requireClientWorkspace.
+  requireClientWorkspace: vi.fn(async () => ({
+    profile: { id: "p1", client_id: "client-A", role: "client" },
+    clientId: "client-A",
+    memberships: ["client-A"],
+    hasMultiple: false,
+  })),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/intake-advance", () => ({ advanceIntakeStatus: vi.fn(async () => {}) }));
