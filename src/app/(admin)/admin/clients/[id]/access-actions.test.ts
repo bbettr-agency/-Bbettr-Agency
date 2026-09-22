@@ -7,53 +7,36 @@ vi.mock("@/lib/email", () => ({ getEmailService: vi.fn(() => ({ send: vi.fn(asyn
 const requireAdmin = vi.fn(async () => ({ id: "admin-1", role: "admin" }));
 vi.mock("@/lib/auth", () => ({ requireAdmin: () => requireAdmin() }));
 
-// ── Configurable supabase mocks ─────────────────────────────────────────────
-let existingProfile: { id: string; full_name: string | null } | null = null;
+// ── Configurable identity/state ─────────────────────────────────────────────
+let authUsers: { id: string; email: string }[] = []; // what listUsers returns
+let svcProfile: { id: string; role: string; client_id: string | null; email: string | null } | null = null;
 let alreadyMember: { client_id: string } | null = null;
 const calls = {
-  cmInsert: [] as unknown[],
+  profileInsert: [] as unknown[],
+  profileUpdate: [] as unknown[],
   cmUpsert: [] as unknown[],
-  cmDelete: [] as { user_id?: string; client_id?: string }[],
   invite: [] as { email: string; opts: unknown }[],
   createUser: [] as unknown[],
   deleteUser: [] as unknown[],
-  profileInsert: [] as unknown[],
-  profileUpdate: [] as unknown[],
+  listUsers: 0,
 };
 
-// Session (RLS) client — reads clients + profiles.
-function sessionBuilder(table: string) {
-  const chain: Record<string, unknown> = {};
-  const self = () => chain;
-  chain.select = self; chain.eq = self; chain.in = self; chain.limit = self;
-  chain.maybeSingle = async () => {
-    if (table === "clients") return { data: { id: "B", name: "MLI Parts" } };
-    if (table === "profiles") return { data: existingProfile };
-    return { data: null };
-  };
-  chain.single = chain.maybeSingle;
-  return chain;
-}
+// Session (RLS) client — only reads clients here.
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ from: (t: string) => sessionBuilder(t) })),
+  createClient: vi.fn(async () => ({
+    from: (_t: string) => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "B", name: "MLI Parts" } }) }) }) }),
+  })),
 }));
 
-// Service-role client — privileged writes + auth admin.
 function svcBuilder(table: string) {
   const chain: Record<string, unknown> = {};
   const self = () => chain;
   chain.select = self; chain.eq = self;
-  // client_members membership pre-check returns `alreadyMember`; profiles lookup
-  // in ensureClientProfileAndMembership returns null (→ profile insert path).
-  chain.maybeSingle = async () => (table === "client_members" ? { data: alreadyMember } : { data: null });
-  chain.insert = async (row: unknown) => {
-    if (table === "client_members") calls.cmInsert.push(row);
-    if (table === "profiles") calls.profileInsert.push(row);
-    return { error: null };
-  };
+  chain.maybeSingle = async () => (table === "client_members" ? { data: alreadyMember } : { data: svcProfile });
+  chain.insert = async (row: unknown) => { if (table === "profiles") calls.profileInsert.push(row); return { error: null }; };
   chain.upsert = async (row: unknown) => { if (table === "client_members") calls.cmUpsert.push(row); return { error: null }; };
-  chain.delete = () => ({ eq: (_c: string, _v: string) => ({ eq: (_c2: string, _v2: string) => { calls.cmDelete.push({}); return Promise.resolve({ error: null }); } }) });
-  chain.update = () => ({ eq: async () => { calls.profileUpdate.push(true); return { error: null }; } });
+  chain.update = (patch: unknown) => ({ eq: async () => { if (table === "profiles") calls.profileUpdate.push(patch); return { error: null }; } });
+  chain.delete = () => ({ eq: () => ({ eq: () => Promise.resolve({ error: null }) }) });
   return chain;
 }
 vi.mock("@/lib/supabase/admin", () => ({
@@ -61,6 +44,7 @@ vi.mock("@/lib/supabase/admin", () => ({
     from: (t: string) => svcBuilder(t),
     auth: {
       admin: {
+        listUsers: async () => { calls.listUsers++; return { data: { users: authUsers }, error: null }; },
         inviteUserByEmail: async (email: string, opts: unknown) => { calls.invite.push({ email, opts }); return { data: { user: { id: "new-user" } }, error: null }; },
         createUser: async (o: unknown) => { calls.createUser.push(o); return { data: {}, error: null }; },
         deleteUser: async (o: unknown) => { calls.deleteUser.push(o); return { error: null }; },
@@ -69,90 +53,109 @@ vi.mock("@/lib/supabase/admin", () => ({
   })),
 }));
 
-import {
-  grantWorkspaceAccessAction,
-  revokeWorkspaceAccessAction,
-} from "./access-actions";
+import { grantWorkspaceAccessAction, revokeWorkspaceAccessAction } from "./access-actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  existingProfile = null;
-  alreadyMember = null;
-  calls.cmInsert = []; calls.cmUpsert = []; calls.cmDelete = []; calls.invite = []; calls.createUser = []; calls.deleteUser = []; calls.profileInsert = []; calls.profileUpdate = [];
+  authUsers = []; svcProfile = null; alreadyMember = null;
+  calls.profileInsert = []; calls.profileUpdate = []; calls.cmUpsert = []; calls.invite = []; calls.createUser = []; calls.deleteUser = []; calls.listUsers = 0;
   requireAdmin.mockResolvedValue({ id: "admin-1", role: "admin" });
 });
 
-describe("grantWorkspaceAccessAction", () => {
-  it("existing user → adds a membership, never a new account or password", async () => {
-    existingProfile = { id: "john", full_name: "John" };
+describe("grantWorkspaceAccessAction — identity-first (auth.users authoritative)", () => {
+  it("BROKEN existing user (auth exists, profile client_id NULL, no membership) → REPAIRED, no invite", async () => {
+    authUsers = [{ id: "john", email: "john@example.com" }];
+    svcProfile = { id: "john", role: "client", client_id: null, email: "john@example.com" };
     const res = await grantWorkspaceAccessAction("B", "John@Example.com");
-    expect(res).toMatchObject({ ok: true, outcome: "granted" });
-    expect(calls.cmInsert).toEqual([{ user_id: "john", client_id: "B" }]);
-    expect(calls.invite).toHaveLength(0);
+    expect(res).toMatchObject({ ok: true, outcome: "repaired" });
+    expect(calls.invite).toHaveLength(0); // existing account is never re-invited
     expect(calls.createUser).toHaveLength(0);
+    expect(calls.profileUpdate).toEqual([{ client_id: "B" }]); // default filled (was null)
+    expect(calls.cmUpsert).toEqual([{ user_id: "john", client_id: "B" }]); // membership created
   });
 
-  it("existing user already a member → idempotent, no insert", async () => {
-    existingProfile = { id: "john", full_name: "John" };
+  it("MISSING profile (auth exists, no profile row) → profile created + membership, no invite", async () => {
+    authUsers = [{ id: "ghost", email: "ghost@example.com" }];
+    svcProfile = null;
+    const res = await grantWorkspaceAccessAction("B", "ghost@example.com");
+    expect(res.outcome).toBe("repaired");
+    expect(calls.invite).toHaveLength(0);
+    expect(calls.profileInsert).toEqual([{ id: "ghost", email: "ghost@example.com", role: "client", client_id: "B" }]);
+    expect(calls.cmUpsert).toEqual([{ user_id: "ghost", client_id: "B" }]);
+  });
+
+  it("HEALTHY existing user (default A) → membership B added, default A NOT changed, outcome granted", async () => {
+    authUsers = [{ id: "amy", email: "amy@example.com" }];
+    svcProfile = { id: "amy", role: "client", client_id: "A", email: "amy@example.com" };
+    const res = await grantWorkspaceAccessAction("B", "amy@example.com");
+    expect(res.outcome).toBe("granted");
+    expect(calls.invite).toHaveLength(0);
+    // No client_id change (healthy default preserved); at most a no-op update set.
+    expect(calls.profileUpdate.flatMap((p) => Object.keys(p as object))).not.toContain("client_id");
+    expect(calls.cmUpsert).toEqual([{ user_id: "amy", client_id: "B" }]);
+  });
+
+  it("ALREADY a member → idempotent, no writes", async () => {
+    authUsers = [{ id: "amy", email: "amy@example.com" }];
+    svcProfile = { id: "amy", role: "client", client_id: "B", email: "amy@example.com" };
     alreadyMember = { client_id: "B" };
-    const res = await grantWorkspaceAccessAction("B", "john@example.com");
+    const res = await grantWorkspaceAccessAction("B", "amy@example.com");
     expect(res.outcome).toBe("already_member");
-    expect(calls.cmInsert).toHaveLength(0);
+    expect(calls.cmUpsert).toHaveLength(0);
+    expect(calls.profileInsert).toHaveLength(0);
+    expect(calls.profileUpdate).toHaveLength(0);
   });
 
-  it("new user → secure invite (own password) with role+client_id metadata and confirm redirect", async () => {
-    existingProfile = null;
+  it("INTERNAL user (existing profile role=admin) → refused safely, role untouched, no membership", async () => {
+    authUsers = [{ id: "boss", email: "boss@bbettr.com" }];
+    svcProfile = { id: "boss", role: "admin", client_id: null, email: "boss@bbettr.com" };
+    const res = await grantWorkspaceAccessAction("B", "boss@bbettr.com");
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/internal Bbettr user/i);
+    expect(calls.cmUpsert).toHaveLength(0);
+    expect(calls.profileUpdate).toHaveLength(0);
+    expect(calls.invite).toHaveLength(0);
+  });
+
+  it("BRAND-NEW email (no auth identity) → invite + explicit provisioning", async () => {
+    authUsers = []; // listUsers finds nobody
+    svcProfile = null;
     const res = await grantWorkspaceAccessAction("B", "new@example.com");
-    expect(res).toMatchObject({ ok: true, outcome: "invited", email: "new@example.com" });
+    expect(res.outcome).toBe("invited");
     expect(calls.invite).toHaveLength(1);
-    const { email, opts } = calls.invite[0] as { email: string; opts: { data: Record<string, unknown>; redirectTo: string } };
-    expect(email).toBe("new@example.com");
+    const { opts } = calls.invite[0] as { opts: { data: Record<string, unknown>; redirectTo: string } };
     expect(opts.data).toMatchObject({ role: "client", client_id: "B" });
     expect(opts.redirectTo).toContain("/auth/confirm");
-    // No password is ever generated/passed — invite carries no credential field
-    // (the "/reset-password" redirect path is where the USER sets their own).
     expect("password" in opts).toBe(false);
-    expect("password" in (opts.data as Record<string, unknown>)).toBe(false);
     expect(calls.createUser).toHaveLength(0);
-    // THE FIX: after invite, the profile + membership are provisioned EXPLICITLY
-    // from the returned user id — not left to the DB trigger (which in prod did
-    // not read client_id from the invite, leaving zero memberships → the loop).
-    expect(calls.profileInsert).toEqual([
-      { id: "new-user", email: "new@example.com", role: "client", client_id: "B" },
-    ]);
+    expect(calls.profileInsert).toEqual([{ id: "new-user", email: "new@example.com", role: "client", client_id: "B" }]);
     expect(calls.cmUpsert).toEqual([{ user_id: "new-user", client_id: "B" }]);
   });
 
-  it("rejects an invalid email before any privileged call", async () => {
+  it("rejects an invalid email before any Auth/DB call", async () => {
     const res = await grantWorkspaceAccessAction("B", "not-an-email");
     expect(res.ok).toBe(false);
+    expect(calls.listUsers).toBe(0);
     expect(calls.invite).toHaveLength(0);
-    expect(calls.cmInsert).toHaveLength(0);
   });
 
-  it("is denied when the caller is not an admin (requireAdmin throws)", async () => {
+  it("denied for a non-admin caller (no privileged calls)", async () => {
     requireAdmin.mockRejectedValueOnce(new Error("redirect"));
     await expect(grantWorkspaceAccessAction("B", "john@example.com")).rejects.toThrow();
-    expect(calls.cmInsert).toHaveLength(0);
+    expect(calls.listUsers).toBe(0);
+    expect(calls.cmUpsert).toHaveLength(0);
     expect(calls.invite).toHaveLength(0);
   });
 });
 
 describe("revokeWorkspaceAccessAction", () => {
-  it("removes only the membership pair — never the auth user", async () => {
-    // svcBuilder returns alreadyMember for client_members.select; emulate the
-    // membership list read by making the first .eq(...) resolve to rows.
+  it("never deletes the auth user; denied for non-admins", async () => {
     const res = await revokeWorkspaceAccessAction("B", "john");
-    // With no memberships returned by the mock, it treats as idempotent no-op —
-    // but crucially never deletes the auth user.
     expect(res.ok).toBe(true);
     expect(calls.deleteUser).toHaveLength(0);
-  });
 
-  it("is denied for a non-admin caller", async () => {
     requireAdmin.mockRejectedValueOnce(new Error("redirect"));
     await expect(revokeWorkspaceAccessAction("B", "john")).rejects.toThrow();
-    expect(calls.cmDelete).toHaveLength(0);
     expect(calls.deleteUser).toHaveLength(0);
   });
 });

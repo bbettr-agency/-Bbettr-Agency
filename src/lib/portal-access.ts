@@ -66,7 +66,9 @@ export function decideDefaultAfterRevoke(input: {
 }
 
 export type GrantOutcome =
-  | "granted" // membership newly created for an existing user
+  | "granted" // membership newly created for an existing (healthy) user
+  | "repaired" // an existing Auth identity with an incomplete/missing profile
+  // was repaired (profile + default filled) and given the membership
   | "already_member" // idempotent: the membership already existed
   | "invited"; // a new user was invited and given the membership
 
