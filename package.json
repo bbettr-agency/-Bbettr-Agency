@@ -34,6 +34,7 @@
     "test:tasks-0057": "node supabase/tests/tasks-0057-client-service-operational-status.test.mjs",
     "test:tasks-0058": "node supabase/tests/tasks-0058-prospect-intakes.test.mjs",
     "test:tasks-0059": "node supabase/tests/tasks-0059-prospect-intake-notification-type.test.mjs",
+    "test:tasks-0060": "node supabase/tests/tasks-0060-client-members.test.mjs",
     "test:parity": "node supabase/tests/schema-parity.test.mjs",
     "test:prospect-cleanup": "node supabase/tests/prospect-intake-cleanup.test.mjs",
     "test:prospect-admin": "node supabase/tests/prospect-intake-admin.test.mjs",

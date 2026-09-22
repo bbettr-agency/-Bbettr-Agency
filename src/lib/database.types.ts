@@ -381,6 +381,41 @@ export interface Database {
           }
         ];
       };
+      // Multi-Workspace Membership (S1, migration 0060). Many-to-many link
+      // between portal users (auth.users) and client workspaces. Defined for
+      // type-completeness; NOT read by the app in S1 (tenant resolution still
+      // flows through profiles.client_id / current_client_id()).
+      client_members: {
+        Row: {
+          id: string;
+          user_id: string;
+          client_id: string;
+          role: "member";
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          client_id: string;
+          role?: "member";
+        };
+        Update: Partial<Database["public"]["Tables"]["client_members"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "client_members_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "client_members_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
       onboarding_submissions: {
         Row: {
           id: string;
