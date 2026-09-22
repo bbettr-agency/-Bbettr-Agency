@@ -14,6 +14,7 @@ import {
 } from "@/lib/queries";
 import {
   getPortalAccess,
+  getWorkspaceMembers,
   getTeamMembers,
   getClientActivity,
   getClientDealLink,
@@ -49,6 +50,7 @@ export default async function ClientDetailPage({
     files,
     onboarding,
     portalAccess,
+    workspaceMembers,
     teamMembers,
     activity,
     contracts,
@@ -65,6 +67,7 @@ export default async function ClientDetailPage({
     getFiles(id),
     getOnboarding(id),
     getPortalAccess(id),
+    getWorkspaceMembers(id),
     getTeamMembers(),
     // Bounded recent window for the fast Work-page paint; full history is loaded
     // on demand via loadClientActivityAction when the admin opens it (Slice 2B).
@@ -97,6 +100,7 @@ export default async function ClientDetailPage({
         onboarding={onboarding}
         portalUrl={PORTAL_URL}
         portalAccess={portalAccess}
+        workspaceMembers={workspaceMembers}
         teamMembers={teamMembers}
         activity={activity}
         activityHasMore={activityHasMore}
