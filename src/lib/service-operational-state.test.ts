@@ -20,11 +20,11 @@ const web = (o: Partial<WebsiteSignals>): WebsiteSignals => ({
 });
 
 describe("Website — derived only (Live / In Development / Not Started)", () => {
-  it("Live when a live URL exists", () => {
-    expect(deriveWebsiteOperational(web({ liveUrl: "https://client.co.za" }))).toBe("active");
-  });
-  it("Live when the Launch stage is completed", () => {
+  it("Live ONLY when the Launch stage is completed (CX1: stages are canonical)", () => {
     expect(deriveWebsiteOperational(web({ launchCompleted: true }))).toBe("active");
+  });
+  it("a live URL WITHOUT Launch completion is In Development, not Live (URL is a CTA, not lifecycle truth)", () => {
+    expect(deriveWebsiteOperational(web({ liveUrl: "https://client.co.za" }))).toBe("in_progress");
   });
   it("In Development when only a preview URL exists", () => {
     expect(deriveWebsiteOperational(web({ previewUrl: "https://preview.test" }))).toBe("in_progress");
@@ -35,10 +35,15 @@ describe("Website — derived only (Live / In Development / Not Started)", () =>
   it("Not Started when there are no signals", () => {
     expect(deriveWebsiteOperational(web({}))).toBe("not_started");
   });
-  it("live URL wins over an in-progress roadmap (no contradiction)", () => {
+  it("Launch completion wins → Live even with a roadmap still showing progress (no contradiction)", () => {
+    expect(
+      deriveWebsiteOperational(web({ launchCompleted: true, liveUrl: "https://client.co.za", hasRoadmapProgress: true }))
+    ).toBe("active");
+  });
+  it("a live URL alongside roadmap progress (but Launch NOT done) stays In Development", () => {
     expect(
       deriveWebsiteOperational(web({ liveUrl: "https://client.co.za", hasRoadmapProgress: true }))
-    ).toBe("active");
+    ).toBe("in_progress");
   });
   it("blank/whitespace URLs are treated as absent", () => {
     expect(deriveWebsiteOperational(web({ liveUrl: "  ", previewUrl: "" }))).toBe("not_started");

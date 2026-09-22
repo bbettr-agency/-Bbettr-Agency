@@ -10,6 +10,7 @@
  * wording rather than fabricating an Active/Live state.
  */
 import { formatCurrency } from "@/lib/utils";
+import { canonicalProjectState } from "@/lib/project-state";
 
 // ── Current focus / next milestone (derived from the roadmap) ───────────────
 
@@ -41,7 +42,11 @@ export function deriveFocus(
   stages: StageLike[],
   estimatedLaunchDate: string | null
 ): FocusState {
-  if (stages.length === 0) {
+  // Delegate to the ONE canonical derivation (CX1) so admin focus and the client
+  // journey can never disagree on which stage is current/next. Admin keeps the
+  // INTERNAL stage names; the client sees the safe labels.
+  const p = canonicalProjectState(stages, { estimatedLaunchDate });
+  if (!p.hasStages) {
     return {
       hasStages: false,
       allComplete: false,
@@ -50,21 +55,12 @@ export function deriveFocus(
       etaDate: estimatedLaunchDate,
     };
   }
-  const ordered = [...stages].sort((a, b) => a.position - b.position);
-  const allComplete = ordered.every((s) => s.status === "completed");
-  const current =
-    ordered.find((s) => s.status === "in_progress") ??
-    ordered.find((s) => s.status === "pending") ??
-    ordered[ordered.length - 1];
-  const currentIdx = ordered.indexOf(current);
-  const next =
-    ordered.slice(currentIdx + 1).find((s) => s.status !== "completed") ?? null;
   return {
     hasStages: true,
-    allComplete,
-    currentLabel: allComplete ? null : current.name,
-    nextLabel: allComplete ? null : next?.name ?? null,
-    etaDate: current.target_date ?? estimatedLaunchDate,
+    allComplete: p.allComplete,
+    currentLabel: p.allComplete ? null : p.current?.internalName ?? null,
+    nextLabel: p.allComplete ? null : p.next?.internalName ?? null,
+    etaDate: p.currentStageTargetDate ?? estimatedLaunchDate,
   };
 }
 

@@ -14,8 +14,8 @@ import type { ProjectStage } from "@/lib/database.types";
  *   Review Stage         → Testing
  *   Launch               → Launch
  *
- * Any stage whose internal name is not in the map falls back to its own name,
- * so custom roadmaps still render.
+ * Any stage whose internal name is not in the map resolves to a SAFE, generic
+ * client-facing label — internal/operational names must never leak to the client.
  */
 export const STAGE_TO_JOURNEY: Record<string, string> = {
   "Contract Signed": "Discovery",
@@ -25,6 +25,18 @@ export const STAGE_TO_JOURNEY: Record<string, string> = {
   "Review Stage": "Testing",
   Launch: "Launch",
 };
+
+/** Neutral client-facing label used when an internal stage name isn't mapped. */
+export const SAFE_STAGE_LABEL = "Project phase";
+
+/**
+ * THE client-facing label for an internal stage name. Every client-visible stage
+ * label must resolve through here so raw internal text can never reach a client
+ * (admin surfaces may still show the internal name where operationally useful).
+ */
+export function clientStageLabel(internalName: string): string {
+  return STAGE_TO_JOURNEY[internalName] ?? SAFE_STAGE_LABEL;
+}
 
 /** Canonical client-facing journey order (for reference / seeding). */
 export const JOURNEY_STEPS = [
@@ -53,7 +65,7 @@ export function toClientJourney(stages: ProjectStage[]): JourneyStage[] {
   return [...stages]
     .sort((a, b) => a.position - b.position)
     .map((s) => ({
-      label: STAGE_TO_JOURNEY[s.name] ?? s.name,
+      label: clientStageLabel(s.name),
       internalName: s.name,
       status: s.status as JourneyStatus,
       position: s.position,

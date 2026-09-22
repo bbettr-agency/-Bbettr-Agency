@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { deriveWebsiteState, isStorableUrl, hasWebsite } from "./website-state";
 
-describe("deriveWebsiteState — one source of truth, live wins", () => {
+describe("deriveWebsiteState — project stages are canonical (CX1)", () => {
   it("is 'none' when neither URL is set", () => {
     const v = deriveWebsiteState({});
     expect(v.state).toBe("none");
@@ -12,45 +12,56 @@ describe("deriveWebsiteState — one source of truth, live wins", () => {
     expect(deriveWebsiteState({ previewUrl: "   ", liveUrl: "" }).state).toBe("none");
   });
 
-  it("is 'preview' when only a preview URL is set", () => {
+  it("is 'preview' (In Development) when only a preview URL is set and not launched", () => {
     const v = deriveWebsiteState({ previewUrl: "https://preview.test/site" });
     expect(v.state).toBe("preview");
     expect(v.url).toBe("https://preview.test/site");
-    expect(v.liveUrl).toBeNull();
+    expect(v.dataWarning).toBeUndefined();
   });
 
-  it("is 'live' when a live URL is set", () => {
-    const v = deriveWebsiteState({ liveUrl: "https://client.co.za" });
+  it("is 'live' ONLY when the project has launched", () => {
+    const v = deriveWebsiteState({ liveUrl: "https://client.co.za", launched: true });
     expect(v.state).toBe("live");
     expect(v.url).toBe("https://client.co.za");
   });
 
-  it("prefers live over preview when both exist", () => {
+  it("launched with only a preview URL is still 'live', opening the preview URL", () => {
+    const v = deriveWebsiteState({ previewUrl: "https://preview.test/site", launched: true });
+    expect(v.state).toBe("live");
+    expect(v.url).toBe("https://preview.test/site");
+  });
+
+  it("a live URL BEFORE Launch completion is NOT live (shows In Development + a data warning)", () => {
+    const v = deriveWebsiteState({ liveUrl: "https://client.co.za", launched: false });
+    expect(v.state).toBe("preview"); // In Development, not Live
+    expect(v.url).toBe("https://client.co.za"); // still openable as a CTA
+    expect(v.dataWarning).toBe("live_url_without_launch");
+  });
+
+  it("both URLs before launch → In Development (preview URL as CTA) + warning", () => {
     const v = deriveWebsiteState({
       previewUrl: "https://preview.test/site",
       liveUrl: "https://client.co.za",
+      launched: false,
     });
-    expect(v.state).toBe("live");
-    expect(v.url).toBe("https://client.co.za");
-    // Both are still exposed for callers that want to show each.
-    expect(v.previewUrl).toBe("https://preview.test/site");
+    expect(v.state).toBe("preview");
+    expect(v.url).toBe("https://preview.test/site");
+    expect(v.dataWarning).toBe("live_url_without_launch");
+  });
+
+  it("launched=undefined defaults to not-launched", () => {
+    expect(deriveWebsiteState({ liveUrl: "https://client.co.za" }).state).toBe("preview");
   });
 });
 
-describe("hasWebsite — the client card render decision (Slice 2D regression)", () => {
-  it("renders for a preview-only client (the reported bug)", () => {
-    const v = deriveWebsiteState({ previewUrl: "https://preview.test/imatec" });
-    expect(v.state).toBe("preview");
-    expect(hasWebsite(v)).toBe(true);
+describe("hasWebsite — the client card render decision", () => {
+  it("renders for a preview-only client", () => {
+    expect(hasWebsite(deriveWebsiteState({ previewUrl: "https://preview.test/imatec" }))).toBe(true);
   });
 
-  it("renders for a live client, with live taking precedence over preview", () => {
-    const v = deriveWebsiteState({
-      previewUrl: "https://preview.test/imatec",
-      liveUrl: "https://imatec.co.za",
-    });
+  it("renders for a launched client", () => {
+    const v = deriveWebsiteState({ liveUrl: "https://imatec.co.za", launched: true });
     expect(v.state).toBe("live");
-    expect(v.url).toBe("https://imatec.co.za");
     expect(hasWebsite(v)).toBe(true);
   });
 

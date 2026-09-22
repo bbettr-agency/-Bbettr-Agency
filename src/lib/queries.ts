@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { NotificationType } from "@/lib/database.types";
 import type { ReactionSummary } from "@/lib/update-reactions";
+import { stageProgressPercent } from "@/lib/project-state";
 
 /**
  * Tenant-scoped data access helpers. RLS guarantees a client can only ever
@@ -445,14 +446,13 @@ export async function getOnboarding(clientId: string) {
   return data ?? [];
 }
 
-/** Percentage of project stages completed (0–100). */
-export function computeProgress(
-  stages: { status: string }[]
-): number {
-  if (stages.length === 0) return 0;
-  const done = stages.filter((s) => s.status === "completed").length;
-  const inProgress = stages.filter((s) => s.status === "in_progress").length;
-  return Math.round(((done + inProgress * 0.5) / stages.length) * 100);
+/**
+ * Percentage of project stages completed (0–100). Deterministic: completed /
+ * total (CX1). Delegates to the canonical rule so every surface agrees — no more
+ * in-progress half-credit (which disagreed with the "X of Y stages" count).
+ */
+export function computeProgress(stages: { status: string }[]): number {
+  return stageProgressPercent(stages);
 }
 
 /**
