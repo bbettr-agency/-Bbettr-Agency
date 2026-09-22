@@ -61,7 +61,9 @@ export function WorkspaceAccessCard({
           ? `Invitation sent to ${res.email}. They'll set their own password and appear here once they accept.`
           : res.outcome === "already_member"
             ? `${res.email} already has access to ${clientName}.`
-            : `Access granted to ${res.email}.`;
+            : res.outcome === "repaired"
+              ? `Existing account repaired and access to ${clientName} granted for ${res.email}. They can sign in with their existing password.`
+              : `Access granted to ${res.email}.`;
       setFeedback({ ok: true, msg });
     });
   }
