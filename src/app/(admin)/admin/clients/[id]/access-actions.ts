@@ -76,11 +76,12 @@ export async function grantWorkspaceAccessAction(
       // ── Existing Auth identity → inspect + repair the portal profile, then
       //    attach the membership. NEVER invite (the account already has
       //    credentials), never change the password. ──────────────────────────
-      const { data: prof } = await svc
+      const { data: prof, error: profErr } = await svc
         .from("profiles")
         .select("id, role, client_id, email")
         .eq("id", authUser.id)
         .maybeSingle();
+      if (profErr) throw new Error(`profile lookup failed: ${profErr.message}`);
 
       // Role safety: never convert an internal (admin/rep) user into a client.
       if (prof && prof.role !== "client") {
@@ -184,20 +185,34 @@ type Svc = ReturnType<typeof createAdminClient>;
  *   • ensures the (user_id, client_id) membership, on-conflict-safe.
  * The membership is what authorizes access (S2) and lets S3 resolve a workspace.
  */
+/**
+ * Thrown when a grant write fails or cannot be verified. The action's catch
+ * logs `.message` server-side and returns a generic, safe message to the admin,
+ * so raw Supabase details never reach the browser and success is NEVER reported
+ * for an unpersisted membership.
+ */
+class GrantPersistenceError extends Error {}
+
 async function ensureClientProfileAndMembership(
   svc: Svc,
   userId: string,
   email: string,
   clientId: string
 ): Promise<void> {
-  const { data: prof } = await svc
+  // 1) Read the current profile (fail hard on a read error — we must not guess).
+  const { data: prof, error: profReadErr } = await svc
     .from("profiles")
     .select("id, client_id, role, email")
     .eq("id", userId)
     .maybeSingle();
+  if (profReadErr) throw new GrantPersistenceError(`profile read failed: ${profReadErr.message}`);
 
+  // 2) Create or repair the profile — inspect EVERY write's error.
   if (!prof) {
-    await svc.from("profiles").insert({ id: userId, email, role: "client", client_id: clientId });
+    const { error } = await svc
+      .from("profiles")
+      .insert({ id: userId, email, role: "client", client_id: clientId });
+    if (error) throw new GrantPersistenceError(`profile insert failed: ${error.message}`);
   } else {
     // Repair an incomplete profile WITHOUT clobbering a healthy one: fill a
     // missing default, a missing/mismatched email, or a non-client role (the
@@ -207,13 +222,30 @@ async function ensureClientProfileAndMembership(
     if (prof.client_id === null) patch.client_id = clientId;
     if ((prof.email ?? "") !== email) patch.email = email;
     if (Object.keys(patch).length > 0) {
-      await svc.from("profiles").update(patch).eq("id", userId);
+      const { error } = await svc.from("profiles").update(patch).eq("id", userId);
+      if (error) throw new GrantPersistenceError(`profile update failed: ${error.message}`);
     }
   }
 
-  await svc
+  // 3) Ensure the membership — inspect the write's error.
+  const { error: memErr } = await svc
     .from("client_members")
     .upsert({ user_id: userId, client_id: clientId }, { onConflict: "user_id,client_id", ignoreDuplicates: true });
+  if (memErr) throw new GrantPersistenceError(`membership upsert failed: ${memErr.message}`);
+
+  // 4) READ-AFTER-WRITE: the exact (user_id, client_id) row MUST now exist.
+  //    This is the authoritative gate — success is only reported after this
+  //    confirms persistence (guards against a silently-dropped write / cache).
+  const { data: confirmed, error: confErr } = await svc
+    .from("client_members")
+    .select("user_id, client_id")
+    .eq("user_id", userId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (confErr) throw new GrantPersistenceError(`membership verification read failed: ${confErr.message}`);
+  if (!confirmed) {
+    throw new GrantPersistenceError("membership verification failed: row not found after write");
+  }
 }
 
 interface AuthIdentity {
