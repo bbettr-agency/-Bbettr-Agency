@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ClipboardList, CheckCircle2 } from "lucide-react";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   getClientServices,
@@ -17,13 +17,13 @@ import { BillingDetailsSection } from "@/components/onboarding/billing-details-s
 export const metadata: Metadata = { title: "Onboarding" };
 
 export default async function OnboardingPage() {
-  const profile = await requireClient();
+  const { clientId } = await requireClientWorkspace();
   const supabase = await createClient();
   const [services, submissions, billing, clientRow] = await Promise.all([
-    getClientServices(profile.client_id),
-    getOnboarding(profile.client_id),
-    getBillingDetails(profile.client_id),
-    supabase.from("clients").select("contact_email").eq("id", profile.client_id).maybeSingle(),
+    getClientServices(clientId),
+    getOnboarding(clientId),
+    getBillingDetails(clientId),
+    supabase.from("clients").select("contact_email").eq("id", clientId).maybeSingle(),
   ]);
 
   const complete = isOnboardingComplete(services);
@@ -60,7 +60,7 @@ export default async function OnboardingPage() {
           {/* One shared, client-level billing section — NOT per service tab. */}
           <BillingDetailsSection initial={billing} contactEmail={contactEmail} />
           <OnboardingTabs
-            clientId={profile.client_id}
+            clientId={clientId}
             services={services.map((s) => ({
               service: s.service,
               onboarding_status: s.onboarding_status,

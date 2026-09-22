@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireClient, requireAdmin } from "@/lib/auth";
+import { requireClientWorkspace, requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   normaliseBillingInput,
@@ -20,16 +20,15 @@ export interface BillingSaveResult {
  * Client self-service upsert of THEIR OWN billing profile. PARTIAL saves are
  * allowed (draft = permissive) — only supplied values are validated for
  * format/length. Completeness (invoice_name + effective email) is enforced later,
- * only at the onboarding submit gate. The client_id is derived from the session
- * (current_client_id via requireClient) — NEVER from the browser. Writes go under
- * the client's own-row RLS (no service-role). updated_by is the acting client's
- * profile id (profiles.id = auth uid → valid FK).
+ * only at the onboarding submit gate. The client_id is the resolved ACTIVE
+ * workspace (S3, via requireClientWorkspace) — NEVER from the browser. Writes go
+ * under the client's own-row RLS (no service-role). updated_by is the acting
+ * client's profile id (profiles.id = auth uid → valid FK).
  */
 export async function saveMyBillingDetailsAction(
   input: BillingDetailsInput
 ): Promise<BillingSaveResult> {
-  const profile = await requireClient();
-  const clientId = profile.client_id;
+  const { profile, clientId } = await requireClientWorkspace();
 
   const v = validateBillingDraft(input);
   if (!v.ok) return { error: "Please fix the highlighted fields.", fieldErrors: v.errors };

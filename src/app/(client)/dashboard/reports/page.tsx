@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SeenMarker } from "@/components/shared/seen-marker";
 import { BarChart3 } from "lucide-react";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { getReports } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui/page-header";
@@ -12,8 +12,8 @@ import { STORAGE_BUCKET } from "@/lib/upload";
 export const metadata: Metadata = { title: "Reports" };
 
 export default async function ReportsPage() {
-  const profile = await requireClient();
-  const reports = await getReports(profile.client_id);
+  const { clientId } = await requireClientWorkspace();
+  const reports = await getReports(clientId);
 
   // Pre-sign any attached PDFs server-side.
   const supabase = await createClient();

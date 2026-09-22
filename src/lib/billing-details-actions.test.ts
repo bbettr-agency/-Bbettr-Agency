@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
-  requireClient: vi.fn(async () => ({ id: "client-profile-1", client_id: "client-A", role: "client" })),
+  // S3: the client self-service path resolves the ACTIVE workspace.
+  requireClientWorkspace: vi.fn(async () => ({
+    profile: { id: "client-profile-1", client_id: "client-A", role: "client" },
+    clientId: "client-A",
+    memberships: ["client-A"],
+    hasMultiple: false,
+  })),
   requireAdmin: vi.fn(async () => ({ id: "admin-profile-1", role: "admin" })),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));

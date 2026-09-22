@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { advanceIntakeStatus } from "@/lib/intake-advance";
@@ -41,10 +41,9 @@ export async function saveOnboarding(
   data: Record<string, unknown>,
   submit: boolean
 ): Promise<OnboardingState> {
-  const profile = await requireClient();
+  const { clientId } = await requireClientWorkspace();
   if (!SERVICES[service]) return { error: "Unknown service." };
 
-  const clientId = profile.client_id;
   const supabase = await createClient();
   const status = submit ? "submitted" : "in_progress";
 

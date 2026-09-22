@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Receipt } from "lucide-react";
 import { SeenMarker } from "@/components/shared/seen-marker";
-import { requireClient } from "@/lib/auth";
+import { requireClientWorkspace } from "@/lib/auth";
 import { getClientInvoices } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -10,8 +10,8 @@ import { InvoiceList } from "@/components/client/invoice-list";
 export const metadata: Metadata = { title: "Invoices" };
 
 export default async function InvoicesPage() {
-  const profile = await requireClient();
-  const invoices = await getClientInvoices(profile.client_id);
+  const { clientId } = await requireClientWorkspace();
+  const invoices = await getClientInvoices(clientId);
 
   return (
     <div className="space-y-6 animate-fade-in">

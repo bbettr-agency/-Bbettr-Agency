@@ -36,6 +36,7 @@
     "test:tasks-0059": "node supabase/tests/tasks-0059-prospect-intake-notification-type.test.mjs",
     "test:tasks-0060": "node supabase/tests/tasks-0060-client-members.test.mjs",
     "test:tasks-0061": "node supabase/tests/tasks-0061-tenant-membership-rls.test.mjs",
+    "test:active-workspace": "node supabase/tests/active-workspace-resolution.test.mjs",
     "test:parity": "node supabase/tests/schema-parity.test.mjs",
     "test:prospect-cleanup": "node supabase/tests/prospect-intake-cleanup.test.mjs",
     "test:prospect-admin": "node supabase/tests/prospect-intake-admin.test.mjs",
