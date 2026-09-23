@@ -17,7 +17,7 @@ function mem(p: Partial<MemorySummary>): MemorySummary {
     observedAt: p.observedAt ?? "2026-01-01T00:00:00Z",
     suppliedDisplay: p.suppliedDisplay ?? "Eloff",
     confirmedAt: p.confirmedAt ?? null,
-    conflictsWithId: p.conflictsWithId ?? null,
+    conflictsWithIds: p.conflictsWithIds ?? [],
     supersedesId: p.supersedesId ?? null,
     supersededById: p.supersededById ?? null,
   };
@@ -39,7 +39,7 @@ describe("context shaping — separation + currency", () => {
     const rows = [
       mem({ id: "gen", category: "context_note" }),
       mem({ id: "com", category: "commitment" }),
-      mem({ id: "conf", category: "client_knowledge", conflictsWithId: "x" }),
+      mem({ id: "conf", category: "client_knowledge", conflictsWithIds: ["x", "y"] }),
     ];
     const s = shapeMemoryContext(rows);
     expect(s.memory.map((m) => m.id)).toEqual(["gen"]);

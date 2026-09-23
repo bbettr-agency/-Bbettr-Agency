@@ -11,11 +11,10 @@ import type { MemoryCategory, MemoryScope, MemorySourceKind } from "./types";
 /**
  * Memory write path (server-only). Runs under the service role AFTER the server
  * action has authenticated the principal and checked capability grants. Every
- * mutation is deterministic (ingestion policy + state machine) and journalled to
- * the append-only lineage log. Corrections are ATOMIC via the SQL RPC.
- *
- * Portal remains authoritative: callers pass `assertsPortalOwnedValue` when a
- * candidate would duplicate operational truth, and the ingestion policy rejects.
+ * operation that mutates canonical state AND must record lineage runs as ONE
+ * transaction via a tightly-scoped RPC (row + event succeed or fail together).
+ * The pure ingestion policy + state machine decide legality here; the RPC
+ * re-guards preconditions. No authorization lives in the RPCs.
  */
 export interface MemoryActor {
   principalId: string;
@@ -56,7 +55,27 @@ function scopeError(input: { scope: MemoryScope; clientId?: string | null; userI
   return null;
 }
 
-/** Create a candidate memory. Ingestion policy decides observed/inferred/proposed or reject. */
+function rowJson(input: MemoryCreateInput, state: string, current: boolean): Json {
+  return {
+    scope: input.scope,
+    client_id: input.clientId ?? null,
+    user_id: input.userId ?? null,
+    subject_kind: input.subjectKind ?? null,
+    subject_ref: input.subjectRef ?? null,
+    category: input.category,
+    claim: input.claim.trim(),
+    body: input.body ?? null,
+    structured: input.structured ?? {},
+    state,
+    current,
+    importance: input.importance ?? 0,
+    source_kind: input.sourceKind,
+    source_ref: input.sourceRef ?? null,
+    observed_at: input.observedAt ?? null,
+  } as unknown as Json;
+}
+
+/** Create a candidate memory (atomic row + 'created' event via RPC). */
 export async function createMemory(actor: MemoryActor, input: MemoryCreateInput): Promise<MemoryWriteResult> {
   const scopeErr = scopeError(input);
   if (scopeErr) return { ok: false, reason: scopeErr };
@@ -73,7 +92,8 @@ export async function createMemory(actor: MemoryActor, input: MemoryCreateInput)
   });
 
   if (decision.decision === "reject") {
-    // Record the rejection WITHOUT persisting any content (safe labels only).
+    // No canonical row is created — only a single-table 'rejected' event (safe
+    // labels only). Nothing to desync.
     await appendMemoryEvent({
       workspaceId: actor.workspaceId,
       memoryId: null,
@@ -89,44 +109,15 @@ export async function createMemory(actor: MemoryActor, input: MemoryCreateInput)
 
   const state: MemoryCreateState = decision.state;
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("jarvis_memories")
-    .insert({
-      workspace_id: actor.workspaceId,
-      scope: input.scope,
-      client_id: input.clientId ?? null,
-      user_id: input.userId ?? null,
-      subject_kind: input.subjectKind ?? null,
-      subject_ref: input.subjectRef ?? null,
-      category: input.category,
-      claim: input.claim.trim(),
-      body: input.body ?? null,
-      structured: (input.structured as unknown as Json) ?? {},
-      state,
-      current: currentOnCreate(state),
-      importance: input.importance ?? 0,
-      source_kind: input.sourceKind,
-      source_ref: input.sourceRef ?? null,
-      observed_at: input.observedAt ?? new Date().toISOString(),
-      supplied_by: actor.principalId,
-      supplied_display: actor.display,
-      created_by: actor.principalId,
-    })
-    .select("id")
-    .single();
-  if (error || !data) return { ok: false, reason: "could_not_create_memory" };
-
-  await appendMemoryEvent({
-    workspaceId: actor.workspaceId,
-    memoryId: data.id as string,
-    eventType: "created",
-    actorKind: "human",
-    actorUserId: actor.principalId,
-    actorDisplay: actor.display,
-    reason: decision.reason,
-    detail: { state, category: input.category, sourceKind: input.sourceKind },
+  const { data, error } = await admin.rpc("jarvis_memory_create", {
+    p_workspace: actor.workspaceId,
+    p_row: rowJson(input, state, currentOnCreate(state)),
+    p_actor: actor.principalId,
+    p_actor_display: actor.display,
+    p_reason: decision.reason,
   });
-  return { ok: true, id: data.id as string, state };
+  if (error || !data) return { ok: false, reason: "could_not_create_memory" };
+  return { ok: true, id: data as string, state };
 }
 
 async function loadState(workspaceId: string, memoryId: string): Promise<string | null> {
@@ -140,7 +131,7 @@ async function loadState(workspaceId: string, memoryId: string): Promise<string 
   return (data?.state as string | undefined) ?? null;
 }
 
-/** Confirm a proposed/inferred/observed memory → confirmed (requires authority). */
+/** Confirm a proposed/inferred/observed memory → confirmed (atomic via RPC). */
 export async function confirmMemory(actor: MemoryActor, memoryId: string): Promise<MemoryWriteResult> {
   const from = await loadState(actor.workspaceId, memoryId);
   if (!from) return { ok: false, reason: "not_found" };
@@ -148,28 +139,19 @@ export async function confirmMemory(actor: MemoryActor, memoryId: string): Promi
   if (!t.ok) return { ok: false, reason: t.reason };
 
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("jarvis_memories")
-    .update({ state: "confirmed", current: true, confirmed_by: actor.principalId, confirmed_at: new Date().toISOString() })
-    .eq("id", memoryId)
-    .eq("workspace_id", actor.workspaceId)
-    .eq("state", from as never) // single-use guard against a racing transition
-    .select("id");
-  if (!data || data.length === 0) return { ok: false, reason: "race_or_ineligible" };
-
-  await appendMemoryEvent({
-    workspaceId: actor.workspaceId,
-    memoryId,
-    eventType: "confirmed",
-    actorKind: "human",
-    actorUserId: actor.principalId,
-    actorDisplay: actor.display,
-    detail: { from },
+  const { data, error } = await admin.rpc("jarvis_memory_confirm", {
+    p_workspace: actor.workspaceId,
+    p_id: memoryId,
+    p_from: from,
+    p_actor: actor.principalId,
+    p_actor_display: actor.display,
   });
+  if (error) return { ok: false, reason: "confirm_failed" };
+  if (data !== true) return { ok: false, reason: "race_or_ineligible" };
   return { ok: true, id: memoryId, state: "confirmed" };
 }
 
-/** Retire a memory → not returned by normal retrieval (requires authority). */
+/** Retire a memory → not returned by normal retrieval (atomic via RPC). */
 export async function retireMemory(actor: MemoryActor, memoryId: string, reason: string): Promise<MemoryWriteResult> {
   const from = await loadState(actor.workspaceId, memoryId);
   if (!from) return { ok: false, reason: "not_found" };
@@ -177,32 +159,23 @@ export async function retireMemory(actor: MemoryActor, memoryId: string, reason:
   if (!t.ok) return { ok: false, reason: t.reason };
 
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("jarvis_memories")
-    .update({ state: "retired", current: false, retired_at: new Date().toISOString(), retired_reason: reason.slice(0, 500) })
-    .eq("id", memoryId)
-    .eq("workspace_id", actor.workspaceId)
-    .eq("state", from as never)
-    .select("id");
-  if (!data || data.length === 0) return { ok: false, reason: "race_or_ineligible" };
-
-  await appendMemoryEvent({
-    workspaceId: actor.workspaceId,
-    memoryId,
-    eventType: "retired",
-    actorKind: "human",
-    actorUserId: actor.principalId,
-    actorDisplay: actor.display,
-    reason: reason.slice(0, 500),
-    detail: { from },
+  const { data, error } = await admin.rpc("jarvis_memory_retire", {
+    p_workspace: actor.workspaceId,
+    p_id: memoryId,
+    p_from: from,
+    p_reason: reason.slice(0, 500),
+    p_actor: actor.principalId,
+    p_actor_display: actor.display,
   });
+  if (error) return { ok: false, reason: "retire_failed" };
+  if (data !== true) return { ok: false, reason: "race_or_ineligible" };
   return { ok: true, id: memoryId, state: "retired" };
 }
 
 /**
- * Correct a memory by SUPERSEDING it: creates a new confirmed replacement and
- * marks the old superseded — ATOMICALLY via the SQL RPC. History is preserved.
- * Requires authority; secret content is rejected before any write.
+ * Correct a memory by SUPERSEDING it: new confirmed replacement + old superseded,
+ * ATOMICALLY via RPC. History preserved. Requires authority; secrets rejected
+ * before any write.
  */
 export async function supersedeMemory(
   actor: MemoryActor,
@@ -243,21 +216,7 @@ export async function supersedeMemory(
   const { data, error } = await admin.rpc("jarvis_memory_supersede", {
     p_workspace: actor.workspaceId,
     p_old_id: oldId,
-    p_new: {
-      scope: newInput.scope,
-      client_id: newInput.clientId ?? null,
-      user_id: newInput.userId ?? null,
-      subject_kind: newInput.subjectKind ?? null,
-      subject_ref: newInput.subjectRef ?? null,
-      category: newInput.category,
-      claim: newInput.claim.trim(),
-      body: newInput.body ?? null,
-      structured: newInput.structured ?? {},
-      source_kind: newInput.sourceKind,
-      source_ref: newInput.sourceRef ?? null,
-      observed_at: newInput.observedAt ?? null,
-      importance: newInput.importance ?? 0,
-    } as unknown as Json,
+    p_new: rowJson(newInput, "confirmed", true),
     p_actor: actor.principalId,
     p_actor_display: actor.display,
     p_reason: reason.slice(0, 500),
@@ -266,7 +225,7 @@ export async function supersedeMemory(
   return { ok: true, id: data as string, state: "confirmed", detail: `superseded ${oldId}` };
 }
 
-/** Flag two memories as conflicting — both preserved, neither silently chosen. */
+/** Flag two memories as conflicting (atomic edges + events via RPC). Many-to-many. */
 export async function flagConflict(
   actor: MemoryActor,
   aId: string,
@@ -275,34 +234,14 @@ export async function flagConflict(
 ): Promise<MemoryWriteResult> {
   if (aId === bId) return { ok: false, reason: "cannot_conflict_with_self" };
   const admin = createAdminClient();
-  const { data: rows } = await admin
-    .from("jarvis_memories")
-    .select("id")
-    .eq("workspace_id", actor.workspaceId)
-    .in("id", [aId, bId]);
-  if (!rows || rows.length !== 2) return { ok: false, reason: "both_memories_required" };
-
-  await admin.from("jarvis_memories").update({ conflicts_with_id: bId }).eq("id", aId).eq("workspace_id", actor.workspaceId);
-  await admin.from("jarvis_memories").update({ conflicts_with_id: aId }).eq("id", bId).eq("workspace_id", actor.workspaceId);
-  await appendMemoryEvent({
-    workspaceId: actor.workspaceId,
-    memoryId: aId,
-    eventType: "conflict_flagged",
-    actorKind: "human",
-    actorUserId: actor.principalId,
-    actorDisplay: actor.display,
-    reason: reason.slice(0, 500),
-    detail: { conflicts_with: bId },
+  const { data, error } = await admin.rpc("jarvis_memory_flag_conflict", {
+    p_workspace: actor.workspaceId,
+    p_a: aId,
+    p_b: bId,
+    p_actor: actor.principalId,
+    p_actor_display: actor.display,
+    p_reason: reason.slice(0, 500),
   });
-  await appendMemoryEvent({
-    workspaceId: actor.workspaceId,
-    memoryId: bId,
-    eventType: "conflict_flagged",
-    actorKind: "human",
-    actorUserId: actor.principalId,
-    actorDisplay: actor.display,
-    reason: reason.slice(0, 500),
-    detail: { conflicts_with: aId },
-  });
+  if (error || data !== true) return { ok: false, reason: "both_memories_required" };
   return { ok: true, id: aId, state: "conflict_flagged" };
 }

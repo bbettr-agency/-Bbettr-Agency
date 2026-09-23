@@ -517,7 +517,6 @@ export interface Database {
           confirmed_at: string | null;
           supersedes_id: string | null;
           superseded_by_id: string | null;
-          conflicts_with_id: string | null;
           created_at: string;
           created_by: string | null;
           retired_at: string | null;
@@ -547,13 +546,38 @@ export interface Database {
           confirmed_at?: string | null;
           supersedes_id?: string | null;
           superseded_by_id?: string | null;
-          conflicts_with_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           retired_at?: string | null;
           retired_reason?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["jarvis_memories"]["Row"]>;
+        Relationships: [];
+      };
+      jarvis_memory_conflicts: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          memory_id: string;
+          other_memory_id: string;
+          reason: string | null;
+          flagged_by: string | null;
+          flagged_at: string;
+          resolved_at: string | null;
+          resolved_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          memory_id: string;
+          other_memory_id: string;
+          reason?: string | null;
+          flagged_by?: string | null;
+          flagged_at?: string;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_memory_conflicts"]["Row"]>;
         Relationships: [];
       };
       jarvis_memory_events: {
@@ -1761,6 +1785,30 @@ export interface Database {
           p_reason: string;
         };
         Returns: string;
+      };
+      jarvis_memory_create: {
+        Args: { p_workspace: string; p_row: Json; p_actor: string; p_actor_display: string; p_reason: string };
+        Returns: string;
+      };
+      jarvis_memory_confirm: {
+        Args: { p_workspace: string; p_id: string; p_from: string; p_actor: string; p_actor_display: string };
+        Returns: boolean;
+      };
+      jarvis_memory_retire: {
+        Args: { p_workspace: string; p_id: string; p_from: string; p_reason: string; p_actor: string; p_actor_display: string };
+        Returns: boolean;
+      };
+      jarvis_memory_flag_conflict: {
+        Args: { p_workspace: string; p_a: string; p_b: string; p_actor: string; p_actor_display: string; p_reason: string };
+        Returns: boolean;
+      };
+      jarvis_is_internal: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      jarvis_can_read_memory: {
+        Args: Record<string, never>;
+        Returns: boolean;
       };
       current_client_id: {
         Args: Record<string, never>;

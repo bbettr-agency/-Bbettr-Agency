@@ -26,7 +26,8 @@ export interface MemorySummary {
   observedAt: string;
   suppliedDisplay: string | null;
   confirmedAt: string | null;
-  conflictsWithId: string | null;
+  /** Ids of memories this one currently conflicts with (unresolved). May be many. */
+  conflictsWithIds: string[];
   supersedesId: string | null;
   supersededById: string | null;
 }
@@ -45,7 +46,7 @@ export interface ContextMemoryItem {
   category: MemoryCategory;
   claim: string;
   importance: number;
-  conflictsWithId: string | null;
+  conflictsWithIds: string[];
   provenance: ContextProvenance;
 }
 
@@ -93,7 +94,7 @@ function toItem(m: MemorySummary): ContextMemoryItem {
     category: m.category,
     claim: m.claim,
     importance: m.importance,
-    conflictsWithId: m.conflictsWithId,
+    conflictsWithIds: m.conflictsWithIds,
     provenance: {
       sourceKind: m.sourceKind,
       sourceRef: m.sourceRef,
@@ -122,11 +123,12 @@ export function shapeMemoryContext(
   caps: ContextCaps = DEFAULT_CONTEXT_CAPS
 ): Pick<ContextPackage, "memory" | "openCommitments" | "unresolvedConflicts" | "truncated"> {
   const current = rows.filter((r) => r.current);
+  const hasConflict = (r: MemorySummary) => r.conflictsWithIds.length > 0;
 
-  const conflictsAll = current.filter((r) => r.conflictsWithId).sort(rank);
+  const conflictsAll = current.filter(hasConflict).sort(rank);
   const commitmentsAll = current.filter((r) => r.category === "commitment").sort(rank);
   const generalAll = current
-    .filter((r) => r.category !== "commitment" && !r.conflictsWithId)
+    .filter((r) => r.category !== "commitment" && !hasConflict(r))
     .sort(rank);
 
   return {

@@ -22,7 +22,7 @@ export interface MemoryRow {
   importance: number;
   sourceKind: string;
   suppliedDisplay: string | null;
-  conflictsWithId: string | null;
+  conflictsWithIds: string[];
 }
 
 const SCOPES = ["agency", "client", "user"];
@@ -141,7 +141,7 @@ export function JarvisMemoryPanel({
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={stateTone(m.state)}>{m.state}</Badge>
                 <span className="text-xs text-ink-400">{m.scope} · {m.category} · imp {m.importance}</span>
-                {m.conflictsWithId && <Badge tone="danger">conflict</Badge>}
+                {m.conflictsWithIds.length > 0 && <Badge tone="danger">conflict</Badge>}
               </div>
               <p className="mt-1 text-ink-800">{m.claim}</p>
               <p className="mt-0.5 text-xs text-ink-400">

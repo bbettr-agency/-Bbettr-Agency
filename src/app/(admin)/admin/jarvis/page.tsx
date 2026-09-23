@@ -65,7 +65,7 @@ export default async function JarvisPage() {
         importance: m.importance,
         sourceKind: m.sourceKind,
         suppliedDisplay: m.suppliedDisplay,
-        conflictsWithId: m.conflictsWithId,
+        conflictsWithIds: m.conflictsWithIds,
       }))
     : [];
 

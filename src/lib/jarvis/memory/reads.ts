@@ -9,14 +9,16 @@ export type { MemorySummary } from "./context-shape";
 
 /**
  * Memory read layer (server-only), structured retrieval ONLY — no FTS, no
- * embeddings (Part 16). Reads run under the CALLER's RLS: admins read all memory
- * in their agency workspace; clients/reps see nothing. Every query is bounded.
+ * embeddings (Part 16). Reads run under the CALLER's RLS: an internal user with
+ * effective memory.read reads shared memory in their workspace; clients/reps see
+ * nothing. Every query is bounded. Conflicts are many-to-many (edge table).
  */
 
 type MemoryRow = Database["public"]["Tables"]["jarvis_memories"]["Row"];
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 const COLUMNS =
-  "id, scope, client_id, user_id, category, claim, importance, state, current, source_kind, source_ref, observed_at, supplied_display, confirmed_at, conflicts_with_id, supersedes_id, superseded_by_id";
+  "id, scope, client_id, user_id, category, claim, importance, state, current, source_kind, source_ref, observed_at, supplied_display, confirmed_at, supersedes_id, superseded_by_id";
 
 function toSummary(r: MemoryRow): MemorySummary {
   return {
@@ -34,10 +36,28 @@ function toSummary(r: MemoryRow): MemorySummary {
     observedAt: r.observed_at,
     suppliedDisplay: r.supplied_display,
     confirmedAt: r.confirmed_at,
-    conflictsWithId: r.conflicts_with_id,
+    conflictsWithIds: [],
     supersedesId: r.supersedes_id,
     supersededById: r.superseded_by_id,
   };
+}
+
+/** Attach unresolved conflict edges (many-to-many) to a set of summaries. */
+async function attachConflicts(supabase: SupabaseServerClient, list: MemorySummary[]): Promise<MemorySummary[]> {
+  if (list.length === 0) return list;
+  const ids = list.map((m) => m.id);
+  const { data } = await supabase
+    .from("jarvis_memory_conflicts")
+    .select("memory_id, other_memory_id")
+    .is("resolved_at", null)
+    .in("memory_id", ids);
+  const map = new Map<string, string[]>();
+  for (const e of data ?? []) {
+    const arr = map.get(e.memory_id) ?? [];
+    arr.push(e.other_memory_id);
+    map.set(e.memory_id, arr);
+  }
+  return list.map((m) => ({ ...m, conflictsWithIds: map.get(m.id) ?? [] }));
 }
 
 export interface MemoryQuery {
@@ -63,19 +83,21 @@ export async function listMemories(q: MemoryQuery = {}): Promise<MemorySummary[]
     .order("importance", { ascending: false })
     .order("observed_at", { ascending: false })
     .limit(Math.min(q.limit ?? 50, 200));
-  return ((data ?? []) as unknown as MemoryRow[]).map(toSummary);
+  return attachConflicts(supabase, ((data ?? []) as unknown as MemoryRow[]).map(toSummary));
 }
 
 /** A single memory (any state) in the caller's workspace. */
 export async function getMemory(id: string): Promise<MemorySummary | null> {
   const supabase = await createClient();
   const { data } = await supabase.from("jarvis_memories").select(COLUMNS).eq("id", id).maybeSingle();
-  return data ? toSummary(data as unknown as MemoryRow) : null;
+  if (!data) return null;
+  const [withConflicts] = await attachConflicts(supabase, [toSummary(data as unknown as MemoryRow)]);
+  return withConflicts ?? null;
 }
 
 /**
  * Reconstruct a supersession chain for historical reasoning: walk backwards via
- * supersedes_id and forwards via superseded_by_id from the given memory. Bounded.
+ * supersedes_id and forwards via superseded_by_id. Bounded.
  */
 export async function getMemoryHistory(id: string, maxDepth = 25): Promise<MemorySummary[]> {
   const seen = new Map<string, MemorySummary>();
@@ -104,13 +126,16 @@ export async function getMemoryHistory(id: string, maxDepth = 25): Promise<Memor
   return [...seen.values()].sort((a, b) => a.observedAt.localeCompare(b.observedAt));
 }
 
-/** Current memories that carry an unresolved conflict flag (optionally per client). */
-export async function listUnresolvedConflicts(clientId?: string, limit = 25): Promise<MemorySummary[]> {
+/** Current memories carrying at least one UNRESOLVED conflict (optionally per client). */
+export async function listUnresolvedConflicts(clientId?: string, limit = 50): Promise<MemorySummary[]> {
   const supabase = await createClient();
-  let query = supabase.from("jarvis_memories").select(COLUMNS).eq("current", true).not("conflicts_with_id", "is", null);
+  const { data: edges } = await supabase.from("jarvis_memory_conflicts").select("memory_id").is("resolved_at", null);
+  const ids = [...new Set((edges ?? []).map((e) => e.memory_id))];
+  if (ids.length === 0) return [];
+  let query = supabase.from("jarvis_memories").select(COLUMNS).eq("current", true).in("id", ids);
   if (clientId) query = query.eq("client_id", clientId);
   const { data } = await query.order("observed_at", { ascending: false }).limit(Math.min(limit, 100));
-  return ((data ?? []) as unknown as MemoryRow[]).map(toSummary);
+  return attachConflicts(supabase, ((data ?? []) as unknown as MemoryRow[]).map(toSummary));
 }
 
 export interface MemoryEventRow {
@@ -120,7 +145,7 @@ export interface MemoryEventRow {
   occurredAt: string;
 }
 
-/** Lineage events for one memory (admin-only under RLS). */
+/** Lineage events for one memory (internal + memory.read under RLS). */
 export async function listMemoryEvents(memoryId: string, limit = 50): Promise<MemoryEventRow[]> {
   const supabase = await createClient();
   const { data } = await supabase
