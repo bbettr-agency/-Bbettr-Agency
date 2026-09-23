@@ -100,6 +100,7 @@ export async function invokeCapability(
       decision: decision.outcome,
       executed: true,
       success: false,
+      verificationState: "failed",
       error: e instanceof Error ? e.message : "execution_failed",
     });
     return { status: "error", reason: "execution_failed" };

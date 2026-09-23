@@ -180,9 +180,14 @@ export async function approveAndExecuteProposal(ctx: JarvisContext, proposalId: 
     });
     return { ok: true, result: result.data, verification: result.verification, verified };
   } catch (e) {
+    // Execution attempted but the underlying operation FAILED (the handler threw,
+    // including when the Planner command returned { ok:false }). Record the truth:
+    // proposal → failed (never a state implying success), verification → failed,
+    // and the specific safe message. The single-use pending→approved claim above
+    // already fired, so the proposal cannot be re-approved/retried.
     const msg = e instanceof Error ? e.message : "execution_failed";
-    await admin.from("jarvis_proposals").update({ status: "failed", error: msg }).eq("id", proposalId);
-    await appendJarvisAction({ workspaceId: ctx.workspaceId, actorKind: "human", initiatedBy: ctx.principalId, capabilityId: p.capability_id, decision: "allow", proposalId, approvalBy: ctx.principalId, executed: true, success: false, error: "execution_failed" });
+    await admin.from("jarvis_proposals").update({ status: "failed", error: msg, verification_state: "failed" }).eq("id", proposalId);
+    await appendJarvisAction({ workspaceId: ctx.workspaceId, actorKind: "human", initiatedBy: ctx.principalId, capabilityId: p.capability_id, decision: "allow", proposalId, approvalBy: ctx.principalId, executed: true, success: false, verificationState: "failed", error: msg });
     return { ok: false, reason: "execution_failed" };
   }
 }

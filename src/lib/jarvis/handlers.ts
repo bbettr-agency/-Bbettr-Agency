@@ -46,7 +46,22 @@ const HANDLERS: Record<string, Handler> = {
       { command: { type: "CaptureTask", title }, idempotency_key: randomUUID() },
       { revalidate: [] }
     );
-    return { data: res, verification: { state: "not_required" } };
+    // HONESTY BOUNDARY: runTaskCommand signals failure by RETURNING { ok:false }
+    // (e.g. a disabled domain, a version conflict, a mapped DB error) — it does
+    // NOT throw. If we ignored that, Jarvis would record a false success. So a
+    // returned failure is surfaced as a thrown execution error, which the
+    // execution layer records as success=false / verification=failed. `code` is
+    // a safe typed discriminant (never raw DB text).
+    if (!res.ok) throw new Error(`internal task command failed: ${res.code}`);
+    // Authoritative transactional success: the adapter returns a COMMITTED taskId
+    // + outcome only after apply_task_command committed. That committed result is
+    // itself the independent evidence the side effect persisted — so this is
+    // genuinely `verified`, not merely `not_required` (no external adapter needed
+    // because the Planner command result is transactionally authoritative).
+    return {
+      data: { outcome: res.outcome, taskId: res.taskId },
+      verification: { state: "verified", evidence: { taskId: res.taskId, outcome: res.outcome } },
+    };
   },
 
   "integrations.read_deployment_state": async () => ({
