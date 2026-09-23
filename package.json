@@ -39,6 +39,7 @@
     "test:tasks-0062": "node supabase/tests/tasks-0062-jarvis.test.mjs",
     "test:tasks-0063": "node supabase/tests/tasks-0063-jarvis-fk-carveout.test.mjs",
     "test:tasks-0064": "node supabase/tests/tasks-0064-jarvis-memory.test.mjs",
+    "test:tasks-0065": "node supabase/tests/tasks-0065-jarvis-memory-privileges.test.mjs",
     "test:active-workspace": "node supabase/tests/active-workspace-resolution.test.mjs",
     "test:portal-access": "node supabase/tests/portal-access-grant-revoke.test.mjs",
     "test:switch-isolation": "node supabase/tests/workspace-switch-isolation.test.mjs",
