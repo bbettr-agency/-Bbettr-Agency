@@ -22,6 +22,7 @@ import {
   CalendarCheck,
   Repeat,
   Inbox,
+  Bot,
 } from "lucide-react";
 
 export interface NavItem {
@@ -125,10 +126,18 @@ const ADMIN_TAIL: NavSection = {
  * Compose the admin sidebar. The Planner sub-menu sits between the main group
  * and Integrations/Settings, and is included only when the module is enabled.
  */
-export function adminNavSections(plannerEnabled: boolean): NavSection[] {
-  return plannerEnabled
-    ? [ADMIN_MAIN, PLANNER_SECTION, ADMIN_TAIL]
-    : [ADMIN_MAIN, ADMIN_TAIL];
+/** Jarvis (internal, admin-only) — a single item, shown only when enabled. */
+const JARVIS_SECTION: NavSection = {
+  label: "Jarvis",
+  items: [{ label: "Jarvis", href: "/admin/jarvis", icon: Bot }],
+};
+
+export function adminNavSections(plannerEnabled: boolean, jarvisEnabled = false): NavSection[] {
+  const sections: NavSection[] = [ADMIN_MAIN];
+  if (plannerEnabled) sections.push(PLANNER_SECTION);
+  if (jarvisEnabled) sections.push(JARVIS_SECTION);
+  sections.push(ADMIN_TAIL);
+  return sections;
 }
 
 /** Default client sidebar (onboarding shown). The layout passes the live flag. */

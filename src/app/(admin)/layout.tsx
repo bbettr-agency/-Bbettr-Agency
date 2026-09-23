@@ -2,7 +2,7 @@ import { requireAdmin } from "@/lib/auth";
 import { AppShell } from "@/components/layout/app-shell";
 import { getInternalFeed } from "@/lib/internal-notifications";
 import { InternalNotificationBell } from "@/components/internal/internal-notification-bell";
-import { isPlannerEnabled } from "@/lib/flags";
+import { isPlannerEnabled, isJarvisEnabled } from "@/lib/flags";
 
 export default async function AdminLayout({
   children,
@@ -16,12 +16,14 @@ export default async function AdminLayout({
   // label) + the request-time flag. Clients/reps never reach this layout, so they
   // never receive this capability.
   const canUsePlanner = profile.role === "admin" && isPlannerEnabled();
+  const canUseJarvis = profile.role === "admin" && isJarvisEnabled();
 
   return (
     <AppShell
       roleLabel="Admin"
       context="Bbettr Agency · Administrator"
       canUsePlanner={canUsePlanner}
+      canUseJarvis={canUseJarvis}
       headerSlot={
         <InternalNotificationBell
           notifications={feed.items}

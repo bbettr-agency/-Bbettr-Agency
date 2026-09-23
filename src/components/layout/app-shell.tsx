@@ -37,6 +37,8 @@ interface AppShellProps {
    * sub-menu. Never grants access on its own — routes/RLS still enforce admin.
    */
   canUsePlanner?: boolean;
+  /** Client only=false; admin: reveal the Jarvis nav item (JARVIS_ENABLED). */
+  canUseJarvis?: boolean;
   /**
    * Client only: whether onboarding is still relevant. When false, the
    * Onboarding item drops out of the primary nav (route is preserved). Defaults
@@ -60,6 +62,7 @@ export function AppShell({
   roleLabel,
   badges,
   canUsePlanner,
+  canUseJarvis,
   onboardingActive,
   headerSlot,
   workspaceControl,
@@ -76,7 +79,7 @@ export function AppShell({
   // and reps use their own sections and never receive the capability.
   const sections: NavSection[] =
     roleLabel === "Admin"
-      ? adminNavSections(Boolean(canUsePlanner))
+      ? adminNavSections(Boolean(canUsePlanner), Boolean(canUseJarvis))
       : roleLabel === "Rep"
         ? REP_SECTIONS
         : clientNavSections({ onboardingActive: onboardingActive ?? true });

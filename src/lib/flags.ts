@@ -42,3 +42,14 @@ export function isPlannerEnabled(): boolean {
 export function isTasksEnabled(): boolean {
   return process.env.TASKS_ENABLED === "true";
 }
+
+/**
+ * JARVIS_ENABLED — the internal, admin-only Jarvis security kernel + surface
+ * (Foundation 1). Read at request time, same as the others. Default OFF. NOT a
+ * security boundary: admin-only access + capability grants + deterministic
+ * policy enforce authority independently; this only reveals the admin surface.
+ * Absent or anything other than "true" ⇒ off.
+ */
+export function isJarvisEnabled(): boolean {
+  return process.env.JARVIS_ENABLED === "true";
+}

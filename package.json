@@ -36,6 +36,7 @@
     "test:tasks-0059": "node supabase/tests/tasks-0059-prospect-intake-notification-type.test.mjs",
     "test:tasks-0060": "node supabase/tests/tasks-0060-client-members.test.mjs",
     "test:tasks-0061": "node supabase/tests/tasks-0061-tenant-membership-rls.test.mjs",
+    "test:tasks-0062": "node supabase/tests/tasks-0062-jarvis.test.mjs",
     "test:active-workspace": "node supabase/tests/active-workspace-resolution.test.mjs",
     "test:portal-access": "node supabase/tests/portal-access-grant-revoke.test.mjs",
     "test:switch-isolation": "node supabase/tests/workspace-switch-isolation.test.mjs",

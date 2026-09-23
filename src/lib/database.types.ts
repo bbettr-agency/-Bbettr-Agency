@@ -385,6 +385,113 @@ export interface Database {
       // between portal users (auth.users) and client workspaces. Defined for
       // type-completeness; NOT read by the app in S1 (tenant resolution still
       // flows through profiles.client_id / current_client_id()).
+      // Jarvis Foundation 1 (migration 0062). Agency-workspace-scoped security
+      // kernel state. Not read by the client app; admin/service-role only.
+      jarvis_capability_grants: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          subject_user_id: string;
+          grant_key: string;
+          granted_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          workspace_id: string;
+          subject_user_id: string;
+          grant_key: string;
+          granted_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_capability_grants"]["Row"]>;
+        Relationships: [];
+      };
+      jarvis_proposals: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          capability_id: string;
+          args: Json;
+          effect: Json;
+          effect_hash: string;
+          rationale: string | null;
+          status: "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+          initiated_by: string | null;
+          is_proactive: boolean;
+          created_at: string;
+          expires_at: string;
+          approved_by: string | null;
+          approved_at: string | null;
+          rejected_by: string | null;
+          rejected_at: string | null;
+          executed_at: string | null;
+          idempotency_key: string | null;
+          verification_state: "not_required" | "pending" | "reported" | "verified" | "failed" | "unavailable";
+          verification_evidence: Json | null;
+          error: string | null;
+        };
+        Insert: {
+          workspace_id: string;
+          capability_id: string;
+          args?: Json;
+          effect?: Json;
+          effect_hash: string;
+          rationale?: string | null;
+          status?: string;
+          initiated_by?: string | null;
+          is_proactive?: boolean;
+          expires_at: string;
+          idempotency_key?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_proposals"]["Row"]>;
+        Relationships: [];
+      };
+      jarvis_action_events: {
+        Row: {
+          event_id: string;
+          seq: number;
+          workspace_id: string;
+          occurred_at: string;
+          actor_kind: "jarvis" | "human" | "system";
+          initiated_by: string | null;
+          is_proactive: boolean;
+          capability_id: string;
+          decision: "allow" | "deny" | "needs_approval" | "monitor_only";
+          risk_class: string | null;
+          target_client_id: string | null;
+          proposal_id: string | null;
+          approval_by: string | null;
+          executed: boolean;
+          success: boolean | null;
+          verification_state: string | null;
+          evidence: Json | null;
+          sources: Json | null;
+          idempotency_key: string | null;
+          error: string | null;
+          detail: Json | null;
+        };
+        Insert: {
+          workspace_id: string;
+          actor_kind: "jarvis" | "human" | "system";
+          initiated_by?: string | null;
+          is_proactive?: boolean;
+          capability_id: string;
+          decision: "allow" | "deny" | "needs_approval" | "monitor_only";
+          risk_class?: string | null;
+          target_client_id?: string | null;
+          proposal_id?: string | null;
+          approval_by?: string | null;
+          executed?: boolean;
+          success?: boolean | null;
+          verification_state?: string | null;
+          evidence?: Json | null;
+          sources?: Json | null;
+          idempotency_key?: string | null;
+          error?: string | null;
+          detail?: Json | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_action_events"]["Row"]>;
+        Relationships: [];
+      };
       client_members: {
         Row: {
           id: string;
