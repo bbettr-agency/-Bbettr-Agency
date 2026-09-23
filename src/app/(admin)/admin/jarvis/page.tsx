@@ -5,11 +5,13 @@ import { isJarvisEnabled } from "@/lib/flags";
 import { resolveJarvisContext } from "@/lib/jarvis/identity";
 import { readRecentJarvisActions } from "@/lib/jarvis/audit";
 import { CAPABILITY_REGISTRY } from "@/lib/jarvis/capabilities";
-import { GRANT_JARVIS_APPROVE } from "@/lib/jarvis/constants";
+import { GRANT_JARVIS_APPROVE, GRANT_MEMORY_PROPOSE } from "@/lib/jarvis/constants";
+import { listMemories } from "@/lib/jarvis/memory/reads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { JarvisConsole } from "@/components/admin/jarvis-console";
+import { JarvisMemoryPanel } from "@/components/admin/jarvis-memory-panel";
 
 export const metadata: Metadata = { title: "Jarvis" };
 
@@ -50,6 +52,22 @@ export default async function JarvisPage() {
     riskClass: c.riskClass,
     requiredGrant: c.requiredGrant,
   }));
+
+  const canPropose = enabled && ctx.grants.has(GRANT_MEMORY_PROPOSE);
+  const memoryRows = enabled
+    ? (await listMemories({ currentOnly: true, limit: 50 })).map((m) => ({
+        id: m.id,
+        scope: m.scope,
+        category: m.category,
+        state: m.state,
+        current: m.current,
+        claim: m.claim,
+        importance: m.importance,
+        sourceKind: m.sourceKind,
+        suppliedDisplay: m.suppliedDisplay,
+        conflictsWithId: m.conflictsWithId,
+      }))
+    : [];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -94,6 +112,13 @@ export default async function JarvisPage() {
           expiresAt: p.expires_at as string,
         }))}
         actions={actions}
+      />
+
+      <JarvisMemoryPanel
+        enabled={enabled}
+        canPropose={canPropose}
+        canApprove={canApprove}
+        memories={memoryRows}
       />
     </div>
   );

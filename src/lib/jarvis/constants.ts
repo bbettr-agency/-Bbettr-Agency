@@ -17,5 +17,15 @@ export const GRANT_JARVIS_USE = "jarvis.use" as const;
 /** Grant key for approval authority (who may approve confirm/destructive actions). */
 export const GRANT_JARVIS_APPROVE = "jarvis.approve" as const;
 
+/**
+ * Memory V1 grant keys. Reading and proposing are their own narrow grants; the
+ * AUTHORITATIVE curation acts (confirm / supersede-correct / retire) deliberately
+ * REUSE the existing `jarvis.approve` authority rather than inventing a second
+ * approval framework. A future non-admin staff member can hold `memory.read`
+ * (and optionally `memory.propose`) without any Portal admin role.
+ */
+export const GRANT_MEMORY_READ = "memory.read" as const;
+export const GRANT_MEMORY_PROPOSE = "memory.propose" as const;
+
 /** Proposal freshness window: an approval/proposal older than this is stale. */
 export const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000; // 24h

@@ -492,6 +492,99 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["jarvis_action_events"]["Row"]>;
         Relationships: [];
       };
+      jarvis_memories: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          scope: "agency" | "client" | "user";
+          client_id: string | null;
+          user_id: string | null;
+          subject_kind: string | null;
+          subject_ref: string | null;
+          category: "company_knowledge" | "client_knowledge" | "decision" | "commitment" | "preference_rule" | "context_note";
+          claim: string;
+          body: string | null;
+          structured: Json;
+          state: "observed" | "inferred" | "proposed" | "confirmed" | "superseded" | "retired" | "rejected";
+          current: boolean;
+          importance: number;
+          source_kind: "human_statement" | "portal_record" | "document" | "system_event" | "model_inference";
+          source_ref: string | null;
+          observed_at: string;
+          supplied_by: string | null;
+          supplied_display: string | null;
+          confirmed_by: string | null;
+          confirmed_at: string | null;
+          supersedes_id: string | null;
+          superseded_by_id: string | null;
+          conflicts_with_id: string | null;
+          created_at: string;
+          created_by: string | null;
+          retired_at: string | null;
+          retired_reason: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          scope: "agency" | "client" | "user";
+          client_id?: string | null;
+          user_id?: string | null;
+          subject_kind?: string | null;
+          subject_ref?: string | null;
+          category: "company_knowledge" | "client_knowledge" | "decision" | "commitment" | "preference_rule" | "context_note";
+          claim: string;
+          body?: string | null;
+          structured?: Json;
+          state?: "observed" | "inferred" | "proposed" | "confirmed" | "superseded" | "retired" | "rejected";
+          current?: boolean;
+          importance?: number;
+          source_kind: "human_statement" | "portal_record" | "document" | "system_event" | "model_inference";
+          source_ref?: string | null;
+          observed_at?: string;
+          supplied_by?: string | null;
+          supplied_display?: string | null;
+          confirmed_by?: string | null;
+          confirmed_at?: string | null;
+          supersedes_id?: string | null;
+          superseded_by_id?: string | null;
+          conflicts_with_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          retired_at?: string | null;
+          retired_reason?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_memories"]["Row"]>;
+        Relationships: [];
+      };
+      jarvis_memory_events: {
+        Row: {
+          event_id: string;
+          seq: number;
+          workspace_id: string;
+          memory_id: string | null;
+          occurred_at: string;
+          event_type: "created" | "confirmed" | "superseded" | "corrected" | "conflict_flagged" | "retired" | "rejected" | "redacted";
+          actor_kind: "jarvis" | "human" | "system";
+          actor_user_id: string | null;
+          actor_display: string | null;
+          reason: string | null;
+          detail: Json | null;
+        };
+        Insert: {
+          event_id?: string;
+          workspace_id: string;
+          memory_id?: string | null;
+          occurred_at?: string;
+          event_type: "created" | "confirmed" | "superseded" | "corrected" | "conflict_flagged" | "retired" | "rejected" | "redacted";
+          actor_kind: "jarvis" | "human" | "system";
+          actor_user_id?: string | null;
+          actor_display?: string | null;
+          reason?: string | null;
+          detail?: Json | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_memory_events"]["Row"]>;
+        Relationships: [];
+      };
       client_members: {
         Row: {
           id: string;
@@ -1657,6 +1750,17 @@ export interface Database {
       is_admin: {
         Args: Record<string, never>;
         Returns: boolean;
+      };
+      jarvis_memory_supersede: {
+        Args: {
+          p_workspace: string;
+          p_old_id: string;
+          p_new: Json;
+          p_actor: string;
+          p_actor_display: string;
+          p_reason: string;
+        };
+        Returns: string;
       };
       current_client_id: {
         Args: Record<string, never>;
