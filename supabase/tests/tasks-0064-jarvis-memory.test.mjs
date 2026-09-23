@@ -153,15 +153,41 @@ async function main() {
   check("authenticated cannot directly WRITE memory (service-role only)", (await runAs(c, "authenticated", U.admin, `insert into public.jarvis_memories (workspace_id,scope,category,claim,source_kind) values ('${WS}','agency','context_note','x','human_statement')`)).error !== null);
   check("cross-workspace: admin2 (grant in WS2) sees no WS memory", (await runAs(c, "authenticated", U.admin2, `select id from public.jarvis_memories`)).rowCount === 0);
 
+  console.log("\n── PRIVACY: user-scoped lineage & conflict isolation ──");
+  // Lineage on a PRIVATE user memory (owner nogrant, NO memory.read) + a SHARED one.
+  await c.query(`insert into public.jarvis_memory_events (workspace_id,memory_id,event_type,actor_kind,actor_user_id,actor_display,reason) values
+    ('${WS}','${memUserNo}','created','human','${U.nogrant}','N','umem'),
+    ('${WS}','${memAgency}','created','human','${U.admin}','A','shared')`);
+  // Conflict edges: private↔shared (memUserRd is private to reader) and shared↔shared.
+  await c.query(`select public.jarvis_memory_flag_conflict('${WS}','${memUserRd}','${memClient}','${U.admin}','A','p')`);
+  await c.query(`select public.jarvis_memory_flag_conflict('${WS}','${memClient}','${memProposed}','${U.admin}','A','h')`);
+
+  check("A: owner reads their user-scoped memory", (await runAs(c, "authenticated", U.nogrant, `select id from public.jarvis_memories where id='${memUserNo}'`)).rowCount === 1);
+  check("B: owner reads their user-memory lineage (no memory.read needed)", (await runAs(c, "authenticated", U.nogrant, `select event_id from public.jarvis_memory_events where memory_id='${memUserNo}'`)).rowCount >= 1);
+  check("C: other memory.read holder CANNOT read the user's memory", (await runAs(c, "authenticated", U.admin, `select id from public.jarvis_memories where id='${memUserNo}'`)).rowCount === 0);
+  check("D: other memory.read holder CANNOT read the user's lineage", (await runAs(c, "authenticated", U.admin, `select event_id from public.jarvis_memory_events where memory_id='${memUserNo}'`)).rowCount === 0);
+  check("D2: reader (memory.read) also cannot read another's user lineage", (await runAs(c, "authenticated", U.reader, `select event_id from public.jarvis_memory_events where memory_id='${memUserNo}'`)).rowCount === 0);
+  check("E: other user CANNOT discover conflict edges touching a private user memory", (await runAs(c, "authenticated", U.admin, `select id from public.jarvis_memory_conflicts where memory_id='${memUserRd}' or other_memory_id='${memUserRd}'`)).rowCount === 0);
+  check("F: shared memory readable to memory.read holder", (await runAs(c, "authenticated", U.reader, `select id from public.jarvis_memories where id='${memAgency}'`)).rowCount === 1);
+  check("G: shared lineage readable to memory.read holder", (await runAs(c, "authenticated", U.reader, `select event_id from public.jarvis_memory_events where memory_id='${memAgency}'`)).rowCount >= 1);
+  check("H: shared↔shared conflict edge visible to memory.read holder", (await runAs(c, "authenticated", U.reader, `select id from public.jarvis_memory_conflicts where memory_id='${memClient}' and other_memory_id='${memProposed}'`)).rowCount === 1);
+  check("I: edge with a private side HIDDEN from non-owner", (await runAs(c, "authenticated", U.admin, `select id from public.jarvis_memory_conflicts where memory_id='${memUserRd}' and other_memory_id='${memClient}'`)).rowCount === 0);
+  check("I2: same edge VISIBLE to the owner (reads both sides)", (await runAs(c, "authenticated", U.reader, `select id from public.jarvis_memory_conflicts where memory_id='${memUserRd}' and other_memory_id='${memClient}'`)).rowCount === 1);
+  check("J: client with mistaken grant sees no lineage", (await runAs(c, "authenticated", U.clientg, `select event_id from public.jarvis_memory_events`)).rowCount === 0);
+  check("K: rep with mistaken grant sees no lineage", (await runAs(c, "authenticated", U.rep, `select event_id from public.jarvis_memory_events`)).rowCount === 0);
+  check("J/K: client/rep see no conflict edges", (await runAs(c, "authenticated", U.clientg, `select id from public.jarvis_memory_conflicts`)).rowCount === 0 && (await runAs(c, "authenticated", U.rep, `select id from public.jarvis_memory_conflicts`)).rowCount === 0);
+  check("L: cross-workspace sees no lineage/conflicts", (await runAs(c, "authenticated", U.admin2, `select event_id from public.jarvis_memory_events`)).rowCount === 0 && (await runAs(c, "authenticated", U.admin2, `select id from public.jarvis_memory_conflicts`)).rowCount === 0);
+  check("M: authenticated cannot directly write conflict edges", (await runAs(c, "authenticated", U.admin, `insert into public.jarvis_memory_conflicts (workspace_id,memory_id,other_memory_id) values ('${WS}','${memAgency}','${memClient}')`)).error !== null);
+
   console.log("\n── append-only events + FK carve-out ──");
-  await c.query(`insert into public.jarvis_memory_events (workspace_id,memory_id,event_type,actor_kind,actor_user_id,actor_display,reason) values ('${WS}','${memAgency}','created','human','${U.nogrant}','N','seed')`);
-  const EID = (await c.query(`select event_id from public.jarvis_memory_events limit 1`)).rows[0].event_id;
-  check("founder reads memory events (memory.read)", (await runAs(c, "authenticated", U.admin, `select event_id from public.jarvis_memory_events`)).rowCount === 1);
+  await c.query(`insert into public.jarvis_memory_events (workspace_id,memory_id,event_type,actor_kind,actor_user_id,actor_display,reason) values ('${WS}','${memAgency}','created','human','${U.nogrant}','N','carveseed')`);
+  const EID = (await c.query(`select event_id from public.jarvis_memory_events where reason='carveseed'`)).rows[0].event_id;
+  check("founder reads shared memory events (memory.read)", (await runAs(c, "authenticated", U.admin, `select event_id from public.jarvis_memory_events where memory_id='${memAgency}'`)).rowCount >= 1);
   check("client denied events", denied(await runAs(c, "authenticated", U.client, `select event_id from public.jarvis_memory_events`)));
   check("authenticated cannot insert events (service-role only)", (await runAs(c, "authenticated", U.admin, `insert into public.jarvis_memory_events (workspace_id,event_type,actor_kind) values ('${WS}','created','human')`)).error !== null);
   check("ordinary UPDATE rejected", !(await tryQ(c, `update public.jarvis_memory_events set reason='x' where event_id='${EID}'`)).ok);
   check("DELETE rejected", !(await tryQ(c, `delete from public.jarvis_memory_events where event_id='${EID}'`)).ok);
-  check("carve-out: deleting referenced profile nullifies actor_user_id, rest intact", (await tryQ(c, `delete from public.profiles where id='${U.nogrant}'`)).ok && (await scalar(c, `select actor_user_id is null and reason='seed' from public.jarvis_memory_events where event_id='${EID}'`)) === true);
+  check("carve-out: deleting referenced profile nullifies actor_user_id, rest intact", (await tryQ(c, `delete from public.profiles where id='${U.nogrant}'`)).ok && (await scalar(c, `select actor_user_id is null and reason='carveseed' from public.jarvis_memory_events where event_id='${EID}'`)) === true);
 
   console.log("\n── CONCERN 2: atomic row + lineage (all-or-nothing) ──");
   // Wrong guard → RPC returns false, NOTHING changes (no state change, no event).

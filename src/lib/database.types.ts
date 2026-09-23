@@ -1810,6 +1810,10 @@ export interface Database {
         Args: Record<string, never>;
         Returns: boolean;
       };
+      jarvis_can_read_memory_row: {
+        Args: { p_memory: string };
+        Returns: boolean;
+      };
       current_client_id: {
         Args: Record<string, never>;
         Returns: string;

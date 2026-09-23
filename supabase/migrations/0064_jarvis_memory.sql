@@ -119,6 +119,26 @@ create or replace function public.jarvis_can_read_memory()
   );
 $fn$;
 
+-- jarvis_can_read_memory_row: may the principal read THIS specific memory, under
+-- the SAME scope rules as the jarvis_memories read policy? Child records (events,
+-- conflicts) gate on this so they never leak metadata about a memory the reader
+-- cannot see — in particular another internal user's PERSONAL (user-scoped)
+-- memory. SECURITY DEFINER reads jarvis_memories as the owner, which bypasses its
+-- RLS (enable, not force) so there is NO policy recursion and no reference to the
+-- child tables. Fail-closed: an unknown or not-visible id ⇒ false.
+create or replace function public.jarvis_can_read_memory_row(p_memory uuid)
+  returns boolean language sql security definer set search_path = public stable as $fn$
+  select exists (
+    select 1 from public.jarvis_memories m
+    where m.id = p_memory
+      and m.workspace_id = public.current_workspace_id()
+      and (
+        (m.scope in ('agency','client') and public.jarvis_can_read_memory())
+        or (m.scope = 'user' and m.user_id = auth.uid() and public.jarvis_is_internal())
+      )
+  );
+$fn$;
+
 alter table public.jarvis_memories enable row level security;
 grant select on public.jarvis_memories to authenticated;
 grant all    on public.jarvis_memories to service_role;
@@ -159,9 +179,16 @@ alter table public.jarvis_memory_conflicts enable row level security;
 grant select on public.jarvis_memory_conflicts to authenticated;
 grant all    on public.jarvis_memory_conflicts to service_role;
 drop policy if exists "Read jarvis memory conflicts" on public.jarvis_memory_conflicts;
+-- A conflict edge is visible ONLY if the principal may read BOTH memories it
+-- links — so an edge touching a private user-scoped memory is hidden from anyone
+-- who cannot read that memory (no existence/reason leak).
 create policy "Read jarvis memory conflicts"
   on public.jarvis_memory_conflicts for select to authenticated
-  using (workspace_id = public.current_workspace_id() and public.jarvis_can_read_memory());
+  using (
+    workspace_id = public.current_workspace_id()
+    and public.jarvis_can_read_memory_row(memory_id)
+    and public.jarvis_can_read_memory_row(other_memory_id)
+  );
 
 -- ── Append-only memory lineage / audit log ──────────────────────────────────
 create table if not exists public.jarvis_memory_events (
@@ -188,12 +215,22 @@ revoke all on public.jarvis_memory_events from authenticated;
 revoke all on public.jarvis_memory_events from service_role;
 grant insert, select on public.jarvis_memory_events to service_role;
 grant select on public.jarvis_memory_events to authenticated;
--- Reading lineage is capability-driven, same as memory (internal + memory.read).
+-- Reading lineage FOLLOWS the parent memory's visibility: an event is readable
+-- only if its memory is readable (so personal-memory lineage never leaks to other
+-- internal users). Events with no memory_id are creation-time REJECTIONS (e.g. a
+-- blocked secret — safe labels only, no memory ever existed); those are agency
+-- audit records readable by memory.read holders.
 drop policy if exists "Admins read jarvis memory events" on public.jarvis_memory_events;
 drop policy if exists "Read jarvis memory events" on public.jarvis_memory_events;
 create policy "Read jarvis memory events"
   on public.jarvis_memory_events for select to authenticated
-  using (workspace_id = public.current_workspace_id() and public.jarvis_can_read_memory());
+  using (
+    workspace_id = public.current_workspace_id()
+    and (
+      (memory_id is not null and public.jarvis_can_read_memory_row(memory_id))
+      or (memory_id is null and public.jarvis_can_read_memory())
+    )
+  );
 
 -- Append-only guard WITH the FK ON DELETE SET NULL carve-out (memory_id,
 -- actor_user_id): DELETE always rejected; UPDATE permitted ONLY when every
