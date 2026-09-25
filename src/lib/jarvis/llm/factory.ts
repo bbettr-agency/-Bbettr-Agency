@@ -2,18 +2,20 @@ import "server-only";
 
 import type { LLMProvider } from "./provider";
 import { LLMProviderError } from "./errors";
+import { createAnthropicProvider } from "./anthropic";
 
 /**
- * Jarvis Intelligence — provider factory (Slice B, server-only). FAIL-CLOSED.
+ * Jarvis Intelligence — provider factory (server-only). FAIL-CLOSED.
  *
  * Selects a provider from configuration ONLY. It never:
  *   • silently falls back to a real provider,
- *   • silently chooses Anthropic,
+ *   • silently chooses Anthropic (the provider must be named),
+ *   • infers a default model (the model must be configured),
  *   • returns the test mock (the mock is not imported here and is never reachable
  *     through the factory — see mock.ts, which is test-only).
- * In Slice B no real adapter exists yet, so every path throws a `configuration`
- * error; the Anthropic adapter is wired in Slice E. This keeps the boundary
- * provider-independent and un-tied to any vendor.
+ * Slice E wires the real Anthropic adapter, constructed only when the provider is
+ * named, a model is configured, AND ANTHROPIC_API_KEY is present. A present API
+ * key does NOT enable Intelligence — that stays gated by the feature flags.
  */
 export const SUPPORTED_PROVIDERS = ["anthropic"] as const;
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
@@ -33,12 +35,13 @@ export function createLLMProvider(): LLMProvider {
   }
 
   switch (providerId as SupportedProvider) {
-    case "anthropic":
-      // Adapter (and ANTHROPIC_API_KEY handling) arrives in Slice E — fail closed.
-      throw new LLMProviderError("configuration", {
-        providerId,
-        safeDetail: "anthropic adapter not implemented until Slice E",
-      });
+    case "anthropic": {
+      const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+      if (!apiKey) {
+        throw new LLMProviderError("configuration", { providerId, safeDetail: "ANTHROPIC_API_KEY is not set" });
+      }
+      return createAnthropicProvider({ apiKey, model });
+    }
     default:
       throw new LLMProviderError("configuration", { safeDetail: `unsupported provider: ${providerId}` });
   }

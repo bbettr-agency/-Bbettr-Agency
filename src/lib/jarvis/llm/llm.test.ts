@@ -9,6 +9,7 @@ import type { LLMCompletionRequest } from "./provider";
 const ENV_KEYS = [
   "JARVIS_ENABLED", "JARVIS_INTELLIGENCE_ENABLED", "JARVIS_LLM_PROVIDER", "JARVIS_LLM_MODEL",
   "JARVIS_LLM_HISTORY_TURNS", "JARVIS_LLM_MAX_OUTPUT_TOKENS", "JARVIS_LLM_TIMEOUT_MS",
+  "ANTHROPIC_API_KEY",
 ];
 const saved: Record<string, string | undefined> = {};
 beforeEach(() => { for (const k of ENV_KEYS) { saved[k] = process.env[k]; delete process.env[k]; } });
@@ -55,15 +56,24 @@ describe("factory — fail-closed, no implicit provider", () => {
     process.env.JARVIS_LLM_PROVIDER = "openai"; process.env.JARVIS_LLM_MODEL = "x";
     expect(() => createLLMProvider()).toThrow(/unsupported provider/);
   });
-  it("anthropic selected → still fails closed in Slice B (no real call, not the mock)", () => {
-    process.env.JARVIS_LLM_PROVIDER = "anthropic"; process.env.JARVIS_LLM_MODEL = "some-model";
-    expect(() => createLLMProvider()).toThrow(/not implemented until Slice E/);
+  it("anthropic + model but NO ANTHROPIC_API_KEY → configuration error (fail closed)", () => {
+    process.env.JARVIS_LLM_PROVIDER = "anthropic"; process.env.JARVIS_LLM_MODEL = "claude-sonnet-5";
+    delete process.env.ANTHROPIC_API_KEY;
+    try { createLLMProvider(); expect.unreachable(); }
+    catch (e) { expect((e as LLMProviderError).kind).toBe("configuration"); expect((e as LLMProviderError).message).toMatch(/ANTHROPIC_API_KEY/); }
   });
-  it("no configuration ever yields the mock as a production default", () => {
-    // Every reachable Slice-B config throws; the factory never returns a provider.
+  it("anthropic + model + key → constructs the Anthropic provider (no network on construction)", () => {
+    process.env.JARVIS_LLM_PROVIDER = "anthropic"; process.env.JARVIS_LLM_MODEL = "claude-sonnet-5";
+    process.env.ANTHROPIC_API_KEY = "test-key-not-real";
+    const provider = createLLMProvider();
+    expect(provider.id).toBe("anthropic");
+    expect(provider.model).toBe("claude-sonnet-5"); // configured model preserved
+  });
+  it("provider config never yields the mock; unset/partial config throws", () => {
+    // The mock is never a production fallback; incomplete config fails closed.
     for (const cfg of [{}, { JARVIS_LLM_PROVIDER: "anthropic", JARVIS_LLM_MODEL: "m" }, { JARVIS_LLM_PROVIDER: "mock", JARVIS_LLM_MODEL: "m" }]) {
-      for (const k of ["JARVIS_LLM_PROVIDER", "JARVIS_LLM_MODEL"]) delete process.env[k];
-      Object.assign(process.env, cfg);
+      for (const k of ["JARVIS_LLM_PROVIDER", "JARVIS_LLM_MODEL", "ANTHROPIC_API_KEY"]) delete process.env[k];
+      Object.assign(process.env, cfg); // note: no ANTHROPIC_API_KEY in any cfg
       expect(() => createLLMProvider()).toThrow();
     }
     expect(SUPPORTED_PROVIDERS).not.toContain("mock");

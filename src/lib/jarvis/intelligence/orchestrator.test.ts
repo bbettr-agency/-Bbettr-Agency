@@ -624,6 +624,20 @@ describe("orchestrator — Slice D action/memory bridges", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("a provider REFUSAL (non-JSON text) ⇒ invalid_response safe failure, NO action/Memory side effect", async () => {
+    // Mirrors an Anthropic refusal: HTTP 200 with prose that is not Jarvis JSON. Strict
+    // Slice-C validation is the gate — a refusal can never drive a bridge.
+    const { provider } = makeProvider({ text: "I'm sorry, but I can't help with that request." });
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "do something disallowed" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r).toMatchObject({ ok: false, reason: "invalid_response" });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("bridges NEVER run on a clarification turn", async () => {
     const { provider, seen } = makeProvider({ text: INTENT_TEXT });
     const { invoke, create } = bridgeSeams();
