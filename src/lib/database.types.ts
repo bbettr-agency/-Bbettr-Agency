@@ -609,6 +609,71 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["jarvis_memory_events"]["Row"]>;
         Relationships: [];
       };
+      jarvis_threads: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          user_id: string;
+          title: string | null;
+          status: "active" | "archived";
+          last_client_id: string | null;
+          created_at: string;
+          updated_at: string;
+          archived_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          user_id: string;
+          title?: string | null;
+          status?: "active" | "archived";
+          last_client_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          archived_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_threads"]["Row"]>;
+        Relationships: [];
+      };
+      jarvis_messages: {
+        Row: {
+          id: string;
+          seq: number;
+          thread_id: string;
+          workspace_id: string;
+          role: "user" | "assistant";
+          content: string;
+          status: "ok" | "error";
+          request_id: string;
+          reasoning_summary: string | null;
+          provenance: Json | null;
+          proposed_intent: Json | null;
+          uncertainty: Json | null;
+          provider: string | null;
+          model: string | null;
+          usage: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          thread_id: string;
+          workspace_id: string;
+          role: "user" | "assistant";
+          content: string;
+          status?: "ok" | "error";
+          request_id?: string;
+          reasoning_summary?: string | null;
+          provenance?: Json | null;
+          proposed_intent?: Json | null;
+          uncertainty?: Json | null;
+          provider?: string | null;
+          model?: string | null;
+          usage?: Json | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_messages"]["Row"]>;
+        Relationships: [];
+      };
       client_members: {
         Row: {
           id: string;
@@ -1812,6 +1877,14 @@ export interface Database {
       };
       jarvis_can_read_memory_row: {
         Args: { p_memory: string };
+        Returns: boolean;
+      };
+      jarvis_has_use: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      jarvis_can_read_thread: {
+        Args: { p_thread: string };
         Returns: boolean;
       };
       current_client_id: {
