@@ -7,6 +7,8 @@
  * never taken from model output.
  */
 import type { MemoryCategory, MemoryScope } from "@/lib/jarvis/memory/types";
+import type { ActionBridgeResult } from "./action-bridge";
+import type { MemoryBridgeResult } from "./memory-bridge";
 
 /** Deterministic context routing decision (the model never chooses this). */
 export type ContextPlan =
@@ -56,6 +58,13 @@ export interface TrustedProvenance {
   contextPortalFactCount: number;
 }
 
+/**
+ * The result of ONE `runIntelligenceTurn` invocation. `requestId` is a
+ * per-invocation CORRELATION id (links this turn's user + assistant rows and any
+ * bridge side effects), NOT a transport idempotency key: two invocations yield two
+ * request_ids and are two distinct turns. Callers must not auto-retry a turn after
+ * an ambiguous failure once bridges are active (see orchestrator.ts).
+ */
 export type TurnResult =
   | {
       ok: true;
@@ -71,6 +80,14 @@ export type TurnResult =
       /** ok:true is only ever returned AFTER the assistant row is durably stored,
        *  so this is always true — stated explicitly for transactional honesty. */
       persisted: true;
+      /** Trusted result of bridging proposed_intent into F1 (Slice D). Present
+       *  when the turn produced a validated response; "not_requested" when the
+       *  model proposed no intent. Execution truth comes ONLY from here, never
+       *  from the model's assistant_message. */
+      action?: ActionBridgeResult;
+      /** Trusted result of bridging memory_candidate into the Memory lifecycle
+       *  (Slice D). Model memory enters as `inferred` and needs human confirmation. */
+      memory?: MemoryBridgeResult;
     }
   | {
       ok: false;

@@ -17,6 +17,8 @@ import { planContext as defaultPlanContext } from "./context-router";
 import { buildSystemPrompt } from "./prompt";
 import { parseAssistantResponse } from "./response-contract";
 import { callProviderWithPolicy } from "./provider-call";
+import { bridgeProposedIntent, type ActionBridgeDeps, type ActionBridgeResult } from "./action-bridge";
+import { bridgeMemoryCandidate, type MemoryBridgeDeps, type MemoryBridgeResult } from "./memory-bridge";
 import {
   createConversationRepo,
   SAFE_FAILURE_MESSAGE,
@@ -24,7 +26,13 @@ import {
   type ConversationRepo,
   type ConversationThread,
 } from "./repository";
-import type { ContextPlan, TrustedProvenance, TurnResult } from "./types";
+import type {
+  ContextPlan,
+  TrustedProvenance,
+  TurnResult,
+  ValidatedProposedIntent,
+  ValidatedMemoryCandidate,
+} from "./types";
 
 /**
  * Jarvis Intelligence — orchestrator (Slice C, server-only). THE trusted entry
@@ -42,11 +50,32 @@ import type { ContextPlan, TrustedProvenance, TurnResult } from "./types";
  *  10. persist assistant success OR a safe failure; return a safe result.
  *
  * The LLM is NOT an authorization mechanism. It cannot execute, approve, widen
- * scope, choose workspace/user/client, or write memory. proposed_intent and
- * memory_candidate are validated (shape only) and RETURNED — never executed or
- * written in Slice C.
+ * scope, choose workspace/user/client, or write memory. In Slice D, validated
+ * proposals are bridged into the EXISTING F1 / Memory systems by trusted code;
+ * the model gains no authority.
  *
  * Everything external is injectable for tests (no DB / network / keys needed).
+ *
+ * ── IDEMPOTENCY BOUNDARY (read before wiring a transport) ────────────────────
+ * `request_id` is generated ONCE PER `runIntelligenceTurn` INVOCATION and is a
+ * CORRELATION id only — it is NOT a transport idempotency key. Each call to this
+ * function is a DISTINCT turn: it mints a new request_id, persists a new user
+ * message, and (on success) runs the bridges exactly once. There is intentionally
+ * NO cross-invocation dedup here — no check-then-insert, no process-memory cache,
+ * and no source_ref lookup masquerading as idempotency.
+ *
+ * Therefore callers MUST NOT automatically retry `runIntelligenceTurn` after an
+ * ambiguous transport/result failure once the operational bridges are active: a
+ * retry is a NEW turn and may create a second F1 proposal / Memory candidate.
+ *
+ * RELEASE BLOCKER for the future retryable public transport (chat) slice — before
+ * exposing any retryable transport, require a stable, trusted, transport-supplied
+ * idempotency key threaded as:
+ *   ACTION: transport key → F1 bridge → existing jarvis_proposals.idempotency_key
+ *           (UNIQUE) with atomic get-or-create / conflict-safe semantics
+ *           + jarvis_action_events correlation;
+ *   MEMORY: transport key → an additive DB uniqueness mechanism with atomic
+ *           create-or-get (this MAY justify a future migration — NOT in this slice).
  */
 
 /** Slice-A DB CHECK bound on jarvis_messages.content (1..20000). */
@@ -81,6 +110,10 @@ export interface TurnDeps {
   limits?: IntelligenceLimits;
   /** Server-generated request-id seam (deterministic in tests). */
   uuid?: () => string;
+  /** Slice-D action-bridge seams (F1). */
+  actionBridge?: ActionBridgeDeps;
+  /** Slice-D memory-bridge seams (Memory). */
+  memoryBridge?: MemoryBridgeDeps;
 }
 
 const defaultAssembler: ContextAssembler = {
@@ -124,7 +157,9 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
   const assembler = deps.assembler ?? defaultAssembler;
   const router = deps.router ?? defaultPlanContext;
 
-  // Server-generated correlation id for BOTH rows of this turn.
+  // Server-generated CORRELATION id for BOTH rows of this turn. Per-invocation,
+  // NOT a transport idempotency key (see the IDEMPOTENCY BOUNDARY note above): two
+  // independent invocations get two distinct request_ids and are two distinct turns.
   const requestId = newUuid();
 
   // (4) Resolve or create + verify ownership of the thread (trusted, owner-only).
@@ -256,6 +291,20 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
   });
   if (!stored) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
 
+  // (11) Slice-D BRIDGES. Only reached once the assistant row is durably stored,
+  //      so we never create an operational side effect for a turn whose record
+  //      failed to persist. The model's proposals are UNTRUSTED suggestions; the
+  //      bridges gate them into the existing trusted F1 / Memory systems.
+  const { action, memory } = await runBridges({
+    turnCtx: ctx,
+    resolve,
+    proposedIntent: value.proposedIntent,
+    memoryCandidate: value.memoryCandidate,
+    plan,
+    requestId,
+    deps,
+  });
+
   return {
     ok: true,
     threadId: thread.id,
@@ -265,7 +314,67 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
     memoryCandidate: value.memoryCandidate,
     uncertainty: value.uncertainty,
     persisted: true,
+    action,
+    memory,
   };
+}
+
+/**
+ * Run the Slice-D bridges with centralized REAUTHORIZATION (TOCTOU): re-resolve
+ * the principal at bridge time and require it to match the turn's principal +
+ * workspace. A denied/changed authorization means neither bridge runs. Each bridge
+ * runs at most ONCE per turn, and a failure in one is isolated from the other and
+ * from the (already durable) conversation.
+ */
+async function runBridges(args: {
+  turnCtx: JarvisContext;
+  resolve: () => Promise<JarvisResolution>;
+  proposedIntent?: ValidatedProposedIntent;
+  memoryCandidate?: ValidatedMemoryCandidate;
+  plan: ContextPlan;
+  requestId: string;
+  deps: TurnDeps;
+}): Promise<{ action?: ActionBridgeResult; memory?: MemoryBridgeResult }> {
+  const { turnCtx, resolve, proposedIntent, memoryCandidate, plan, requestId, deps } = args;
+
+  // Nothing proposed ⇒ no reauthorization, no bridge work.
+  if (!proposedIntent && !memoryCandidate) {
+    return { action: { status: "not_requested" }, memory: { status: "not_requested" } };
+  }
+
+  // Reauthorize ONCE at bridge time; both bridges share the fresh, checked context.
+  let reauth: JarvisResolution;
+  try {
+    reauth = await resolve();
+  } catch {
+    reauth = { denied: "not_enabled" };
+  }
+  if ("denied" in reauth || reauth.principalId !== turnCtx.principalId || reauth.workspaceId !== turnCtx.workspaceId) {
+    const reason = "denied" in reauth ? `reauth:${reauth.denied}` : "context_changed";
+    return {
+      action: proposedIntent ? { status: "unauthorized", reason } : { status: "not_requested" },
+      memory: memoryCandidate ? { status: "unauthorized", reason } : { status: "not_requested" },
+    };
+  }
+  const freshCtx: JarvisContext = reauth;
+
+  let action: ActionBridgeResult;
+  try {
+    action = await bridgeProposedIntent({ ctx: freshCtx, intent: proposedIntent, plan }, deps.actionBridge);
+  } catch {
+    action = proposedIntent
+      ? { status: "failed", capabilityId: proposedIntent.capabilityId, reason: "bridge_error" }
+      : { status: "not_requested" };
+  }
+
+  let memory: MemoryBridgeResult;
+  try {
+    memory = await bridgeMemoryCandidate({ ctx: freshCtx, candidate: memoryCandidate, plan, requestId }, deps.memoryBridge);
+  } catch {
+    memory = { status: "failed", reason: "bridge_error" };
+  }
+
+  return { action, memory };
 }
 
 /** Attempt an assistant-row write; return whether it durably persisted. Never

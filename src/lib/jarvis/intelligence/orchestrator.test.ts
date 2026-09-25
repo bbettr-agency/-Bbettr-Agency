@@ -469,6 +469,192 @@ describe("orchestrator — persistence honesty (never claim a durability we don'
   });
 });
 
+// ---------- Slice D: bridge integration ----------
+
+const RICH_GRANTS = ["jarvis.use", "portal.read", "portal.tasks.write", "integrations.read", "memory.read", "memory.propose"];
+const RICH_CTX: JarvisContext = { principalId: "u1", workspaceId: "w1", grants: new Set(RICH_GRANTS) };
+
+const INTENT_TEXT = JSON.stringify({
+  assistant_message: "I can propose that.",
+  proposed_intent: { capability_id: "portal.propose_internal_task", args: { title: "Call Fine Art tomorrow" } },
+});
+const MEMORY_TEXT = JSON.stringify({
+  assistant_message: "Noted.",
+  memory_candidate: { scope: "agency", category: "company_knowledge", claim: "We bill monthly" },
+});
+const BOTH_TEXT = JSON.stringify({
+  assistant_message: "Okay.",
+  proposed_intent: { capability_id: "portal.read_task_counts", args: {} },
+  memory_candidate: { scope: "user", category: "preference_rule", claim: "Prefers morning standups" },
+});
+
+/** Fake F1 invoke + Memory create seams that record calls (and optionally order). */
+function bridgeSeams(opts: { invokeResult?: unknown; createResult?: unknown; order?: string[] } = {}) {
+  const invoke = vi.fn(async () => {
+    opts.order?.push("invoke");
+    return (opts.invokeResult ?? { status: "needs_approval", proposalId: "prop-1" }) as never;
+  });
+  const create = vi.fn(async () => {
+    opts.order?.push("create");
+    return (opts.createResult ?? { ok: true, id: "mem-1", state: "inferred" }) as never;
+  });
+  return { invoke, create };
+}
+
+describe("orchestrator — Slice D action/memory bridges", () => {
+  it("no proposals ⇒ both bridges report not_requested, no reauthorization side effects", async () => {
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "hi" },
+      baseDeps({ resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.action).toEqual({ status: "not_requested" });
+      expect(r.memory).toEqual({ status: "not_requested" });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("proposed_intent ⇒ action bridge runs ONCE AFTER assistant persistence; approval_required surfaced", async () => {
+    const order: string[] = [];
+    const { provider } = makeProvider({ text: INTENT_TEXT, order });
+    const { repo } = makeRepo({ order });
+    const { invoke, create } = bridgeSeams({ order, invokeResult: { status: "needs_approval", proposalId: "prop-9" } });
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, repo, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.action).toEqual({ status: "approval_required", capabilityId: "portal.propose_internal_task", proposalId: "prop-9" });
+    expect(invoke).toHaveBeenCalledTimes(1); // exactly once per turn
+    // bridge runs strictly AFTER the assistant row is persisted
+    expect(order.indexOf("invoke")).toBeGreaterThan(order.indexOf("persistAssistant:ok"));
+  });
+
+  it("memory_candidate ⇒ memory bridge runs once; needs_confirmation surfaced (inferred, not confirmed)", async () => {
+    const { provider } = makeProvider({ text: MEMORY_TEXT });
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "remember we bill monthly" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.memory).toEqual({ status: "needs_confirmation", memoryId: "mem-1", state: "inferred" });
+      expect(r.action).toEqual({ status: "not_requested" });
+    }
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("BOTH proposals ⇒ each bridge runs once, independent results, NO second provider call", async () => {
+    const { provider, seen } = makeProvider({ text: BOTH_TEXT });
+    const { invoke, create } = bridgeSeams({ invokeResult: { status: "allow", result: { inbox: 2 }, verification: {} } });
+    const r = await runIntelligenceTurn(
+      { message: "counts + remember" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.action).toEqual({ status: "read_result", capabilityId: "portal.read_task_counts", result: { inbox: 2 } });
+      expect(r.memory).toEqual({ status: "needs_confirmation", memoryId: "mem-1", state: "inferred" });
+    }
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(seen.calls).toBe(1); // one provider sequence per turn — no second model call
+  });
+
+  it("reauthorization DENIED between model call and bridge ⇒ unauthorized, bridges never invoked", async () => {
+    let n = 0;
+    const resolveContext = async () => (n++ === 0 ? RICH_CTX : ({ denied: "not_enabled" } as const));
+    const { provider } = makeProvider({ text: BOTH_TEXT });
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, resolveContext, actionBridge: { invoke }, memoryBridge: { create } }));
+    expect(r.ok).toBe(true); // conversation still durable
+    if (r.ok) {
+      expect(r.action).toEqual({ status: "unauthorized", reason: "reauth:not_enabled" });
+      expect(r.memory).toEqual({ status: "unauthorized", reason: "reauth:not_enabled" });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("workspace CHANGED between model call and bridge ⇒ unauthorized(context_changed), no bridge run", async () => {
+    let n = 0;
+    const resolveContext = async () => (n++ === 0 ? RICH_CTX : ({ principalId: "u1", workspaceId: "w2", grants: new Set(RICH_GRANTS) } as JarvisContext));
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams();
+    const r = await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, resolveContext, actionBridge: { invoke } }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.action).toEqual({ status: "unauthorized", reason: "context_changed" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("action bridge failure is isolated: conversation stays ok; memory still processed", async () => {
+    const { provider } = makeProvider({ text: BOTH_TEXT });
+    const invoke = vi.fn(async () => { throw new Error("f1 down"); });
+    const { create } = bridgeSeams();
+    const r = await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.action).toMatchObject({ status: "failed" });
+      expect(r.memory).toEqual({ status: "needs_confirmation", memoryId: "mem-1", state: "inferred" });
+    }
+  });
+
+  it("memory bridge failure is isolated: conversation stays ok; action still processed", async () => {
+    const { provider } = makeProvider({ text: BOTH_TEXT });
+    const { invoke } = bridgeSeams({ invokeResult: { status: "allow", result: { inbox: 1 }, verification: {} } });
+    const create = vi.fn(async () => { throw new Error("mem down"); });
+    const r = await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.action).toMatchObject({ status: "read_result" });
+      expect(r.memory).toEqual({ status: "failed", reason: "bridge_invocation_failed" });
+    }
+  });
+
+  it("bridges NEVER run on a non-success turn (invalid model response ⇒ no invoke/create)", async () => {
+    const { provider } = makeProvider({ text: "NOT JSON" });
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } }));
+    expect(r).toMatchObject({ ok: false, reason: "invalid_response" });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("bridges NEVER run on a clarification turn", async () => {
+    const { provider, seen } = makeProvider({ text: INTENT_TEXT });
+    const { invoke, create } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "email that client" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, router: async () => ({ kind: "unknown_client" }), actionBridge: { invoke }, memoryBridge: { create } })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.clarification).toBe(true);
+    expect(seen.calls).toBe(0); // no provider call at all on clarification
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("orchestrator — request_id is per-invocation correlation, NOT transport idempotency", () => {
+  it("two independent invocations receive DISTINCT request_ids (they are distinct turns)", async () => {
+    // Use the REAL default id generator (no uuid seam) to prove each invocation mints
+    // a fresh request_id. There is no cross-invocation dedup: a retry is a new turn.
+    const deps = baseDeps({ uuid: undefined });
+    const r1 = await runIntelligenceTurn({ message: "hi" }, deps);
+    const r2 = await runIntelligenceTurn({ message: "hi" }, deps);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    if (r1.ok && r2.ok) {
+      expect(r1.requestId).not.toBe(r2.requestId);
+      expect(r1.requestId).toMatch(/^[0-9a-f-]{36}$/i);
+    }
+  });
+});
+
 describe("orchestrator — provider failure ⇒ safe failure persistence", () => {
   it.each<LLMErrorKind>(["timeout", "rate_limit", "provider_5xx", "unavailable", "provider_4xx", "configuration", "invalid_response"])(
     "on a %s provider error, persists a safe assistant error row and returns the kind",
