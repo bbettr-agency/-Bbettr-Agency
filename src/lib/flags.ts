@@ -53,3 +53,15 @@ export function isTasksEnabled(): boolean {
 export function isJarvisEnabled(): boolean {
   return process.env.JARVIS_ENABLED === "true";
 }
+
+/**
+ * JARVIS_INTELLIGENCE_ENABLED — the conversational Intelligence layer (Slice B+).
+ * Read at request time. Default OFF and FAIL-CLOSED: anything other than "true"
+ * ⇒ off. Intelligence requires BOTH the Jarvis boundary AND this flag, so it can
+ * never run while the base Jarvis surface is disabled. NOT a security boundary
+ * (auth + capability grants + policy still enforce authority independently) and
+ * NOT exposed to the browser (never NEXT_PUBLIC).
+ */
+export function isJarvisIntelligenceEnabled(): boolean {
+  return isJarvisEnabled() && process.env.JARVIS_INTELLIGENCE_ENABLED === "true";
+}
