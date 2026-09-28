@@ -78,15 +78,23 @@ export async function createProposal(
   if (error) throw new Error("could not create proposal");
   if (inserted && inserted.length === 1) return { outcome: "created", id: inserted[0].id as string, effectHash };
 
-  // Lost the race / already exists → read the existing owner row by the exact key and
-  // compare the IMMUTABLE stored effect hash (effect_hash is set once and never
-  // rewritten). Same effect ⇒ reuse; different ⇒ deterministic conflict (fail closed).
+  // Lost the race / already exists → read the existing owner row by the exact key,
+  // SCOPED TO THE CURRENT TRUSTED WORKSPACE. Global uniqueness arbitrates insertion;
+  // trusted workspace identity arbitrates REUSE (the operation key is neither tenant
+  // identity nor authorization). Compare the IMMUTABLE stored effect hash (set once,
+  // never rewritten): same effect ⇒ reuse; different ⇒ deterministic conflict.
   const { data: existing, error: selErr } = await admin
     .from("jarvis_proposals")
     .select("id, effect_hash, status")
     .eq("idempotency_key", operationKey)
+    .eq("workspace_id", ctx.workspaceId)
     .maybeSingle();
-  if (selErr || !existing) throw new Error("could not create proposal");
+  if (selErr) throw new Error("could not create proposal");
+  // The INSERT lost the global-unique race but NO reusable proposal exists in THIS
+  // workspace ⇒ the key is owned by another tenant. Fail closed as a plain conflict:
+  // never surface the foreign row's id/hash/status, never mutate/approve/execute it,
+  // never reveal that a foreign proposal exists.
+  if (!existing) return { outcome: "conflict" };
   if ((existing.effect_hash as string) !== effectHash) return { outcome: "conflict" };
   return { outcome: "reused", id: existing.id as string, effectHash, status: existing.status as ProposalStatus };
 }

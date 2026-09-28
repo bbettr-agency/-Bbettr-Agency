@@ -115,10 +115,15 @@ export async function createMemory(actor: MemoryActor, input: MemoryCreateInput)
   }
 
   const state: MemoryCreateState = decision.state;
+  // F1c idempotency is opt-in and the pair is all-or-nothing (0068 coherence CHECK:
+  // idempotency_key and idem_effect_hash are both-null or both-set). Fail FAST on an
+  // incoherent internal call rather than silently downgrading to a non-idempotent
+  // legacy create or handing Postgres an incoherent pair. No RPC is issued.
+  const hasKey = !!input.idempotencyKey;
+  const hasHash = !!input.idemEffectHash;
+  if (hasKey !== hasHash) return { ok: false, reason: "idempotency_pair_incoherent" };
+  const idempotent = hasKey && hasHash;
   const admin = createAdminClient();
-  // F1c idempotency is opt-in: BOTH the trusted operation key and its effect hash must
-  // be present. Otherwise the legacy 5-arg call is used with byte-identical behavior.
-  const idempotent = !!input.idempotencyKey && !!input.idemEffectHash;
   const { data, error } = await admin.rpc("jarvis_memory_create", {
     p_workspace: actor.workspaceId,
     p_row: rowJson(input, state, currentOnCreate(state)),
