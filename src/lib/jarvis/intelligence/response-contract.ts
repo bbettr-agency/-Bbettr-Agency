@@ -65,48 +65,29 @@ export type ParseResult =
   | { ok: false; reason: "too_large" | "not_json" | "schema" };
 
 /**
- * Extract the FIRST complete, brace-balanced top-level JSON object from raw model
- * text, or null. This tolerates ONLY benign presentation envelopes a live model may
- * add around the required object — a ```json / ``` markdown code fence, or a leading/
- * trailing sentence — since the scan simply locates the first `{` and its matching
- * `}`, ignoring anything outside. It is STRING-AWARE (a `}` inside a JSON string value
- * never closes the object) and FAILS CLOSED: an unbalanced/truncated object returns
- * null (never a partially-recovered fragment). It changes only WHERE the object is
- * found — the strict schema below is unchanged, so unknown keys / wrong shapes / bounds
- * are still rejected exactly as before, and nothing is executed or trusted here.
+ * CONSERVATIVE envelope handling (F2b). A single markdown code fence that encloses the
+ * WHOLE reply is the one benign wrapper we accept (the live model returned
+ * invalid_response:not_json for a fenced object). The reply must be EXACTLY one JSON
+ * object: this matches only a fence that spans the entire trimmed text (`^```…```$`),
+ * so leading/trailing prose, a fence with surrounding prose, and multiple objects are
+ * NOT accepted. We deliberately do NOT scan arbitrary text for a brace-balanced object.
  */
-export function extractJsonObject(raw: string): string | null {
-  const start = raw.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < raw.length; i++) {
-    const c = raw[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') {
-      inStr = true;
-    } else if (c === "{") {
-      depth++;
-    } else if (c === "}") {
-      depth--;
-      if (depth === 0) return raw.slice(start, i + 1);
-    }
-  }
-  return null; // unbalanced / truncated ⇒ fail closed, no partial recovery
-}
+const WHOLE_FENCE_RE = /^```[a-zA-Z0-9]*\s*([\s\S]*?)\s*```$/;
 
 export function parseAssistantResponse(rawText: string): ParseResult {
   if (typeof rawText !== "string" || rawText.length === 0 || rawText.length > MAX_RAW_TEXT) {
     return { ok: false, reason: "too_large" };
   }
-  // Accept the required object even when the model wraps it in a code fence or adds a
-  // leading/trailing sentence; reject anything without a complete balanced object.
-  const candidate = extractJsonObject(rawText);
-  if (candidate === null) return { ok: false, reason: "not_json" };
+  // Ordinary leading/trailing whitespace is fine; unwrap a single all-encompassing code
+  // fence if (and only if) it spans the entire reply.
+  let candidate = rawText.trim();
+  const fenced = WHOLE_FENCE_RE.exec(candidate);
+  if (fenced) candidate = fenced[1].trim();
+  // The remainder must be EXACTLY one JSON object — no surrounding prose, no extra
+  // objects. (Two objects, or an object plus prose, fail JSON.parse or this guard.)
+  if (candidate.length === 0 || candidate[0] !== "{" || candidate[candidate.length - 1] !== "}") {
+    return { ok: false, reason: "not_json" };
+  }
   let json: unknown;
   try {
     json = JSON.parse(candidate);

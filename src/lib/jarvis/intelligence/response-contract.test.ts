@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAssistantResponse, extractJsonObject } from "./response-contract";
+import { parseAssistantResponse } from "./response-contract";
 
 /**
  * MODEL OUTPUT IS UNTRUSTED. These prove the contract parses/validates/bounds and
@@ -34,60 +34,47 @@ describe("parseAssistantResponse — happy path", () => {
   });
 });
 
-// F2b: the live provider proved the model may wrap the required object in a markdown
-// fence or add a sentence around it (invalid_response:not_json). The parser tolerates
-// ONLY that benign envelope; the contract stays strict.
-describe("parseAssistantResponse — benign JSON envelope tolerance (F2b)", () => {
+// F2b (CONSERVATIVE): the live model returned invalid_response:not_json for a fenced
+// object. We accept ONLY a clean object (with whitespace) or exactly one object inside a
+// single all-encompassing markdown fence. Surrounding prose, prose+fence, and multiple
+// objects are rejected. The strict contract is preserved.
+describe("parseAssistantResponse — conservative JSON envelope (F2b)", () => {
   const obj = { assistant_message: "Hi, I'm reachable." };
-  it("accepts a ```json fenced object", () => {
+  it("accepts a clean object with ordinary leading/trailing whitespace", () => {
+    const r = parseAssistantResponse("\n\n  " + ok(obj) + "  \n");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.assistantMessage).toBe("Hi, I'm reachable.");
+  });
+  it("accepts exactly one object in a ```json fence spanning the whole reply", () => {
     const r = parseAssistantResponse("```json\n" + ok(obj) + "\n```");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.assistantMessage).toBe("Hi, I'm reachable.");
   });
-  it("accepts a plain ``` fenced object", () => {
+  it("accepts exactly one object in a plain ``` fence spanning the whole reply", () => {
     expect(parseAssistantResponse("```\n" + ok(obj) + "\n```").ok).toBe(true);
   });
-  it("accepts a leading sentence before the object", () => {
-    expect(parseAssistantResponse("Sure! Here is the JSON:\n" + ok(obj)).ok).toBe(true);
-  });
-  it("accepts a trailing sentence after the object", () => {
-    expect(parseAssistantResponse(ok(obj) + "\n\nHope that helps!").ok).toBe(true);
-  });
-  it("accepts a fenced object with both fence and prose", () => {
-    expect(parseAssistantResponse("Here you go:\n```json\n" + ok(obj) + "\n```\nLet me know.").ok).toBe(true);
-  });
-  it("does NOT let a `}` inside a string value close the object early", () => {
-    const r = parseAssistantResponse("```json\n" + ok({ assistant_message: "a } brace } inside" }) + "\n```");
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.assistantMessage).toBe("a } brace } inside");
-  });
-  it("extracts the FIRST complete object when several are present", () => {
-    const r = parseAssistantResponse(ok({ assistant_message: "first" }) + "\n" + ok({ assistant_message: "second" }));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.assistantMessage).toBe("first");
-  });
-  it("STRICTNESS SURVIVES extraction: a fenced object with an unknown root key still fails schema", () => {
+  it("STRICTNESS SURVIVES unwrap: a fenced object with an unknown root key still fails schema", () => {
     expect(parseAssistantResponse("```json\n" + ok({ assistant_message: "x", provider: "anthropic" }) + "\n```")).toEqual({
       ok: false,
       reason: "schema",
     });
   });
-  it("fails closed on a truncated/unbalanced object (no partial recovery)", () => {
-    expect(parseAssistantResponse('```json\n{"assistant_message": "hi"')).toEqual({ ok: false, reason: "not_json" });
-    expect(parseAssistantResponse('prose then {"assistant_message": "hi", "x": ')).toEqual({ ok: false, reason: "not_json" });
-  });
-});
 
-describe("extractJsonObject — pure helper", () => {
-  it("returns null when there is no object", () => {
-    expect(extractJsonObject("no braces here")).toBeNull();
-    expect(extractJsonObject("")).toBeNull();
+  // NOT APPROVED — must be REJECTED (never silently extracted):
+  it("REJECTS a leading sentence before the object", () => {
+    expect(parseAssistantResponse("Sure! Here is the JSON:\n" + ok(obj))).toEqual({ ok: false, reason: "not_json" });
   });
-  it("returns the balanced object, ignoring surrounding text/fences", () => {
-    expect(extractJsonObject('x ```json\n{"a":1}\n``` y')).toBe('{"a":1}');
+  it("REJECTS a trailing sentence after the object", () => {
+    expect(parseAssistantResponse(ok(obj) + "\n\nHope that helps!")).toEqual({ ok: false, reason: "not_json" });
   });
-  it("returns null on an unbalanced object", () => {
-    expect(extractJsonObject('{"a": {"b": 1}')).toBeNull();
+  it("REJECTS prose wrapped around a fenced object", () => {
+    expect(parseAssistantResponse("Here you go:\n```json\n" + ok(obj) + "\n```\nLet me know.")).toEqual({ ok: false, reason: "not_json" });
+  });
+  it("REJECTS multiple JSON objects (does not take the first)", () => {
+    expect(parseAssistantResponse(ok({ assistant_message: "first" }) + "\n" + ok({ assistant_message: "second" }))).toEqual({ ok: false, reason: "not_json" });
+  });
+  it("REJECTS a truncated/unbalanced object (no partial recovery)", () => {
+    expect(parseAssistantResponse('```json\n{"assistant_message": "hi"')).toEqual({ ok: false, reason: "not_json" });
   });
 });
 
