@@ -13,6 +13,7 @@ vi.mock("@/lib/auth", () => ({ requireAdmin: async () => ({ id: "admin1", role: 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 
 import { runIntelligenceTurn, runDurableTurn, type TurnDeps, type ContextAssembler } from "./orchestrator";
+import { memoryEffectHash } from "./memory-bridge";
 import type { ConversationTurnRepo, TurnRow, TurnResultSnapshot } from "./turns";
 import { SAFE_FAILURE_MESSAGE, type ConversationRepo, type ConversationThread, type AssistantRow } from "./repository";
 import { isJarvisEnabled, isJarvisIntelligenceEnabled } from "@/lib/flags";
@@ -1001,5 +1002,90 @@ describe("runDurableTurn — request hash binds owner/workspace (isolation)", ()
     await runDurableTurn({ message: "same message", idempotencyKey: KEY_UUID }, durableDeps({ provider, resolveContext: async () => ({ principalId: "u1", workspaceId: "wA", grants: new Set(RICH_GRANTS) }) }, repo));
     await runDurableTurn({ message: "same message", idempotencyKey: KEY_UUID }, durableDeps({ provider, resolveContext: async () => ({ principalId: "u1", workspaceId: "wB", grants: new Set(RICH_GRANTS) }) }, repo));
     expect(hashes[0]).not.toBe(hashes[1]);
+  });
+});
+
+// ---------- F1c: trusted per-slot operation keys derived from the durable turn.id ----------
+
+const BOTH_EFFECTS = JSON.stringify({
+  assistant_message: "ok",
+  proposed_intent: { capability_id: "portal.propose_internal_task", args: { title: "x" } },
+  memory_candidate: { scope: "agency", category: "company_knowledge", claim: "c" },
+});
+
+/** Capturing bridge seams (real bridges run; only invoke/create are injected). */
+function captureBridges() {
+  const seen = { invokeOpts: undefined as unknown, memInput: undefined as Record<string, unknown> | undefined };
+  const invoke = vi.fn(async (_c: unknown, _id: unknown, _a: unknown, opts?: unknown) => {
+    seen.invokeOpts = opts;
+    return { status: "needs_approval", proposalId: "prop-1" } as never;
+  });
+  const create = vi.fn(async (_actor: unknown, input: unknown) => {
+    seen.memInput = input as Record<string, unknown>;
+    return { ok: true, id: "mem-1", state: "inferred" } as never;
+  });
+  return { invoke, create, seen };
+}
+
+describe("runDurableTurn — F1c operation keys are trusted + derived from turn.id", () => {
+  it("action op key = turn:<turn.id>:action:0, forwarded to F1 as opts.idempotencyKey", async () => {
+    const { provider } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create, seen } = captureBridges();
+    const { repo } = makeTurnRepo(); // claim returns turn id "turn-x"
+    await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect((seen.invokeOpts as { idempotencyKey?: string }).idempotencyKey).toBe("turn:turn-x:action:0");
+  });
+
+  it("memory op key = turn:<turn.id>:memory:0 + the locked-envelope effect hash", async () => {
+    const { provider } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create, seen } = captureBridges();
+    const { repo } = makeTurnRepo();
+    await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect(seen.memInput!.idempotencyKey).toBe("turn:turn-x:memory:0");
+    expect(seen.memInput!.idemEffectHash).toBe(
+      memoryEffectHash({ workspaceId: "w1", scope: "agency", clientId: null, userId: null, category: "company_knowledge", claim: "c", body: null })
+    );
+  });
+
+  it("returned proposal id + memory id are linked best-effort to the durable turn", async () => {
+    const { provider } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create } = captureBridges();
+    const { repo, calls } = makeTurnRepo();
+    await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect(calls.proposal).toEqual(["prop-1"]);
+    expect(calls.memory).toEqual(["mem-1"]);
+    expect(calls.complete.length).toBe(1);
+  });
+
+  it("the KEYLESS legacy runIntelligenceTurn invents NO operation keys (no durable turn)", async () => {
+    const { provider } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create, seen } = captureBridges();
+    const r = await runIntelligenceTurn({ message: "do it" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, actionBridge: { invoke }, memoryBridge: { create } }));
+    expect(r.ok).toBe(true);
+    expect((seen.invokeOpts as { idempotencyKey?: string }).idempotencyKey).toBeUndefined();
+    expect(seen.memInput!.idempotencyKey).toBeUndefined();
+    expect(seen.memInput!.idemEffectHash).toBeUndefined();
+  });
+
+  it("completed replay runs ZERO bridges (no op-key work, no provider)", async () => {
+    const { provider, seen: pseen } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create } = captureBridges();
+    const { repo } = makeTurnRepo({ existing: { status: "completed", result: validSnapshot } });
+    const r = await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect(r.kind).toBe("completed_replay");
+    expect(pseen.calls).toBe(0);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("processing replay runs ZERO bridges (no op-key work, no provider)", async () => {
+    const { provider, seen: pseen } = makeProvider({ text: BOTH_EFFECTS });
+    const { invoke, create } = captureBridges();
+    const { repo } = makeTurnRepo({ existing: { status: "processing" } });
+    const r = await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect(r).toMatchObject({ kind: "in_progress" });
+    expect(pseen.calls).toBe(0);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 });

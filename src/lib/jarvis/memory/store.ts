@@ -40,6 +40,13 @@ export interface MemoryCreateInput {
   importance?: number;
   declaredSecret?: boolean;
   assertsPortalOwnedValue?: boolean;
+  /** Trusted, server-generated F1c operation key (`turn:<turnId>:memory:0`). When set
+   *  together with `idemEffectHash`, creation is idempotent via the 0068 7-arg RPC.
+   *  NEVER model/browser/user supplied. */
+  idempotencyKey?: string;
+  /** Lowercase SHA-256 hex of the trusted semantic effect envelope (F1c). Bound with
+   *  idempotencyKey; a same-key/different-hash create fails closed (BB68C). */
+  idemEffectHash?: string;
 }
 
 export type MemoryWriteResult =
@@ -109,14 +116,24 @@ export async function createMemory(actor: MemoryActor, input: MemoryCreateInput)
 
   const state: MemoryCreateState = decision.state;
   const admin = createAdminClient();
+  // F1c idempotency is opt-in: BOTH the trusted operation key and its effect hash must
+  // be present. Otherwise the legacy 5-arg call is used with byte-identical behavior.
+  const idempotent = !!input.idempotencyKey && !!input.idemEffectHash;
   const { data, error } = await admin.rpc("jarvis_memory_create", {
     p_workspace: actor.workspaceId,
     p_row: rowJson(input, state, currentOnCreate(state)),
     p_actor: actor.principalId,
     p_actor_display: actor.display,
     p_reason: decision.reason,
+    ...(idempotent ? { p_idempotency_key: input.idempotencyKey, p_idem_effect_hash: input.idemEffectHash } : {}),
   });
-  if (error || !data) return { ok: false, reason: "could_not_create_memory" };
+  if (error) {
+    // Same operation key, DIFFERENT semantic effect (0068 raises SQLSTATE BB68C). Fail
+    // closed as a typed conflict; never a second row, never a false success.
+    if ((error as { code?: string }).code === "BB68C") return { ok: false, reason: "idempotency_conflict" };
+    return { ok: false, reason: "could_not_create_memory" };
+  }
+  if (!data) return { ok: false, reason: "could_not_create_memory" };
   return { ok: true, id: data as string, state };
 }
 

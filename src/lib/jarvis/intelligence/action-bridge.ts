@@ -91,7 +91,7 @@ export interface ActionBridgeDeps {
     ctx: JarvisContext,
     capabilityId: string,
     rawArgs: unknown,
-    opts?: { rationale?: string; targetClientId?: string | null }
+    opts?: { rationale?: string; targetClientId?: string | null; idempotencyKey?: string }
   ) => Promise<InvokeResult>;
   /** Defaults to the canonical registry lookup. */
   getCap?: (id: string) => JarvisCapability | null;
@@ -102,10 +102,13 @@ export interface ActionBridgeInput {
   ctx: JarvisContext;
   intent: ValidatedProposedIntent | undefined;
   plan: ContextPlan;
+  /** Trusted, server-generated F1c operation key (`turn:<turnId>:action:0`). Absent on
+   *  the legacy keyless path. NEVER model/browser/user supplied. */
+  operationKey?: string;
 }
 
 export async function bridgeProposedIntent(input: ActionBridgeInput, deps: ActionBridgeDeps = {}): Promise<ActionBridgeResult> {
-  const { ctx, intent, plan } = input;
+  const { ctx, intent, plan, operationKey } = input;
   if (!intent) return { status: "not_requested" };
 
   const getCap = deps.getCap ?? getCapability;
@@ -133,6 +136,9 @@ export async function bridgeProposedIntent(input: ActionBridgeInput, deps: Actio
     res = await invoke(ctx, intent.capabilityId, intent.args, {
       rationale: intent.rationale,
       targetClientId: plan.kind === "client" ? plan.clientId : null,
+      // Trusted operation key for idempotent proposal creation (F1c). F1 applies it
+      // only after its own re-validation/policy/audit; it is never authorization.
+      idempotencyKey: operationKey,
     });
   } catch {
     return { status: "failed", capabilityId: intent.capabilityId, reason: "bridge_invocation_failed" };
@@ -153,7 +159,10 @@ export async function bridgeProposedIntent(input: ActionBridgeInput, deps: Actio
     case "deny":
       return { status: "unauthorized", reason: res.reason };
     case "error":
-      return { status: "failed", capabilityId: intent.capabilityId, reason: "execution_failed" };
+      // Fail closed. `reason` is a trusted bounded literal from F1 (e.g.
+      // "execution_failed", or the F1c internal "idempotency_conflict"/"idempotency_state").
+      // No public status is widened and no internal/DB detail is exposed.
+      return { status: "failed", capabilityId: intent.capabilityId, reason: res.reason || "execution_failed" };
     default:
       return { status: "failed", capabilityId: intent.capabilityId, reason: "unknown_result" };
   }

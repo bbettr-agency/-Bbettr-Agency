@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 
-import { bridgeMemoryCandidate, MEMORY_MODEL_DISPLAY } from "./memory-bridge";
+import { bridgeMemoryCandidate, MEMORY_MODEL_DISPLAY, memoryEffectHash } from "./memory-bridge";
 import type { MemoryActor, MemoryCreateInput, MemoryWriteResult } from "@/lib/jarvis/memory/store";
 import type { JarvisContext } from "@/lib/jarvis/identity";
 import type { ContextPlan, ValidatedMemoryCandidate } from "./types";
@@ -158,5 +158,86 @@ describe("memory-bridge — duplicate/conflict HONESTY (no invented detection)",
     // The bridge's ONLY Memory dependency is the create seam — there is no confirm/
     // supersede/retire/flagConflict path reachable from it.
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("memory-bridge — F1c operation-key idempotency wiring", () => {
+  const OP_KEY = "turn:11111111-1111-4111-8111-111111111111:memory:0";
+
+  it("without an operationKey: legacy create (no idempotency pair passed)", async () => {
+    const { create, calls } = fakeCreate(okInferred);
+    await bridgeMemoryCandidate({ ctx: CTX, candidate: candidate(), plan: AGENCY, requestId: "req-1" }, { create });
+    expect(calls[0].input.idempotencyKey).toBeUndefined();
+    expect(calls[0].input.idemEffectHash).toBeUndefined();
+  });
+
+  it("with a trusted operationKey: passes the key + the locked-envelope effect hash", async () => {
+    const { create, calls } = fakeCreate(okInferred);
+    await bridgeMemoryCandidate(
+      { ctx: CTX, candidate: candidate({ scope: "agency", category: "company_knowledge", claim: "We bill monthly", body: "net-30" }), plan: AGENCY, requestId: "req-1", operationKey: OP_KEY },
+      { create }
+    );
+    expect(calls[0].input.idempotencyKey).toBe(OP_KEY);
+    // Hash is over the trusted, deterministically-bound envelope (agency ⇒ null ids).
+    expect(calls[0].input.idemEffectHash).toBe(
+      memoryEffectHash({ workspaceId: "w1", scope: "agency", clientId: null, userId: null, category: "company_knowledge", claim: "We bill monthly", body: "net-30" })
+    );
+  });
+
+  it("the hash binds the TRUSTED resolved client id (client scope), not any model value", async () => {
+    const { create, calls } = fakeCreate(okInferred);
+    await bridgeMemoryCandidate(
+      { ctx: CTX, candidate: candidate({ scope: "client", category: "client_knowledge", claim: "Prefers mornings" }), plan: CLIENT, requestId: "req-1", operationKey: OP_KEY },
+      { create }
+    );
+    expect(calls[0].input.idemEffectHash).toBe(
+      memoryEffectHash({ workspaceId: "w1", scope: "client", clientId: "c-1", userId: null, category: "client_knowledge", claim: "Prefers mornings", body: null })
+    );
+  });
+
+  it("the model cannot supply the operation key (bridge reads only input.operationKey)", async () => {
+    const { create, calls } = fakeCreate(okInferred);
+    const sneaky = { scope: "agency", category: "company_knowledge", claim: "x", operationKey: "turn:evil:memory:0", idempotency_key: "evil" } as unknown as ValidatedMemoryCandidate;
+    await bridgeMemoryCandidate({ ctx: CTX, candidate: sneaky, plan: AGENCY, requestId: "req-1" }, { create });
+    expect(calls[0].input.idempotencyKey).toBeUndefined(); // no operationKey arg ⇒ none forwarded
+  });
+
+  it("BB68C from the store (same key, different effect) ⇒ failed(idempotency_conflict), not rejected/confirmed", async () => {
+    const { create } = fakeCreate({ ok: false, reason: "idempotency_conflict" });
+    const r = await bridgeMemoryCandidate(
+      { ctx: CTX, candidate: candidate(), plan: AGENCY, requestId: "req-1", operationKey: OP_KEY },
+      { create }
+    );
+    expect(r).toEqual({ status: "failed", reason: "idempotency_conflict" });
+  });
+
+  it("same key + same effect replay: store returns the existing id ⇒ needs_confirmation (inferred), one call", async () => {
+    const { create, calls } = fakeCreate({ ok: true, id: "mem-existing", state: "inferred" });
+    const r = await bridgeMemoryCandidate(
+      { ctx: CTX, candidate: candidate(), plan: AGENCY, requestId: "req-2", operationKey: OP_KEY },
+      { create }
+    );
+    expect(r).toEqual({ status: "needs_confirmation", memoryId: "mem-existing", state: "inferred" });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("memoryEffectHash — locked semantic envelope (every trusted field binds)", () => {
+  const base = { workspaceId: "w1", scope: "client", clientId: "c-1", userId: null as string | null, category: "client_knowledge", claim: "Prefers mornings", body: "detail" };
+  it("is deterministic lowercase 64-hex", () => {
+    const h = memoryEffectHash(base);
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(memoryEffectHash({ ...base })).toBe(h);
+  });
+  it.each(["workspaceId", "scope", "clientId", "userId", "category", "claim", "body"] as const)(
+    "changing %s changes the hash",
+    (field) => {
+      const mutated = { ...base, [field]: field === "userId" ? "u9" : (base[field] ?? "") + "X" };
+      expect(memoryEffectHash(mutated)).not.toBe(memoryEffectHash(base));
+    }
+  );
+  it("trims claim and normalizes body to null (stable canonical identity)", () => {
+    expect(memoryEffectHash({ ...base, claim: "  Prefers mornings  " })).toBe(memoryEffectHash({ ...base, claim: "Prefers mornings" }));
+    expect(memoryEffectHash({ ...base, body: null })).toBe(memoryEffectHash({ ...base, body: null }));
   });
 });

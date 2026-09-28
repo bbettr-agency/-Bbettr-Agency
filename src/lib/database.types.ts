@@ -521,6 +521,9 @@ export interface Database {
           created_by: string | null;
           retired_at: string | null;
           retired_reason: string | null;
+          // 0068 idempotency primitives (F1c wiring): both null or both set.
+          idempotency_key: string | null;
+          idem_effect_hash: string | null;
         };
         Insert: {
           id?: string;
@@ -550,6 +553,8 @@ export interface Database {
           created_by?: string | null;
           retired_at?: string | null;
           retired_reason?: string | null;
+          idempotency_key?: string | null;
+          idem_effect_hash?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["jarvis_memories"]["Row"]>;
         Relationships: [];
@@ -1898,7 +1903,17 @@ export interface Database {
         Returns: string;
       };
       jarvis_memory_create: {
-        Args: { p_workspace: string; p_row: Json; p_actor: string; p_actor_display: string; p_reason: string };
+        // 0068 canonical 7-arg form. The idempotency pair is optional (defaults null in
+        // SQL) so legacy 5-arg callers are unchanged.
+        Args: {
+          p_workspace: string;
+          p_row: Json;
+          p_actor: string;
+          p_actor_display: string;
+          p_reason: string;
+          p_idempotency_key?: string | null;
+          p_idem_effect_hash?: string | null;
+        };
         Returns: string;
       };
       jarvis_memory_confirm: {

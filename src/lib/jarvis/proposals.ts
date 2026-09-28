@@ -16,33 +16,79 @@ function effectOf(capabilityId: string, args: unknown) {
   return { capabilityId, args };
 }
 
+export type ProposalStatus = "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+
+/**
+ * Outcome of a proposal create. With a trusted operation key (Slice F1c) the create
+ * is a DB-arbitrated get-or-create:
+ *   • `created`  — this call inserted the proposal row.
+ *   • `reused`   — an existing proposal for this exact operation key with the SAME
+ *                  immutable effect hash; its current lifecycle `status` is returned
+ *                  so the caller can represent it truthfully (never invent "pending").
+ *   • `conflict` — an existing proposal for this operation key with a DIFFERENT effect
+ *                  hash (the same durable slot reused inconsistently). Fail closed:
+ *                  no second row, no mutation, no approval, no execution.
+ * Without an operation key the legacy plain-INSERT behavior is preserved and always
+ * resolves to `created`.
+ */
+export type CreateProposalResult =
+  | { outcome: "created"; id: string; effectHash: string }
+  | { outcome: "reused"; id: string; effectHash: string; status: ProposalStatus }
+  | { outcome: "conflict" };
+
 export async function createProposal(
   ctx: JarvisContext,
   capabilityId: string,
   args: unknown,
-  rationale?: string
-): Promise<{ id: string; effectHash: string }> {
+  rationale?: string,
+  /** Trusted, server-generated operation key (F1c). NEVER model/browser/user supplied.
+   *  When present, creation is idempotent on jarvis_proposals.idempotency_key (UNIQUE). */
+  operationKey?: string
+): Promise<CreateProposalResult> {
   const admin = createAdminClient();
   const effect = effectOf(capabilityId, args);
   const effectHash = canonicalEffectHash(effect);
-  const { data, error } = await admin
+  const row = {
+    workspace_id: ctx.workspaceId,
+    capability_id: capabilityId,
+    args: (args as Json) ?? {},
+    effect: effect as unknown as Json,
+    effect_hash: effectHash,
+    rationale: rationale ?? null,
+    status: "pending",
+    initiated_by: ctx.principalId,
+    is_proactive: false,
+    expires_at: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
+    ...(operationKey ? { idempotency_key: operationKey } : {}),
+  };
+
+  // Legacy path (no operation key): unchanged plain INSERT — always a new row.
+  if (!operationKey) {
+    const { data, error } = await admin.from("jarvis_proposals").insert(row).select("id").single();
+    if (error || !data) throw new Error("could not create proposal");
+    return { outcome: "created", id: data.id as string, effectHash };
+  }
+
+  // F1c get-or-create: INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING.
+  // The DB UNIQUE constraint is the sole concurrency arbiter (no check-then-insert).
+  const { data: inserted, error } = await admin
     .from("jarvis_proposals")
-    .insert({
-      workspace_id: ctx.workspaceId,
-      capability_id: capabilityId,
-      args: (args as Json) ?? {},
-      effect: effect as unknown as Json,
-      effect_hash: effectHash,
-      rationale: rationale ?? null,
-      status: "pending",
-      initiated_by: ctx.principalId,
-      is_proactive: false,
-      expires_at: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
-    })
-    .select("id")
-    .single();
-  if (error || !data) throw new Error("could not create proposal");
-  return { id: data.id as string, effectHash };
+    .upsert(row, { onConflict: "idempotency_key", ignoreDuplicates: true })
+    .select("id");
+  if (error) throw new Error("could not create proposal");
+  if (inserted && inserted.length === 1) return { outcome: "created", id: inserted[0].id as string, effectHash };
+
+  // Lost the race / already exists → read the existing owner row by the exact key and
+  // compare the IMMUTABLE stored effect hash (effect_hash is set once and never
+  // rewritten). Same effect ⇒ reuse; different ⇒ deterministic conflict (fail closed).
+  const { data: existing, error: selErr } = await admin
+    .from("jarvis_proposals")
+    .select("id, effect_hash, status")
+    .eq("idempotency_key", operationKey)
+    .maybeSingle();
+  if (selErr || !existing) throw new Error("could not create proposal");
+  if ((existing.effect_hash as string) !== effectHash) return { outcome: "conflict" };
+  return { outcome: "reused", id: existing.id as string, effectHash, status: existing.status as ProposalStatus };
 }
 
 export type ExecuteResult =

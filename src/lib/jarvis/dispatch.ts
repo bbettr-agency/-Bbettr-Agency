@@ -29,7 +29,7 @@ export async function invokeCapability(
   ctx: JarvisContext,
   capabilityId: string,
   rawArgs: unknown,
-  opts: { rationale?: string; targetClientId?: string | null } = {}
+  opts: { rationale?: string; targetClientId?: string | null; idempotencyKey?: string } = {}
 ): Promise<InvokeResult> {
   const cap = getCapability(capabilityId);
   const parsed = cap ? cap.parse(rawArgs) : ({ ok: false, error: "unregistered" } as const);
@@ -64,8 +64,17 @@ export async function invokeCapability(
   if (decision.outcome === "deny") return { status: "deny", reason: decision.reason };
 
   if (decision.outcome === "needs_approval") {
-    const { id } = await createProposal(ctx, capabilityId, (parsed as { args: unknown }).args, opts.rationale);
-    return { status: "needs_approval", proposalId: id };
+    // Idempotency (F1c) enters ONLY here — strictly AFTER lookup + arg canonicalization
+    // + policy decision + audit. It dedupes proposal CREATION; it is never authorization.
+    // The effect identity is the canonical (parsed) args, never raw model JSON.
+    const created = await createProposal(ctx, capabilityId, (parsed as { args: unknown }).args, opts.rationale, opts.idempotencyKey);
+    // Same operation key, DIFFERENT canonical effect ⇒ internal invariant failure. Fail
+    // closed: no second proposal, no mutation, no approval, no execution.
+    if (created.outcome === "conflict") return { status: "error", reason: "idempotency_conflict" };
+    // Same key + same effect but the existing proposal already advanced past `pending`:
+    // do NOT misrepresent a terminal/approved proposal as a fresh pending approval.
+    if (created.outcome === "reused" && created.status !== "pending") return { status: "error", reason: "idempotency_state" };
+    return { status: "needs_approval", proposalId: created.id };
   }
 
   const handler = getHandler(capabilityId);

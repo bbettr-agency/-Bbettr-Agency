@@ -219,8 +219,11 @@ async function executeLifecycle(params: {
   deps: TurnDeps;
   requestId: string;
   hooks?: TurnHooks;
+  /** Durable jarvis_turns.id (F1c). Present only on the durable path; the sole trusted
+   *  source of the per-slot operation keys. Absent ⇒ legacy path derives no keys. */
+  turnId?: string;
 }): Promise<TurnResult> {
-  const { ctx, message, input, deps, requestId, hooks } = params;
+  const { ctx, message, input, deps, requestId, hooks, turnId } = params;
   const resolve = deps.resolveContext ?? resolveJarvisContext;
   const repo = deps.repo ?? createConversationRepo();
   const limits = deps.limits ?? getIntelligenceLimits();
@@ -388,6 +391,7 @@ async function executeLifecycle(params: {
     plan,
     requestId,
     deps,
+    turnId,
   });
 
   return {
@@ -506,7 +510,7 @@ export async function runDurableTurn(input: TurnInput, deps: TurnDeps): Promise<
     onAssistant: (mid) => turnRepo.setAssistantMessageId(turnId, mid),
   };
 
-  const result = await executeLifecycle({ ctx, message, input, deps, requestId, hooks });
+  const result = await executeLifecycle({ ctx, message, input, deps, requestId, hooks, turnId });
 
   if (!result.ok) {
     await runHook(() => turnRepo.fail(turnId, result.reason));
@@ -563,8 +567,17 @@ async function runBridges(args: {
   plan: ContextPlan;
   requestId: string;
   deps: TurnDeps;
+  /** Durable turn id (F1c). Present ⇒ derive trusted per-slot operation keys. */
+  turnId?: string;
 }): Promise<{ action?: ActionBridgeResult; memory?: MemoryBridgeResult }> {
-  const { turnCtx, resolve, proposedIntent, memoryCandidate, plan, requestId, deps } = args;
+  const { turnCtx, resolve, proposedIntent, memoryCandidate, plan, requestId, deps, turnId } = args;
+
+  // Trusted, server-generated operation keys for the current one-action/one-memory
+  // turn. Derived ONLY from the durable jarvis_turns.id — never from the model, the
+  // browser, the user, request_id, or the transport idempotency key. Absent on the
+  // legacy keyless path (no durable turn ⇒ no idempotent effect slots).
+  const actionOperationKey = turnId ? `turn:${turnId}:action:0` : undefined;
+  const memoryOperationKey = turnId ? `turn:${turnId}:memory:0` : undefined;
 
   // Nothing proposed ⇒ no reauthorization, no bridge work.
   if (!proposedIntent && !memoryCandidate) {
@@ -589,7 +602,7 @@ async function runBridges(args: {
 
   let action: ActionBridgeResult;
   try {
-    action = await bridgeProposedIntent({ ctx: freshCtx, intent: proposedIntent, plan }, deps.actionBridge);
+    action = await bridgeProposedIntent({ ctx: freshCtx, intent: proposedIntent, plan, operationKey: actionOperationKey }, deps.actionBridge);
   } catch {
     action = proposedIntent
       ? { status: "failed", capabilityId: proposedIntent.capabilityId, reason: "bridge_error" }
@@ -598,7 +611,7 @@ async function runBridges(args: {
 
   let memory: MemoryBridgeResult;
   try {
-    memory = await bridgeMemoryCandidate({ ctx: freshCtx, candidate: memoryCandidate, plan, requestId }, deps.memoryBridge);
+    memory = await bridgeMemoryCandidate({ ctx: freshCtx, candidate: memoryCandidate, plan, requestId, operationKey: memoryOperationKey }, deps.memoryBridge);
   } catch {
     memory = { status: "failed", reason: "bridge_error" };
   }

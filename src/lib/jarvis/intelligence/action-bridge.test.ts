@@ -188,6 +188,48 @@ describe("action-bridge — no `executed` state can occur (fail closed on unexpe
   });
 });
 
+describe("action-bridge — F1c operation-key forwarding (trusted, server-generated)", () => {
+  const OP_KEY = "turn:11111111-1111-4111-8111-111111111111:action:0";
+
+  it("forwards the trusted operationKey to F1 as opts.idempotencyKey", async () => {
+    const { invoke, calls } = fakeInvoke({ status: "needs_approval", proposalId: "p1" });
+    await bridgeProposedIntent(
+      { ctx: CTX, intent: intent("portal.propose_internal_task", { title: "x" }), plan: AGENCY, operationKey: OP_KEY },
+      { invoke }
+    );
+    expect((calls[0].opts as { idempotencyKey?: string }).idempotencyKey).toBe(OP_KEY);
+  });
+
+  it("the model cannot supply the operation key: intent.args never becomes the key", async () => {
+    const { invoke, calls } = fakeInvoke({ status: "needs_approval", proposalId: "p1" });
+    // Model tries to smuggle an idempotency key in args — envelope rejects unexpected keys
+    // anyway, but even the valid call carries ONLY the server operationKey (here absent).
+    await bridgeProposedIntent(
+      { ctx: CTX, intent: intent("portal.propose_internal_task", { title: "x" }), plan: AGENCY },
+      { invoke }
+    );
+    expect((calls[0].opts as { idempotencyKey?: string }).idempotencyKey).toBeUndefined();
+  });
+
+  it("idempotency conflict from F1 (error) ⇒ failed with the internal reason (no public status widening)", async () => {
+    const { invoke } = fakeInvoke({ status: "error", reason: "idempotency_conflict" });
+    const r = await bridgeProposedIntent(
+      { ctx: CTX, intent: intent("portal.propose_internal_task", { title: "x" }), plan: AGENCY, operationKey: OP_KEY },
+      { invoke }
+    );
+    expect(r).toEqual({ status: "failed", capabilityId: "portal.propose_internal_task", reason: "idempotency_conflict" });
+  });
+
+  it("idempotency state (reused non-pending) from F1 (error) ⇒ failed with the internal reason", async () => {
+    const { invoke } = fakeInvoke({ status: "error", reason: "idempotency_state" });
+    const r = await bridgeProposedIntent(
+      { ctx: CTX, intent: intent("portal.propose_internal_task", { title: "x" }), plan: AGENCY, operationKey: OP_KEY },
+      { invoke }
+    );
+    expect(r).toEqual({ status: "failed", capabilityId: "portal.propose_internal_task", reason: "idempotency_state" });
+  });
+});
+
 describe("action-bridge — canonical validator behavior for propose_internal_task (via the real registry)", () => {
   const cap = getCapability("portal.propose_internal_task")!;
 
