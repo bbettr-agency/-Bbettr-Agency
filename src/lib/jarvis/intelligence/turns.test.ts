@@ -98,18 +98,55 @@ describe("result snapshot", () => {
     expect(validateResultSnapshot({ v: 1, assistantMessage: "x", secretKey: "leak" })).toEqual({ ok: false, reason: "invalid" }); // strict
   });
 
-  it("enforces the byte ceiling with EXACT UTF-8 bytes (multibyte cannot bypass)", () => {
-    // 20000 × 3-byte '€' = 20000 chars but 60000 bytes → must reduce below the ceiling.
-    const huge = "€".repeat(20_000);
-    const snap = buildResultSnapshot(okResult({ assistantMessage: huge }), { provider: "mock", model: "m", usage: null });
-    const bytes = Buffer.byteLength(JSON.stringify(snap), "utf8");
-    expect(bytes).toBeLessThanOrEqual(RESULT_MAX_BYTES);
-    expect(snap.truncated).toBe(true);
-    // char-length would have been < ceiling (20000 chars) — prove the guard is byte-based
-    expect(huge.length).toBeLessThan(RESULT_MAX_BYTES);
+  it("is FIDELITY-PRESERVING: carries every field verbatim (no reduction, no truncation)", () => {
+    // FAIL-CLOSED (F1b locked): buildResultSnapshot never reduces or truncates. The
+    // model-authored / free-text fields must survive byte-for-byte.
+    const longMsg = "Detailed reasoning ".repeat(50);
+    const longArgs = { note: "x".repeat(2_000), items: [1, 2, 3], nested: { deep: "y".repeat(500) } };
+    const longBody = "z".repeat(1_500);
+    const longNotes = "n".repeat(800);
+    const snap = buildResultSnapshot(
+      okResult({
+        assistantMessage: longMsg,
+        uncertainty: { level: "high", notes: longNotes },
+        proposedIntent: { capabilityId: "portal.read_task_counts", args: longArgs },
+        memoryCandidate: { scope: "client", category: "preference_rule", claim: "prefers mornings", body: longBody },
+        action: { status: "approval_required", proposalId: "p-1", capabilityId: "portal.read_task_counts" } as never,
+        memory: { status: "needs_confirmation", memoryId: "m-1" } as never,
+      }),
+      { provider: "anthropic", model: "sonnet", usage: { inputTokens: 10, outputTokens: 20 } }
+    );
+    // Every field is present and unmodified.
+    expect(snap.assistantMessage).toBe(longMsg);
+    expect(snap.uncertainty).toEqual({ level: "high", notes: longNotes });
+    expect(snap.proposedIntent).toEqual({ capabilityId: "portal.read_task_counts", args: longArgs });
+    expect(snap.memoryCandidate).toEqual({ scope: "client", category: "preference_rule", claim: "prefers mornings", body: longBody });
+    expect(snap.action).toEqual({ status: "approval_required", proposalId: "p-1", capabilityId: "portal.read_task_counts" });
+    expect(snap.memory).toEqual({ status: "needs_confirmation", memoryId: "m-1" });
+    expect(snap.provider).toBe("anthropic");
+    // No lossy marker exists anymore.
+    expect("truncated" in snap).toBe(false);
+    // This snapshot fits, so validation passes and round-trips unchanged.
+    const parsed = validateResultSnapshot(snap);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value).toEqual(snap);
   });
 
-  it("validate rejects an oversized snapshot as too_large", () => {
+  it("validate REJECTS an oversized faithful snapshot as too_large with EXACT UTF-8 bytes (no lossy substitute)", () => {
+    // 20000 × 3-byte '€' = 20000 chars but 60000 bytes → over the ceiling by bytes.
+    const huge = "€".repeat(20_000);
+    const snap = buildResultSnapshot(okResult({ assistantMessage: huge }), { provider: "mock", model: "m", usage: null });
+    // buildResultSnapshot did NOT truncate — the full message is still present.
+    expect(snap.assistantMessage).toBe(huge);
+    expect("truncated" in snap).toBe(false);
+    // char-length would have been < ceiling (20000 chars) — prove the guard is byte-based.
+    expect(huge.length).toBeLessThan(RESULT_MAX_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(snap), "utf8")).toBeGreaterThan(RESULT_MAX_BYTES);
+    // Fail closed: sizing rejects it; the caller must transition to failed, not store it.
+    expect(validateResultSnapshot(snap)).toEqual({ ok: false, reason: "too_large" });
+  });
+
+  it("validate rejects a raw oversized snapshot as too_large", () => {
     const oversized = { v: 1, assistantMessage: "y".repeat(RESULT_MAX_BYTES + 100) } as unknown;
     expect(validateResultSnapshot(oversized)).toEqual({ ok: false, reason: "too_large" });
   });

@@ -716,7 +716,7 @@ function turnRow(over: Partial<TurnRow> = {}): TurnRow {
 
 /** Fake durable-turn repo. `existing` (when set) makes claim return an existing turn
  *  (echoing the incoming request_hash unless hashMatches:false). Records all calls. */
-function makeTurnRepo(cfg: { existing?: { status: TurnRow["status"]; hashMatches?: boolean; result?: unknown; reason?: string } } = {}) {
+function makeTurnRepo(cfg: { existing?: { status: TurnRow["status"]; hashMatches?: boolean; result?: unknown; reason?: string }; providerStartFails?: boolean } = {}) {
   const calls = { claim: 0, providerStarted: 0, thread: [] as string[], userMsg: [] as string[], assistant: [] as string[], proposal: [] as string[], memory: [] as string[], complete: [] as unknown[], fail: [] as string[] };
   const repo: ConversationTurnRepo = {
     claim: vi.fn(async (input) => {
@@ -736,7 +736,12 @@ function makeTurnRepo(cfg: { existing?: { status: TurnRow["status"]; hashMatches
     }),
     setThreadId: vi.fn(async (_t, v) => { calls.thread.push(v); }),
     setUserMessageId: vi.fn(async (_t, v) => { calls.userMsg.push(v); }),
-    markProviderStarted: vi.fn(async () => { calls.providerStarted += 1; }),
+    markProviderStarted: vi.fn(async () => {
+      // The durable provider_started_at write is a HARD precondition. When it fails,
+      // the provider must NOT be called and no provider execution may be claimed.
+      if (cfg.providerStartFails) throw new Error("db down: could not set provider_started_at");
+      calls.providerStarted += 1;
+    }),
     setAssistantMessageId: vi.fn(async (_t, v) => { calls.assistant.push(v); }),
     setProposalId: vi.fn(async (_t, v) => { calls.proposal.push(v); }),
     setMemoryId: vi.fn(async (_t, v) => { calls.memory.push(v); }),
@@ -841,6 +846,94 @@ describe("runDurableTurn — CLAIMED execution + checkpoints", () => {
     expect(calls.complete.length).toBe(1);
     const snap = calls.complete[0] as TurnResultSnapshot;
     expect(snap.clarification).toBe(true);
+  });
+});
+
+describe("runDurableTurn — release blockers (hard provider-start precondition + fail-closed sizing)", () => {
+  it("BLOCKER 1: provider_started_at DB write FAILS ⇒ provider NEVER called, bridges NEVER run, honest failure (no false provider claim)", async () => {
+    // The model WOULD propose an action if it ran; prove none of that machinery is
+    // reached once the durable provider-start marker cannot be written.
+    const propose = JSON.stringify({
+      assistant_message: "would act",
+      proposed_intent: { capability_id: "portal.propose_internal_task", args: { title: "x" } },
+    });
+    const { provider, seen } = makeProvider({ text: propose });
+    const invoke = vi.fn(async () => ({ status: "needs_approval", proposalId: "prop-1" }) as never);
+    const create = vi.fn(async () => ({ ok: true, id: "mem-1", state: "inferred" }) as never);
+    const { repo, calls } = makeTurnRepo({ providerStartFails: true });
+
+    const r = await runDurableTurn(
+      { message: "hi", idempotencyKey: KEY_UUID },
+      durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo)
+    );
+
+    // Honest internal failure — never reported as a provider execution.
+    expect(r.kind).toBe("executed");
+    if (r.kind === "executed") {
+      expect(r.result.ok).toBe(false);
+      if (!r.result.ok) expect(r.result.reason).toBe("provider_start_failed");
+    }
+    // The precondition failed BEFORE the external boundary: provider count MUST be 0.
+    expect(seen.calls).toBe(0);
+    // No bridge/side-effect machinery ran.
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    // No completion, no false provider_started marker, and the turn is failed honestly.
+    expect(calls.complete.length).toBe(0);
+    expect(calls.providerStarted).toBe(0);
+    expect(calls.fail).toEqual(["provider_start_failed"]);
+  });
+
+  it("BLOCKER 1 (replay): a provider_start-failed turn replays as failed WITHOUT re-running the provider", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo } = makeTurnRepo({ existing: { status: "failed", reason: "provider_start_failed" } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r).toMatchObject({ kind: "failed_replay", reason: "provider_start_failed" });
+    expect(seen.calls).toBe(0);
+  });
+
+  it("BLOCKER 2: an oversized FAITHFUL result FAILS CLOSED ⇒ marked failed 'result_too_large', never completed with a lossy substitute", async () => {
+    // proposed_intent.args is an open bag; a large blob makes the FAITHFUL snapshot
+    // exceed the app byte ceiling. FAIL-CLOSED: we must NOT truncate & complete.
+    const blob = "x".repeat(40_000); // raw JSON < MAX_RAW_TEXT(60k); snapshot > RESULT_MAX_BYTES(30k)
+    const oversized = JSON.stringify({
+      assistant_message: "ok",
+      proposed_intent: { capability_id: "portal.propose_internal_task", args: { blob } },
+    });
+    const { provider, seen } = makeProvider({ text: oversized });
+    const invoke = vi.fn(async () => ({ status: "needs_approval", proposalId: "prop-1" }) as never);
+    const { repo, calls } = makeTurnRepo();
+
+    const r = await runDurableTurn(
+      { message: "do it", idempotencyKey: KEY_UUID },
+      durableDeps({ provider, actionBridge: { invoke } }, repo)
+    );
+
+    // Honest failure surfaced (not an ok result with a truncated body).
+    expect(r.kind).toBe("executed");
+    if (r.kind === "executed") {
+      expect(r.result.ok).toBe(false);
+      if (!r.result.ok) expect(r.result.reason).toBe("result_too_large");
+    }
+    // The provider ran exactly once; it is NOT re-run to shrink output.
+    expect(seen.calls).toBe(1);
+    // The turn is FAILED, never COMPLETED — and no lossy snapshot was written.
+    expect(calls.complete.length).toBe(0);
+    expect(calls.fail).toEqual(["result_too_large"]);
+  });
+
+  it("BLOCKER 2 (replay): a result_too_large turn replays as failed WITHOUT re-running the provider or bridges", async () => {
+    const { provider, seen } = makeProvider();
+    const invoke = vi.fn();
+    const { repo, calls } = makeTurnRepo({ existing: { status: "failed", reason: "result_too_large" } });
+    const r = await runDurableTurn(
+      { message: "hi", idempotencyKey: KEY_UUID },
+      durableDeps({ provider, actionBridge: { invoke: invoke as never } }, repo)
+    );
+    expect(r).toMatchObject({ kind: "failed_replay", reason: "result_too_large" });
+    expect(seen.calls).toBe(0);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(calls.complete.length).toBe(0);
   });
 });
 

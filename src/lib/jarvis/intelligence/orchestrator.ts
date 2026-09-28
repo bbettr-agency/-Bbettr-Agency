@@ -23,6 +23,7 @@ import {
   createConversationTurnRepo,
   computeRequestHash,
   buildResultSnapshot,
+  validateResultSnapshot,
   classifyExisting,
   type ConversationTurnRepo,
   type ProviderMeta,
@@ -307,9 +308,20 @@ async function executeLifecycle(params: {
   const history = await repo.loadBoundedHistory(ctx, thread.id, limits.historyTurns * 2);
 
   // (8) Build the trusted prompt and call the provider under an owned deadline.
-  //     The durable marker is set immediately BEFORE the provider sequence begins.
+  //     CORRECTNESS-CRITICAL: durably mark provider_started_at BEFORE the provider
+  //     sequence. Unlike the best-effort audit hooks, this is a HARD precondition —
+  //     if the marker write fails we must NOT call the provider (or run bridges) and
+  //     must NOT claim a provider request occurred. The failure is entirely before
+  //     the external boundary, so it is an honest internal processing failure.
   const system = buildSystemPrompt(contexts);
-  await runHook(hooks?.beforeProvider ? () => hooks.beforeProvider!() : undefined);
+  if (hooks?.beforeProvider) {
+    try {
+      await hooks.beforeProvider();
+    } catch {
+      const stored = await persistFailure(repo, ctx, thread.id, requestId, "provider_start_failed");
+      return { ok: false, reason: "provider_start_failed", threadId: thread.id, requestId, persisted: stored };
+    }
+  }
   let resultText: string;
   let providerId: string;
   let model: string;
@@ -507,9 +519,27 @@ export async function runDurableTurn(input: TurnInput, deps: TurnDeps): Promise<
   const mem = result.memory;
   if (mem && mem.status === "needs_confirmation") await runHook(() => turnRepo.setMemoryId(turnId, mem.memoryId));
 
+  // Build the COMPLETE, fidelity-preserving snapshot, then size it FAIL-CLOSED.
+  // LOCKED (F1b): no lossy reduction/truncation. If the faithful snapshot exceeds the
+  // application byte ceiling we do NOT complete with a truncated substitute — we
+  // transition the turn to a semantically honest `failed` state and surface the
+  // failure. The provider/bridges already ran and are NOT re-executed; a replay of a
+  // failed turn is FAILED_REPLAY, never a second provider sequence.
   const snapshot = buildResultSnapshot(result, providerMeta);
+  const sized = validateResultSnapshot(snapshot);
+  if (!sized.ok) {
+    await runHook(() => turnRepo.fail(turnId, "result_too_large"));
+    const failure: TurnResult = {
+      ok: false,
+      reason: "result_too_large",
+      threadId: result.threadId,
+      requestId,
+      persisted: true,
+    };
+    return { kind: "executed", turnId, result: failure };
+  }
   try {
-    await turnRepo.complete(turnId, snapshot);
+    await turnRepo.complete(turnId, sized.value);
   } catch {
     // Completion write failed → the turn stays `processing`; a replay is IN_PROGRESS
     // and never re-executes. We do not claim durable success at the transport boundary.

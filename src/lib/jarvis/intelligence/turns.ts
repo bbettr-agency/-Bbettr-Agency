@@ -72,8 +72,6 @@ export interface TurnResultSnapshot {
   provider?: string;
   model?: string;
   usage?: unknown;
-  /** Set when the snapshot was reduced to fit the byte ceiling. */
-  truncated?: true;
 }
 
 /** Trusted provider metadata captured at execution time (never model-claimed). */
@@ -87,20 +85,6 @@ export interface ProviderMeta {
 function byteLen(s: string): number {
   return Buffer.byteLength(s, "utf8");
 }
-/** Truncate a string to at most `maxBytes` UTF-8 bytes without splitting a codepoint. */
-function byteTruncate(s: string, maxBytes: number): string {
-  if (byteLen(s) <= maxBytes) return s;
-  let out = "";
-  let used = 0;
-  for (const ch of s) {
-    const b = byteLen(ch);
-    if (used + b > maxBytes) break;
-    out += ch;
-    used += b;
-  }
-  return out;
-}
-
 const snapshotZod = z
   .object({
     v: z.literal(1),
@@ -125,16 +109,21 @@ const snapshotZod = z
     provider: z.string().optional(),
     model: z.string().optional(),
     usage: z.unknown().optional(),
-    truncated: z.literal(true).optional(),
   })
   .strict();
 
-/** Build the final replay snapshot from a SUCCESSFUL turn result + trusted provider
- *  metadata. Only trusted, bounded fields — never prompt/context/provider body/keys/
- *  hidden reasoning. reasoning_summary is deliberately NOT stored (not needed to
- *  reproduce the public TurnResult). Reduces to fit RESULT_MAX_BYTES if necessary. */
+/**
+ * Build the COMPLETE final replay snapshot from a SUCCESSFUL turn result + trusted
+ * provider metadata. FIDELITY-PRESERVING (F1b locked decision): every field is
+ * carried verbatim — NO reduction, NO truncation, NO dropping/replacing of
+ * proposedIntent.args / memoryCandidate.body / uncertainty.notes / assistantMessage.
+ * Only trusted, bounded fields — never prompt/context/provider body/keys/hidden
+ * reasoning (reasoning_summary is deliberately not stored). Sizing is enforced by the
+ * caller via validateResultSnapshot, which FAILS CLOSED (no lossy substitute) when a
+ * faithful snapshot would exceed the byte ceiling.
+ */
 export function buildResultSnapshot(result: Extract<TurnResult, { ok: true }>, meta?: ProviderMeta): TurnResultSnapshot {
-  const full: TurnResultSnapshot = {
+  return {
     v: 1,
     ...(result.clarification ? { clarification: true as const } : {}),
     assistantMessage: result.assistantMessage,
@@ -145,28 +134,6 @@ export function buildResultSnapshot(result: Extract<TurnResult, { ok: true }>, m
     ...(result.memory ? { memory: result.memory } : {}),
     ...(meta ? { provider: meta.provider, model: meta.model, usage: meta.usage } : {}),
   };
-  if (byteLen(JSON.stringify(full)) <= RESULT_MAX_BYTES) return full;
-
-  // Reduce: keep the trusted outcomes + a byte-bounded assistant message; drop the
-  // largest model-authored/free fields. Mark truncated so replay is honest.
-  const reduced: TurnResultSnapshot = {
-    v: 1,
-    ...(result.clarification ? { clarification: true as const } : {}),
-    assistantMessage: byteTruncate(result.assistantMessage, 4_000),
-    ...(result.uncertainty ? { uncertainty: { level: result.uncertainty.level } } : {}),
-    ...(result.proposedIntent ? { proposedIntent: { capabilityId: result.proposedIntent.capabilityId, args: {} } } : {}),
-    ...(result.action ? { action: result.action } : {}),
-    ...(result.memory ? { memory: result.memory } : {}),
-    ...(meta ? { provider: meta.provider, model: meta.model, usage: meta.usage } : {}),
-    truncated: true,
-  };
-  // Guarantee fit even in pathological cases by shrinking the assistant message.
-  let budget = 3_000;
-  while (byteLen(JSON.stringify(reduced)) > RESULT_MAX_BYTES && budget > 0) {
-    reduced.assistantMessage = byteTruncate(reduced.assistantMessage, budget);
-    budget -= 500;
-  }
-  return reduced;
 }
 
 export type SnapshotParse = { ok: true; value: TurnResultSnapshot } | { ok: false; reason: "too_large" | "invalid" };
