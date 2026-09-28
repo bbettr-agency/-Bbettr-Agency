@@ -67,7 +67,13 @@ async function readBoundedBody(req: Request): Promise<{ ok: true; text: string }
     if (value) {
       total += value.byteLength;
       if (total > BODY_MAX_BYTES) {
-        await reader.cancel();
+        // The size decision is authoritative; cancellation is best-effort. A failing
+        // reader.cancel() must NOT turn the intended 413 into a 500.
+        try {
+          await reader.cancel();
+        } catch {
+          /* best-effort */
+        }
         return { ok: false };
       }
       chunks.push(value);
@@ -101,45 +107,56 @@ export async function POST(req: Request): Promise<NextResponse> {
     return json(404, { error: "not_found" });
   }
 
-  // 5. Content-Type (accepts application/json; charset=…).
-  const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
-  if (!contentType.includes("application/json")) {
-    return json(415, { error: "unsupported_media_type" });
-  }
-
-  // 6. Bounded body read (128 KiB), then 7. JSON parse.
-  const read = await readBoundedBody(req);
-  if (!read.ok) return json(413, { error: "payload_too_large" });
-  let parsedJson: unknown;
+  // Outer exception boundary for the ENABLED request-processing path: any genuinely
+  // unexpected throw (a body-reader read() rejection, an unexpected runDurableTurn / DB
+  // claim exception, etc.) is converted into a bounded, no-store 500 — never a
+  // framework 500 that could omit no-store or leak exception/DB/provider/config detail.
+  // The deliberate mappings below (415/413/400/503/outcome) return normally and are
+  // unaffected. The raw exception is intentionally neither exposed nor logged.
   try {
-    parsedJson = JSON.parse(read.text);
+    // 5. Content-Type — strict essence match (accepts application/json with optional
+    //    parameters, any case; rejects +json vendor types, text/json, etc.).
+    const essence = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (essence !== "application/json") {
+      return json(415, { error: "unsupported_media_type" });
+    }
+
+    // 6. Bounded body read (128 KiB), then 7. JSON parse.
+    const read = await readBoundedBody(req);
+    if (!read.ok) return json(413, { error: "payload_too_large" });
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(read.text);
+    } catch {
+      return json(400, { error: "invalid_json" });
+    }
+
+    // 8. Strict request schema (rejects unknown keys; validates message/threadId/key).
+    const parsed = chatRequestSchema.safeParse(parsedJson);
+    if (!parsed.success) return json(400, { error: "invalid_request" });
+
+    // 9. Construct the server-selected provider ONLY now (enabled + valid). The caller
+    //    cannot choose provider/model. A misconfiguration fails closed as 503 and no
+    //    durable turn is claimed (runDurableTurn has not run).
+    let provider;
+    try {
+      provider = createLLMProvider();
+    } catch {
+      return json(503, { error: "provider_unavailable" });
+    }
+
+    // 10. Delegate to the sole durable claim/replay arbiter. Authority is the trusted
+    //     server context; the HTTP client disconnecting must NOT abort claimed work, so
+    //     req.signal is deliberately NOT propagated into the durable lifecycle.
+    const outcome = await runDurableTurn(
+      { message: parsed.data.message, threadId: parsed.data.threadId, idempotencyKey: parsed.data.idempotencyKey },
+      { provider, resolveContext: async () => ctx }
+    );
+
+    // 11-12. Map to the bounded public DTO, no-store.
+    const mapped = mapOutcomeToResponse(outcome);
+    return json(mapped.status, mapped.body);
   } catch {
-    return json(400, { error: "invalid_json" });
+    return json(500, { error: "internal_error" });
   }
-
-  // 8. Strict request schema (rejects unknown keys; validates message/threadId/key).
-  const parsed = chatRequestSchema.safeParse(parsedJson);
-  if (!parsed.success) return json(400, { error: "invalid_request" });
-
-  // 9. Construct the server-selected provider ONLY now (enabled + valid). The caller
-  //    cannot choose provider/model. A misconfiguration fails closed as 503 and no
-  //    durable turn is claimed (runDurableTurn has not run).
-  let provider;
-  try {
-    provider = createLLMProvider();
-  } catch {
-    return json(503, { error: "provider_unavailable" });
-  }
-
-  // 10. Delegate to the sole durable claim/replay arbiter. Authority is the trusted
-  //     server context; the HTTP client disconnecting must NOT abort claimed work, so
-  //     req.signal is deliberately NOT propagated into the durable lifecycle.
-  const outcome = await runDurableTurn(
-    { message: parsed.data.message, threadId: parsed.data.threadId, idempotencyKey: parsed.data.idempotencyKey },
-    { provider, resolveContext: async () => ctx }
-  );
-
-  // 11-12. Map to the bounded public DTO, no-store.
-  const mapped = mapOutcomeToResponse(outcome);
-  return json(mapped.status, mapped.body);
 }

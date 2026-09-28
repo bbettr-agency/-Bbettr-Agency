@@ -237,3 +237,80 @@ describe("POST /api/jarvis/chat — delegation + DTO + headers", () => {
     expect(r.headers.get("cache-control")).toBe("no-store");
   });
 });
+
+// A minimal Request-shaped fake giving full control of the body reader (read/cancel),
+// so we can exercise the enabled-path exception boundary deterministically.
+function fakeReq(reader: { read: () => Promise<{ done: boolean; value?: Uint8Array }>; cancel: () => Promise<void> }, headers: Record<string, string> = { "content-type": "application/json" }): Request {
+  const h = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  return {
+    headers: { get: (k: string) => h.get(k.toLowerCase()) ?? null },
+    body: { getReader: () => reader },
+  } as unknown as Request;
+}
+
+describe("POST /api/jarvis/chat — bounded top-level exception boundary", () => {
+  it("A. runDurableTurn throws → 500 internal_error + no-store, sensitive message NOT leaked", async () => {
+    vi.mocked(runDurableTurn).mockRejectedValue(new Error("SENSITIVE claim failed: db=prod host=10.0.0.1 key=sk-abc"));
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(500);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    const text = JSON.stringify(await r.json());
+    expect(JSON.parse(text)).toEqual({ error: "internal_error" });
+    for (const secret of ["SENSITIVE", "prod", "10.0.0.1", "sk-abc"]) expect(text).not.toContain(secret);
+  });
+
+  it("B. body reader read() throws → 500 internal_error + no-store, error not leaked", async () => {
+    const reader = {
+      read: async () => {
+        throw new Error("read boom SENSITIVE-DB-DETAIL");
+      },
+      cancel: async () => {},
+    };
+    const r = await POST(fakeReq(reader));
+    expect(r.status).toBe(500);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    const text = JSON.stringify(await r.json());
+    expect(JSON.parse(text)).toEqual({ error: "internal_error" });
+    expect(text).not.toContain("SENSITIVE-DB-DETAIL");
+    expect(runDurableTurn).not.toHaveBeenCalled();
+  });
+
+  it("C. body over ceiling AND reader.cancel() throws → still 413, no-store, cancel error not exposed", async () => {
+    let served = false;
+    const reader = {
+      read: async () => {
+        if (served) return { done: true, value: undefined };
+        served = true;
+        return { done: false, value: new Uint8Array(200_000) }; // > 128 KiB in one chunk
+      },
+      cancel: async () => {
+        throw new Error("cancel boom SENSITIVE-CANCEL");
+      },
+    };
+    const r = await POST(fakeReq(reader));
+    expect(r.status).toBe(413);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    const text = JSON.stringify(await r.json());
+    expect(JSON.parse(text)).toEqual({ error: "payload_too_large" });
+    expect(text).not.toContain("SENSITIVE-CANCEL");
+    expect(runDurableTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/jarvis/chat — strict Content-Type", () => {
+  it.each([
+    ["application/json", 200],
+    ["application/json; charset=utf-8", 200],
+    ["Application/JSON; Charset=UTF-8", 200],
+    ["application/json-patch+json", 415],
+    ["application/problem+json", 415],
+    ["xapplication/jsonx", 415],
+    ["text/application/json", 415],
+    ["text/json", 415],
+    ["application/javascript", 415],
+  ])("%s → %i", async (ct, status) => {
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }, { "content-type": ct }));
+    expect(r.status).toBe(status);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+  });
+});
