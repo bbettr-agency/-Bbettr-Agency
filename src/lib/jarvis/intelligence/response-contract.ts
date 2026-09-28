@@ -64,13 +64,52 @@ export type ParseResult =
   | { ok: true; value: ValidatedAssistantResponse }
   | { ok: false; reason: "too_large" | "not_json" | "schema" };
 
+/**
+ * Extract the FIRST complete, brace-balanced top-level JSON object from raw model
+ * text, or null. This tolerates ONLY benign presentation envelopes a live model may
+ * add around the required object — a ```json / ``` markdown code fence, or a leading/
+ * trailing sentence — since the scan simply locates the first `{` and its matching
+ * `}`, ignoring anything outside. It is STRING-AWARE (a `}` inside a JSON string value
+ * never closes the object) and FAILS CLOSED: an unbalanced/truncated object returns
+ * null (never a partially-recovered fragment). It changes only WHERE the object is
+ * found — the strict schema below is unchanged, so unknown keys / wrong shapes / bounds
+ * are still rejected exactly as before, and nothing is executed or trusted here.
+ */
+export function extractJsonObject(raw: string): string | null {
+  const start = raw.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true;
+    } else if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return null; // unbalanced / truncated ⇒ fail closed, no partial recovery
+}
+
 export function parseAssistantResponse(rawText: string): ParseResult {
   if (typeof rawText !== "string" || rawText.length === 0 || rawText.length > MAX_RAW_TEXT) {
     return { ok: false, reason: "too_large" };
   }
+  // Accept the required object even when the model wraps it in a code fence or adds a
+  // leading/trailing sentence; reject anything without a complete balanced object.
+  const candidate = extractJsonObject(rawText);
+  if (candidate === null) return { ok: false, reason: "not_json" };
   let json: unknown;
   try {
-    json = JSON.parse(rawText);
+    json = JSON.parse(candidate);
   } catch {
     return { ok: false, reason: "not_json" };
   }
