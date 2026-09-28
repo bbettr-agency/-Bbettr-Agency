@@ -2,7 +2,11 @@
  * Pure Today-membership rules (no I/O, no ambient clock).
  *
  * Locked contract: a task is on Today iff `scheduled_date == today` OR it is
- * overdue, in the agency timezone (Africa/Johannesburg). The agency-local
+ * DUE today (`due_date == today`) OR it is overdue (`due_date < today`), in the
+ * agency timezone (Africa/Johannesburg) — equivalently `scheduled_date == today`
+ * OR `due_date <= today`. This is why a recurring reminder/invoice with a due
+ * offset (scheduled earlier, due later) still appears on its actual due date
+ * rather than vanishing for a day and returning as "overdue". The agency-local
  * `today` (YYYY-MM-DD) is injected by the caller (computed via the Planner date
  * utilities) — this module never reads the system clock. Ranking, grouping,
  * progress and Next-Best-Action are intentionally NOT here (Today product phase).
@@ -28,10 +32,18 @@ export function isScheduledToday(task: TodayTaskLike, todayAgency: string): bool
   return task.scheduled_date === todayAgency;
 }
 
-/** Today membership: scheduled today OR overdue. Deleted rows are never members. */
+/** Due today = has a due date equal to today and not completed/archived. Distinct
+ *  from overdue (strictly before today), so a due-today task is a Today member but
+ *  is NOT flagged "Overdue". Derived, never stored. */
+export function isDueToday(task: TodayTaskLike, todayAgency: string): boolean {
+  return task.due_date === todayAgency && !TERMINAL.includes(task.status);
+}
+
+/** Today membership: scheduled today OR due today OR overdue (i.e. scheduled today
+ *  OR due on/before today). Deleted rows are never members. */
 export function isTodayMember(task: TodayTaskLike, todayAgency: string): boolean {
   if (task.deleted_at != null) return false;
-  return isScheduledToday(task, todayAgency) || isOverdue(task, todayAgency);
+  return isScheduledToday(task, todayAgency) || isDueToday(task, todayAgency) || isOverdue(task, todayAgency);
 }
 
 /** Active-queue eligibility: excludes deleted, completed, archived and Waiting. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isOverdue, isScheduledToday, isTodayMember, isActiveQueueEligible, partitionToday, type TodayTaskLike } from "./today-membership";
+import { isOverdue, isDueToday, isScheduledToday, isTodayMember, isActiveQueueEligible, partitionToday, type TodayTaskLike } from "./today-membership";
 
 const t = (o: Partial<TodayTaskLike>): TodayTaskLike => ({ status: "scheduled", scheduled_date: null, due_date: null, deleted_at: null, ...o });
 const TODAY = "2026-08-03";
@@ -18,7 +18,17 @@ describe("today-membership", () => {
     expect(isOverdue(t({ due_date: "2026-08-01", status: "completed" }), TODAY)).toBe(false);
     expect(isOverdue(t({ due_date: "2026-08-01", status: "archived" }), TODAY)).toBe(false);
   });
-  it("due later but scheduled today is a member (scheduled∪overdue)", () => {
+  it("due today is a member but is NOT overdue (reminders/invoices due today)", () => {
+    expect(isDueToday(t({ due_date: TODAY, status: "scheduled" }), TODAY)).toBe(true);
+    expect(isOverdue(t({ due_date: TODAY, status: "scheduled" }), TODAY)).toBe(false);
+    // due today, scheduled earlier (recurring reminder with a due offset) → still on Today
+    expect(isTodayMember(t({ scheduled_date: "2026-08-01", due_date: TODAY }), TODAY)).toBe(true);
+    // due today, no scheduled date at all → still on Today
+    expect(isTodayMember(t({ scheduled_date: null, due_date: TODAY }), TODAY)).toBe(true);
+    // terminal due-today is not a member
+    expect(isDueToday(t({ due_date: TODAY, status: "completed" }), TODAY)).toBe(false);
+  });
+  it("due later but scheduled today is a member (scheduled∪due∪overdue)", () => {
     expect(isTodayMember(t({ scheduled_date: TODAY, due_date: "2026-08-20" }), TODAY)).toBe(true);
   });
   it("overdue but scheduled tomorrow is still a member (overdue wins)", () => {

@@ -119,13 +119,13 @@ export async function getMyTasks(): Promise<Task[]> {
 
 export interface TodayWorkspace {
   today: string; // agency-local YYYY-MM-DD
-  active: Task[]; // owner|assignee · active status · scheduled today OR overdue
+  active: Task[]; // owner|assignee · active status · scheduled today OR due today OR overdue
   completedToday: Task[]; // owner|assignee · completed within today (agency)
 }
 
 /**
  * The current admin's Today workspace: their (owner OR assignee) active tasks that
- * are members of Today (`scheduled_date == today` OR overdue), plus the tasks they
+ * are members of Today (`scheduled_date == today` OR due on/before today), plus the tasks they
  * completed today (agency day). RLS-scoped; grouping/NBA/progress belong to the
  * pure Today layer, not here. Completed rows are bounded (last 2 days) then filtered
  * to the exact agency day.
@@ -143,7 +143,8 @@ export async function getTodayWorkspace(now: Date = new Date()): Promise<TodayWo
       .is("deleted_at", null)
       .in("status", ["planned", "scheduled", "in_progress", "waiting"] as TaskStatus[])
       .or(mine)
-      .or(`scheduled_date.eq.${today},due_date.lt.${today}`)
+      // Today membership: scheduled today OR due on/before today (due today OR overdue).
+      .or(`scheduled_date.eq.${today},due_date.lte.${today}`)
       .order("due_date", { ascending: true, nullsFirst: false })
       .order("scheduled_date", { ascending: true, nullsFirst: false }),
     supabase
