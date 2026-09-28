@@ -89,9 +89,24 @@ describe("groupWeek", () => {
     expect(g.days.find((d) => d.date === "2026-08-05")!.tasks.map((t) => t.id)).toEqual(["a", "c", "b"]);
   });
 
-  it("does not place a non-overdue task scheduled outside the week", () => {
+  it("does not place a non-overdue undated task scheduled outside the week", () => {
     const g = groupWeek([view({ id: "next", scheduledDate: "2026-08-20" })], WEEK_START);
     expect(g.days.flatMap((d) => d.tasks)).toEqual([]);
     expect(g.overdue).toEqual([]);
+  });
+
+  it("places a due-this-week task with NO in-week scheduled day on its DUE day (reminder/invoice due today)", () => {
+    // due Wednesday, scheduled last month (or undated) → shows on Wednesday, not dropped.
+    const g = groupWeek([view({ id: "dueWed", scheduledDate: "2026-07-01", dueDate: "2026-08-05" })], WEEK_START);
+    expect(g.days.find((d) => d.date === "2026-08-05")!.tasks.map((t) => t.id)).toEqual(["dueWed"]);
+    const g2 = groupWeek([view({ id: "dueWed2", scheduledDate: null, dueDate: "2026-08-05" })], WEEK_START);
+    expect(g2.days.find((d) => d.date === "2026-08-05")!.tasks.map((t) => t.id)).toEqual(["dueWed2"]);
+  });
+
+  it("scheduled-in-week wins over due day (single placement, no duplication)", () => {
+    // scheduled Monday, due Friday → shows on Monday only.
+    const g = groupWeek([view({ id: "sched", scheduledDate: WEEK_START, dueDate: "2026-08-07" })], WEEK_START);
+    const placed = g.days.flatMap((d) => d.tasks.map((t) => `${d.date}:${t.id}`));
+    expect(placed).toEqual([`${WEEK_START}:sched`]);
   });
 });

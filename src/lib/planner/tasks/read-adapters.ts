@@ -169,17 +169,17 @@ export interface WeekTasks {
   today: string; // agency-local YYYY-MM-DD
   weekStart: string; // Monday (agency-local YYYY-MM-DD)
   weekEnd: string; // Sunday (agency-local YYYY-MM-DD)
-  tasks: Task[]; // my active tasks scheduled this week OR overdue
+  tasks: Task[]; // my active tasks scheduled this week OR due on/before today
 }
 
 /**
  * The current admin's THIS WEEK planning slice: their (owner OR assignee) active
  * tasks whose `scheduled_date` falls in the current agency week (Mon–Sun) OR that
- * are overdue (`due_date < today`). Personal (like My Tasks/Today), RLS-scoped, one
- * query. Inbox/completed/archived/deleted are excluded at the database. Undated
- * tasks that are not overdue are intentionally NOT fetched (This Week has no
- * unscheduled backlog — that lives in My Tasks). Day-bucketing + the overdue split
- * are applied by the pure week-grouping layer, not here.
+ * are due on/before today (`due_date <= today` — due today OR overdue). Personal
+ * (like My Tasks/Today), RLS-scoped, one query. Inbox/completed/archived/deleted are
+ * excluded at the database. Undated tasks that are not due are intentionally NOT
+ * fetched (This Week has no unscheduled backlog — that lives in My Tasks).
+ * Day-bucketing + the overdue split are applied by the pure week-grouping layer.
  */
 export async function getWeekTasks(now: Date = new Date()): Promise<WeekTasks> {
   const { supabase, adminId } = await authedContext();
@@ -193,8 +193,8 @@ export async function getWeekTasks(now: Date = new Date()): Promise<WeekTasks> {
     .is("deleted_at", null)
     .in("status", MY_TASKS_STATUSES)
     .or(mine)
-    // scheduled within this agency week, OR overdue (due strictly before today)
-    .or(`and(scheduled_date.gte.${weekStart},scheduled_date.lte.${weekEnd}),due_date.lt.${today}`)
+    // scheduled within this agency week, OR due on/before today (due today OR overdue)
+    .or(`and(scheduled_date.gte.${weekStart},scheduled_date.lte.${weekEnd}),due_date.lte.${today}`)
     .order("scheduled_date", { ascending: true, nullsFirst: false })
     .order("due_date", { ascending: true, nullsFirst: false });
   if (error) throw new TaskError("PersistenceError");

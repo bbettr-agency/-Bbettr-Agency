@@ -41,15 +41,30 @@ export function weekDates(weekStart: string): string[] {
 }
 
 /**
- * Group my week: overdue → the callout only; every non-overdue task → its
- * scheduled day. Each task lands in exactly one place. A task scheduled within the
- * week but overdue belongs to Overdue (it needs attention now), not its day.
+ * Group my week: overdue → the callout only; every non-overdue task → one day.
+ * A task lands on its scheduled day when that day is in the week; otherwise (no
+ * in-week scheduled day) it lands on its DUE day when that is in the week — so a
+ * task due this week but scheduled earlier/undated (e.g. a reminder/invoice due
+ * today) still appears, on its due day, instead of being dropped. Each task lands
+ * in exactly one place; a task scheduled within the week but overdue belongs to
+ * Overdue (it needs attention now), not its day.
  */
 export function groupWeek(views: readonly TaskView[], weekStart: string): WeekGrouping {
+  const dates = weekDates(weekStart);
+  const inWeek = new Set(dates);
   const overdue = views.filter((v) => v.isOverdue).sort(byPriorityThenTitle);
-  const days = weekDates(weekStart).map((date) => ({
+
+  // The single day a non-overdue task belongs to, or null if it falls outside the week.
+  const placementDate = (v: TaskView): string | null => {
+    if (v.isOverdue) return null;
+    if (v.scheduledDate && inWeek.has(v.scheduledDate)) return v.scheduledDate;
+    if (v.dueDate && inWeek.has(v.dueDate)) return v.dueDate;
+    return null;
+  };
+
+  const days = dates.map((date) => ({
     date,
-    tasks: views.filter((v) => !v.isOverdue && v.scheduledDate === date).sort(byPriorityThenTitle),
+    tasks: views.filter((v) => placementDate(v) === date).sort(byPriorityThenTitle),
   }));
   return { overdue, days };
 }
