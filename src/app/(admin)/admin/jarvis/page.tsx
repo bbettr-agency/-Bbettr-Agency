@@ -12,11 +12,13 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { JarvisConsole } from "@/components/admin/jarvis-console";
 import { JarvisMemoryPanel } from "@/components/admin/jarvis-memory-panel";
+import { JarvisSurface } from "@/components/admin/jarvis-surface";
 
 export const metadata: Metadata = { title: "Jarvis" };
 
 export default async function JarvisPage() {
-  await requireAdmin(); // V1 route gate: admin-only.
+  const profile = await requireAdmin(); // V1 route gate: admin-only.
+  const firstName = (profile.full_name ?? "").trim().split(/\s+/)[0] || undefined;
 
   if (!isJarvisEnabled()) {
     return (
@@ -69,10 +71,9 @@ export default async function JarvisPage() {
       }))
     : [];
 
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Jarvis" description="Internal operational intelligence — Foundation 1 (security kernel, no AI yet)." />
-
+  // The existing Foundation-1 surfaces are preserved verbatim under the Console tab.
+  const consoleSlot = (
+    <>
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Your Jarvis access</CardTitle>
@@ -114,12 +115,14 @@ export default async function JarvisPage() {
         actions={actions}
       />
 
-      <JarvisMemoryPanel
-        enabled={enabled}
-        canPropose={canPropose}
-        canApprove={canApprove}
-        memories={memoryRows}
-      />
+      <JarvisMemoryPanel enabled={enabled} canPropose={canPropose} canApprove={canApprove} memories={memoryRows} />
+    </>
+  );
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Jarvis" description="Your operational intelligence assistant." />
+      <JarvisSurface firstName={firstName} consoleSlot={consoleSlot} />
     </div>
   );
 }
