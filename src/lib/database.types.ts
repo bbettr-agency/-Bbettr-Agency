@@ -674,6 +674,52 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["jarvis_messages"]["Row"]>;
         Relationships: [];
       };
+      jarvis_turns: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          user_id: string;
+          thread_id: string | null;
+          user_message_id: string | null;
+          assistant_message_id: string | null;
+          proposal_id: string | null;
+          memory_id: string | null;
+          idempotency_key: string;
+          request_hash: string;
+          correlation_id: string;
+          status: "processing" | "completed" | "failed" | "abandoned";
+          lease_expires_at: string;
+          provider_started_at: string | null;
+          result: Json | null;
+          failure_reason: string | null;
+          created_at: string;
+          updated_at: string;
+          completed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          user_id: string;
+          thread_id?: string | null;
+          user_message_id?: string | null;
+          assistant_message_id?: string | null;
+          proposal_id?: string | null;
+          memory_id?: string | null;
+          idempotency_key: string;
+          request_hash: string;
+          correlation_id: string;
+          status?: "processing" | "completed" | "failed" | "abandoned";
+          lease_expires_at: string;
+          provider_started_at?: string | null;
+          result?: Json | null;
+          failure_reason?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          completed_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_turns"]["Row"]>;
+        Relationships: [];
+      };
       client_members: {
         Row: {
           id: string;

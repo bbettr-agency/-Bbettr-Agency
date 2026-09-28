@@ -36,10 +36,12 @@ export interface AssistantRow {
 export interface ConversationRepo {
   createThread(ctx: JarvisContext): Promise<ConversationThread>;
   loadAuthorizedThread(ctx: JarvisContext, threadId: string): Promise<ConversationThread | null>;
-  persistUserMessage(ctx: JarvisContext, threadId: string, content: string, requestId: string): Promise<void>;
+  /** Returns the inserted message id (used by the F1b turn ledger for set-once linkage). */
+  persistUserMessage(ctx: JarvisContext, threadId: string, content: string, requestId: string): Promise<string>;
   loadBoundedHistory(ctx: JarvisContext, threadId: string, limitMessages: number): Promise<LLMMessage[]>;
   updateLastClientId(ctx: JarvisContext, threadId: string, clientId: string): Promise<void>;
-  persistAssistant(ctx: JarvisContext, threadId: string, requestId: string, row: AssistantRow): Promise<void>;
+  /** Returns the inserted assistant message id (used by the F1b turn ledger for set-once linkage). */
+  persistAssistant(ctx: JarvisContext, threadId: string, requestId: string, row: AssistantRow): Promise<string>;
 }
 
 const J = (v: unknown): Json | null => (v === undefined || v === null ? null : (v as unknown as Json));
@@ -71,15 +73,20 @@ export function createConversationRepo(): ConversationRepo {
 
     async persistUserMessage(ctx, threadId, content, requestId) {
       const admin = createAdminClient();
-      const { error } = await admin.from("jarvis_messages").insert({
-        thread_id: threadId,
-        workspace_id: ctx.workspaceId,
-        role: "user",
-        content,
-        status: "ok",
-        request_id: requestId,
-      });
-      if (error) throw new Error("jarvis: could not persist user message");
+      const { data, error } = await admin
+        .from("jarvis_messages")
+        .insert({
+          thread_id: threadId,
+          workspace_id: ctx.workspaceId,
+          role: "user",
+          content,
+          status: "ok",
+          request_id: requestId,
+        })
+        .select("id")
+        .single();
+      if (error || !data) throw new Error("jarvis: could not persist user message");
+      return data.id as string;
     },
 
     async loadBoundedHistory(ctx, threadId, limitMessages) {
@@ -108,22 +115,27 @@ export function createConversationRepo(): ConversationRepo {
 
     async persistAssistant(ctx, threadId, requestId, row) {
       const admin = createAdminClient();
-      const { error } = await admin.from("jarvis_messages").insert({
-        thread_id: threadId,
-        workspace_id: ctx.workspaceId,
-        role: "assistant",
-        content: row.content,
-        status: row.status,
-        request_id: requestId,
-        reasoning_summary: row.reasoningSummary ?? null,
-        uncertainty: J(row.uncertainty),
-        proposed_intent: J(row.proposedIntent),
-        provider: row.provider ?? null,
-        model: row.model ?? null,
-        usage: J(row.usage),
-        provenance: J(row.provenance),
-      });
-      if (error) throw new Error("jarvis: could not persist assistant message");
+      const { data, error } = await admin
+        .from("jarvis_messages")
+        .insert({
+          thread_id: threadId,
+          workspace_id: ctx.workspaceId,
+          role: "assistant",
+          content: row.content,
+          status: row.status,
+          request_id: requestId,
+          reasoning_summary: row.reasoningSummary ?? null,
+          uncertainty: J(row.uncertainty),
+          proposed_intent: J(row.proposedIntent),
+          provider: row.provider ?? null,
+          model: row.model ?? null,
+          usage: J(row.usage),
+          provenance: J(row.provenance),
+        })
+        .select("id")
+        .single();
+      if (error || !data) throw new Error("jarvis: could not persist assistant message");
+      return data.id as string;
     },
   };
 }

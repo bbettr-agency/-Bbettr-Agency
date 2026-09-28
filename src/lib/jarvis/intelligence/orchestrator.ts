@@ -20,6 +20,14 @@ import { callProviderWithPolicy } from "./provider-call";
 import { bridgeProposedIntent, type ActionBridgeDeps, type ActionBridgeResult } from "./action-bridge";
 import { bridgeMemoryCandidate, type MemoryBridgeDeps, type MemoryBridgeResult } from "./memory-bridge";
 import {
+  createConversationTurnRepo,
+  computeRequestHash,
+  buildResultSnapshot,
+  classifyExisting,
+  type ConversationTurnRepo,
+  type ProviderMeta,
+} from "./turns";
+import {
   createConversationRepo,
   SAFE_FAILURE_MESSAGE,
   type AssistantRow,
@@ -86,6 +94,14 @@ export interface TurnInput {
   threadId?: string;
   /** The current user turn (raw; trimmed + bounded here). */
   message: string;
+  /**
+   * TRANSPORT-INTERNAL COMPATIBILITY ONLY. Present so the durable path
+   * (`runDurableTurn`) can share `TurnInput`. The KEYLESS `runIntelligenceTurn`
+   * is the LEGACY/internal path and is NOT the intended public Intelligence
+   * transport contract — F1d MUST require a trusted transport idempotency key via
+   * `runDurableTurn`. Do not add new callers of the keyless path.
+   */
+  idempotencyKey?: string;
 }
 
 /** Context assembly seam (defaults to the real Context Engine). */
@@ -114,6 +130,10 @@ export interface TurnDeps {
   actionBridge?: ActionBridgeDeps;
   /** Slice-D memory-bridge seams (Memory). */
   memoryBridge?: MemoryBridgeDeps;
+  /** F1b durable turn ledger seam (defaults to the real jarvis_turns repo). */
+  turnRepo?: ConversationTurnRepo;
+  /** Injectable clock (ms) for the lease, deterministic in tests. */
+  now?: () => number;
 }
 
 const defaultAssembler: ContextAssembler = {
@@ -129,38 +149,82 @@ function countMemory(pkgs: ContextPackage[]): number {
   return pkgs.reduce((sum, p) => sum + p.memory.length + p.openCommitments.length + p.unresolvedConflicts.length, 0);
 }
 
-/** Run one deterministic Intelligence turn. Never throws to the caller for an
- *  expected failure — returns a typed, safe {ok:false} instead. */
-export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Promise<TurnResult> {
-  // (1) Flags — fail closed. The LLM is never reachable unless BOTH are on.
-  if (!isJarvisEnabled() || !isJarvisIntelligenceEnabled()) {
-    return { ok: false, reason: "intelligence_disabled" };
-  }
+/** Shared gate: flags → auth → input bounds. No side effects, no persistence. */
+type Preflight =
+  | { ok: true; ctx: JarvisContext; message: string }
+  | { ok: false; kind: "disabled" }
+  | { ok: false; kind: "not_authorized"; reason: string }
+  | { ok: false; kind: "invalid_input"; reason: "empty_message" | "message_too_long" };
 
-  // (2) Authenticate + authorize the human. Authority is the principal's, never
-  //     the model's. resolveJarvisContext requires admin + workspace + jarvis.use.
+async function preflight(input: TurnInput, deps: TurnDeps): Promise<Preflight> {
+  if (!isJarvisEnabled() || !isJarvisIntelligenceEnabled()) return { ok: false, kind: "disabled" };
   const resolve = deps.resolveContext ?? resolveJarvisContext;
   const resolution = await resolve();
-  if ("denied" in resolution) {
-    return { ok: false, reason: `not_authorized:${resolution.denied}` };
-  }
-  const ctx: JarvisContext = resolution;
-
-  // (3) Validate input BEFORE any persistence or provider call.
+  if ("denied" in resolution) return { ok: false, kind: "not_authorized", reason: resolution.denied };
   const message = (input.message ?? "").trim();
-  if (message.length === 0) return { ok: false, reason: "empty_message" };
-  if (message.length > MAX_MESSAGE_CHARS) return { ok: false, reason: "message_too_long" };
+  if (message.length === 0) return { ok: false, kind: "invalid_input", reason: "empty_message" };
+  if (message.length > MAX_MESSAGE_CHARS) return { ok: false, kind: "invalid_input", reason: "message_too_long" };
+  return { ok: true, ctx: resolution, message };
+}
 
+/**
+ * LEGACY / internal keyless path — behavior unchanged. NOT the intended public
+ * transport contract (that is `runDurableTurn`, which requires a trusted
+ * idempotency key). Do not add new callers of this keyless path.
+ */
+export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Promise<TurnResult> {
+  const pre = await preflight(input, deps);
+  if (!pre.ok) {
+    if (pre.kind === "disabled") return { ok: false, reason: "intelligence_disabled" };
+    if (pre.kind === "not_authorized") return { ok: false, reason: `not_authorized:${pre.reason}` };
+    return { ok: false, reason: pre.reason };
+  }
+  const requestId = (deps.uuid ?? (() => globalThis.crypto.randomUUID()))();
+  return executeLifecycle({ ctx: pre.ctx, message: pre.message, input, deps, requestId });
+}
+
+/**
+ * Optional set-once checkpoint hooks. The legacy path passes none (identical
+ * behavior); the durable path (F1b) supplies them to record jarvis_turns linkage.
+ * All hooks are BEST-EFFORT (audit/evidence) — a hook failure never aborts the turn;
+ * the replay-safety guarantee rests on the claim + status + result snapshot, not on
+ * these linkage writes.
+ */
+export interface TurnHooks {
+  onThread?(threadId: string): Promise<void> | void;
+  onUserMessage?(messageId: string): Promise<void> | void;
+  beforeProvider?(): Promise<void> | void;
+  onProviderResult?(meta: ProviderMeta): Promise<void> | void;
+  onAssistant?(messageId: string): Promise<void> | void;
+}
+async function runHook(fn: (() => Promise<void> | void) | undefined): Promise<void> {
+  if (!fn) return;
+  try {
+    await fn();
+  } catch {
+    /* best-effort checkpoint; never abort or fail the turn on a linkage write */
+  }
+}
+
+/**
+ * The full turn lifecycle (steps 4–11). Shared by the legacy and durable paths; the
+ * durable path supplies `hooks` to checkpoint the jarvis_turns ledger. Never throws
+ * for an expected failure — returns a typed, safe {ok:false}.
+ */
+async function executeLifecycle(params: {
+  ctx: JarvisContext;
+  message: string;
+  input: TurnInput;
+  deps: TurnDeps;
+  requestId: string;
+  hooks?: TurnHooks;
+}): Promise<TurnResult> {
+  const { ctx, message, input, deps, requestId, hooks } = params;
+  const resolve = deps.resolveContext ?? resolveJarvisContext;
   const repo = deps.repo ?? createConversationRepo();
   const limits = deps.limits ?? getIntelligenceLimits();
-  const newUuid = deps.uuid ?? (() => globalThis.crypto.randomUUID());
   const assembler = deps.assembler ?? defaultAssembler;
   const router = deps.router ?? defaultPlanContext;
-
-  // Server-generated CORRELATION id for BOTH rows of this turn. Per-invocation,
-  // NOT a transport idempotency key (see the IDEMPOTENCY BOUNDARY note above): two
-  // independent invocations get two distinct request_ids and are two distinct turns.
-  const requestId = newUuid();
 
   // (4) Resolve or create + verify ownership of the thread (trusted, owner-only).
   let thread: ConversationThread;
@@ -171,14 +235,17 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
   } else {
     thread = await repo.createThread(ctx);
   }
+  await runHook(hooks?.onThread ? () => hooks.onThread!(thread.id) : undefined);
 
   // (5) LOCKED: persist the user message BEFORE contacting the provider. If this
   //     write fails, we make NO provider call and honestly report non-persistence.
+  let userMessageId: string;
   try {
-    await repo.persistUserMessage(ctx, thread.id, message, requestId);
+    userMessageId = await repo.persistUserMessage(ctx, thread.id, message, requestId);
   } catch {
     return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
   }
+  await runHook(hooks?.onUserMessage ? () => hooks.onUserMessage!(userMessageId) : undefined);
 
   // (6) Deterministic context routing. The model never selects its own data, and
   //     a model-supplied client id would have zero authority here.
@@ -192,12 +259,14 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
         ? `I can help with that — which client do you mean: ${plan.candidates.map((c) => c.name).join(", ")}?`
         : "I couldn't confidently tell which client you mean. Which client should I look at?";
     // A clarification IS an assistant success turn — only claim ok if it stored.
-    const stored = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
+    const clarificationId = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
       status: "ok",
       content: clarification,
       provenance: { contextKind: plan.kind, clarification: true },
     });
-    if (!stored) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
+    if (clarificationId === null) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
+    await runHook(hooks?.onAssistant ? () => hooks.onAssistant!(clarificationId) : undefined);
+    // NOTE: provider_started_at is deliberately NOT set — a clarification never calls the provider.
     return {
       ok: true,
       threadId: thread.id,
@@ -238,7 +307,9 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
   const history = await repo.loadBoundedHistory(ctx, thread.id, limits.historyTurns * 2);
 
   // (8) Build the trusted prompt and call the provider under an owned deadline.
+  //     The durable marker is set immediately BEFORE the provider sequence begins.
   const system = buildSystemPrompt(contexts);
+  await runHook(hooks?.beforeProvider ? () => hooks.beforeProvider!() : undefined);
   let resultText: string;
   let providerId: string;
   let model: string;
@@ -254,6 +325,7 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
     const stored = await persistFailure(repo, ctx, thread.id, requestId, errorClass);
     return { ok: false, reason: errorClass, threadId: thread.id, requestId, persisted: stored };
   }
+  await runHook(hooks?.onProviderResult ? () => hooks.onProviderResult!({ provider: providerId, model, usage }) : undefined);
 
   // (9) Validate the UNTRUSTED model output. Malformed ⇒ safe failure; never
   //     persist the raw blob as assistant content.
@@ -275,7 +347,7 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
 
   // Durable persistence is a PRECONDITION of an ok:true result. If the write
   // throws, we do NOT tell the caller the turn succeeded.
-  const stored = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
+  const assistantId = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
     status: "ok",
     content: value.assistantMessage,
     reasoningSummary: value.reasoningSummary,
@@ -289,7 +361,8 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
     usage,
     provenance,
   });
-  if (!stored) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
+  if (assistantId === null) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
+  await runHook(hooks?.onAssistant ? () => hooks.onAssistant!(assistantId) : undefined);
 
   // (11) Slice-D BRIDGES. Only reached once the assistant row is durably stored,
   //      so we never create an operational side effect for a turn whose record
@@ -317,6 +390,132 @@ export async function runIntelligenceTurn(input: TurnInput, deps: TurnDeps): Pro
     action,
     memory,
   };
+}
+
+/** F1b lease window: a claimed turn is stale for future recovery after this. Never
+ *  used by F1b to authorize a second provider call. */
+const TURN_LEASE_MS = 5 * 60_000;
+
+/** The transport idempotency key must be a UUID (the jarvis_turns column type). */
+const DURABLE_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The typed outcome of a durable, replay-aware turn (F1b). This is the internal
+ * primitive F1d will expose over transport. A same-key retry NEVER starts a second
+ * provider sequence: it replays the durable turn or reports its in-progress/terminal
+ * state. `conflict` (same key, different request hash) leaks NO stored-request data.
+ */
+export type DurableTurnOutcome =
+  | { kind: "disabled" }
+  | { kind: "not_authorized"; reason: string }
+  | { kind: "invalid_input"; reason: string }
+  | { kind: "conflict" }
+  | { kind: "executed"; turnId: string; result: TurnResult }
+  | { kind: "completed_replay"; turnId: string; result: Extract<TurnResult, { ok: true }> }
+  | { kind: "in_progress"; turnId: string }
+  | { kind: "failed_replay"; turnId: string; reason: string }
+  | { kind: "abandoned_replay"; turnId: string; reason: string };
+
+/**
+ * Durable, transport-replay-aware Intelligence turn (F1b). Requires a trusted
+ * transport idempotency key. Claims a durable turn (the DB unique constraint on
+ * (workspace_id,user_id,idempotency_key) arbitrates concurrency), then either
+ * replays an existing turn or executes a fresh one with set-once checkpointing.
+ *
+ * F1b is transport-replay safety ONLY — NOT workflow recovery and NOT model
+ * re-execution. A processing turn (incl. a crash after the provider call) replays as
+ * IN_PROGRESS and is never resumed/re-executed here; downstream operation-key
+ * idempotency (F1/Memory) is F1c, so a durable side effect may exist while the turn
+ * is still processing. Do not describe F1b as exactly-once action/Memory execution.
+ */
+export async function runDurableTurn(input: TurnInput, deps: TurnDeps): Promise<DurableTurnOutcome> {
+  const pre = await preflight(input, deps);
+  if (!pre.ok) {
+    if (pre.kind === "disabled") return { kind: "disabled" };
+    if (pre.kind === "not_authorized") return { kind: "not_authorized", reason: pre.reason };
+    return { kind: "invalid_input", reason: pre.reason };
+  }
+  const { ctx, message } = pre;
+  const idempotencyKey = input.idempotencyKey;
+  if (!idempotencyKey) return { kind: "invalid_input", reason: "missing_idempotency_key" };
+  // The transport key lands in the uuid `jarvis_turns.idempotency_key` column —
+  // validate its shape at the boundary rather than surfacing a raw DB error.
+  if (!DURABLE_KEY_RE.test(idempotencyKey)) return { kind: "invalid_input", reason: "invalid_idempotency_key" };
+
+  const turnRepo = deps.turnRepo ?? createConversationTurnRepo();
+  const clock = deps.now ?? Date.now;
+  const requestId = (deps.uuid ?? (() => globalThis.crypto.randomUUID()))();
+  // Hash the ORIGINAL transport envelope (input.threadId, not any created thread).
+  const requestHash = computeRequestHash({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.principalId,
+    threadId: input.threadId ?? null,
+    message,
+  });
+
+  // Atomic claim — the unique constraint is the sole concurrency arbiter.
+  const claim = await turnRepo.claim({
+    ctx,
+    idempotencyKey,
+    requestHash,
+    correlationId: requestId,
+    leaseExpiresAt: new Date(clock() + TURN_LEASE_MS).toISOString(),
+  });
+
+  if (claim.outcome === "existing") {
+    const c = classifyExisting(claim.turn, requestHash);
+    switch (c.kind) {
+      case "conflict":
+        return { kind: "conflict" };
+      case "completed_replay":
+        return { kind: "completed_replay", turnId: claim.turn.id, result: c.result };
+      case "in_progress":
+        return { kind: "in_progress", turnId: c.turnId };
+      case "failed_replay":
+        return { kind: "failed_replay", turnId: c.turnId, reason: c.reason };
+      case "abandoned_replay":
+        return { kind: "abandoned_replay", turnId: c.turnId, reason: c.reason };
+      case "corrupt":
+        // Fail closed: never replay an unvalidatable snapshot and never re-execute.
+        return { kind: "in_progress", turnId: c.turnId };
+    }
+  }
+
+  // CLAIMED — execute with set-once checkpoint hooks (best-effort audit linkage).
+  const turnId = claim.turn.id;
+  let providerMeta: ProviderMeta | undefined;
+  const hooks: TurnHooks = {
+    onThread: (tid) => turnRepo.setThreadId(turnId, tid),
+    onUserMessage: (mid) => turnRepo.setUserMessageId(turnId, mid),
+    beforeProvider: () => turnRepo.markProviderStarted(turnId, new Date(clock()).toISOString()),
+    onProviderResult: (m) => {
+      providerMeta = m;
+    },
+    onAssistant: (mid) => turnRepo.setAssistantMessageId(turnId, mid),
+  };
+
+  const result = await executeLifecycle({ ctx, message, input, deps, requestId, hooks });
+
+  if (!result.ok) {
+    await runHook(() => turnRepo.fail(turnId, result.reason));
+    return { kind: "executed", turnId, result };
+  }
+
+  // Link the trusted downstream outcomes (best-effort) then finalize.
+  const act = result.action;
+  if (act && act.status === "approval_required") await runHook(() => turnRepo.setProposalId(turnId, act.proposalId));
+  const mem = result.memory;
+  if (mem && mem.status === "needs_confirmation") await runHook(() => turnRepo.setMemoryId(turnId, mem.memoryId));
+
+  const snapshot = buildResultSnapshot(result, providerMeta);
+  try {
+    await turnRepo.complete(turnId, snapshot);
+  } catch {
+    // Completion write failed → the turn stays `processing`; a replay is IN_PROGRESS
+    // and never re-executes. We do not claim durable success at the transport boundary.
+    return { kind: "in_progress", turnId };
+  }
+  return { kind: "executed", turnId, result };
 }
 
 /**
@@ -385,27 +584,27 @@ async function tryPersistAssistant(
   threadId: string,
   requestId: string,
   row: AssistantRow
-): Promise<boolean> {
+): Promise<string | null> {
   try {
-    await repo.persistAssistant(ctx, threadId, requestId, row);
-    return true;
+    return await repo.persistAssistant(ctx, threadId, requestId, row);
   } catch {
-    return false;
+    return null;
   }
 }
 
 /** Persist a SAFE failure row (generic copy; never raw response/stack/secret/
  *  prompt/context). Returns whether the row was durably stored. */
-function persistFailure(
+async function persistFailure(
   repo: ConversationRepo,
   ctx: JarvisContext,
   threadId: string,
   requestId: string,
   errorClass: string
 ): Promise<boolean> {
-  return tryPersistAssistant(repo, ctx, threadId, requestId, {
+  const id = await tryPersistAssistant(repo, ctx, threadId, requestId, {
     status: "error",
     content: SAFE_FAILURE_MESSAGE,
     provenance: { errorClass },
   });
+  return id !== null;
 }

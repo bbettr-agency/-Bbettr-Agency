@@ -52,7 +52,8 @@
     "test:tasks-inbox-read": "node supabase/tests/tasks-inbox-read.test.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:tasks-0068": "node supabase/tests/tasks-0068-jarvis-turn-idempotency.test.mjs"
+    "test:tasks-0068": "node supabase/tests/tasks-0068-jarvis-turn-idempotency.test.mjs",
+    "test:turn-claim": "node supabase/tests/jarvis-turn-claim-concurrency.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

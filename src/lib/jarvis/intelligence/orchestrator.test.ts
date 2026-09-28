@@ -12,7 +12,8 @@ vi.mock("@/lib/flags", () => ({
 vi.mock("@/lib/auth", () => ({ requireAdmin: async () => ({ id: "admin1", role: "admin" }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 
-import { runIntelligenceTurn, type TurnDeps, type ContextAssembler } from "./orchestrator";
+import { runIntelligenceTurn, runDurableTurn, type TurnDeps, type ContextAssembler } from "./orchestrator";
+import type { ConversationTurnRepo, TurnRow, TurnResultSnapshot } from "./turns";
 import { SAFE_FAILURE_MESSAGE, type ConversationRepo, type ConversationThread, type AssistantRow } from "./repository";
 import { isJarvisEnabled, isJarvisIntelligenceEnabled } from "@/lib/flags";
 import { LLMProviderError, type LLMErrorKind } from "@/lib/jarvis/llm/errors";
@@ -106,10 +107,11 @@ function makeRepo(cfg: {
       if (cfg.threadFound === false) return null;
       return { id, lastClientId: cfg.lastClientId ?? null };
     }),
-    persistUserMessage: vi.fn(async (_c, _t, content: string, requestId: string) => {
+    persistUserMessage: vi.fn(async (_c, _t, content: string, requestId: string): Promise<string> => {
       order.push("persistUserMessage");
       userMsgs.push({ content, requestId });
       if (cfg.failUserPersist) throw new Error("db down");
+      return "umsg-1";
     }),
     loadBoundedHistory: vi.fn(async () => {
       order.push("loadBoundedHistory");
@@ -118,10 +120,11 @@ function makeRepo(cfg: {
     updateLastClientId: vi.fn(async () => {
       order.push("updateLastClientId");
     }),
-    persistAssistant: vi.fn(async (_c, _t, requestId: string, row: AssistantRow) => {
+    persistAssistant: vi.fn(async (_c, _t, requestId: string, row: AssistantRow): Promise<string> => {
       order.push(`persistAssistant:${row.status}`);
       if (cfg.failAssistantPersist) throw new Error("assistant write failed");
       persisted.push({ ...row, requestId });
+      return "amsg-1";
     }),
   };
   return { repo, order, persisted, userMsgs };
@@ -684,4 +687,226 @@ describe("orchestrator — provider failure ⇒ safe failure persistence", () =>
       expect(row.content).not.toContain("llm_provider_error");
     }
   );
+});
+
+const KEY_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+// ---------- F1b: durable turn lifecycle + transport replay (runDurableTurn) ----------
+
+function turnRow(over: Partial<TurnRow> = {}): TurnRow {
+  return {
+    id: "turn-x",
+    workspace_id: "w1",
+    user_id: "u1",
+    thread_id: null,
+    idempotency_key: "k1",
+    request_hash: "a".repeat(64),
+    correlation_id: "corr-1",
+    status: "processing",
+    provider_started_at: null,
+    user_message_id: null,
+    assistant_message_id: null,
+    proposal_id: null,
+    memory_id: null,
+    result: null,
+    failure_reason: null,
+    ...over,
+  };
+}
+
+/** Fake durable-turn repo. `existing` (when set) makes claim return an existing turn
+ *  (echoing the incoming request_hash unless hashMatches:false). Records all calls. */
+function makeTurnRepo(cfg: { existing?: { status: TurnRow["status"]; hashMatches?: boolean; result?: unknown; reason?: string } } = {}) {
+  const calls = { claim: 0, providerStarted: 0, thread: [] as string[], userMsg: [] as string[], assistant: [] as string[], proposal: [] as string[], memory: [] as string[], complete: [] as unknown[], fail: [] as string[] };
+  const repo: ConversationTurnRepo = {
+    claim: vi.fn(async (input) => {
+      calls.claim += 1;
+      if (cfg.existing) {
+        return { outcome: "existing" as const,
+          turn: turnRow({
+            request_hash: cfg.existing.hashMatches === false ? "b".repeat(64) : input.requestHash,
+            correlation_id: input.correlationId,
+            status: cfg.existing.status,
+            result: cfg.existing.result ?? null,
+            failure_reason: cfg.existing.reason ?? null,
+          }),
+        };
+      }
+      return { outcome: "claimed" as const, turn: turnRow({ request_hash: input.requestHash, correlation_id: input.correlationId }) };
+    }),
+    setThreadId: vi.fn(async (_t, v) => { calls.thread.push(v); }),
+    setUserMessageId: vi.fn(async (_t, v) => { calls.userMsg.push(v); }),
+    markProviderStarted: vi.fn(async () => { calls.providerStarted += 1; }),
+    setAssistantMessageId: vi.fn(async (_t, v) => { calls.assistant.push(v); }),
+    setProposalId: vi.fn(async (_t, v) => { calls.proposal.push(v); }),
+    setMemoryId: vi.fn(async (_t, v) => { calls.memory.push(v); }),
+    complete: vi.fn(async (_t, snap) => { calls.complete.push(snap); }),
+    fail: vi.fn(async (_t, r) => { calls.fail.push(r); }),
+  };
+  return { repo, calls };
+}
+
+const validSnapshot: TurnResultSnapshot = { v: 1, assistantMessage: "stored answer", action: { status: "not_requested" }, memory: { status: "not_requested" } };
+
+function durableDeps(over: Partial<TurnDeps> = {}, repo?: ConversationTurnRepo): TurnDeps {
+  return baseDeps({ resolveContext: async () => RICH_CTX, turnRepo: repo, ...over });
+}
+
+describe("runDurableTurn — preflight + key requirement", () => {
+  it("flags off → disabled (no claim)", async () => {
+    vi.mocked(isJarvisIntelligenceEnabled).mockReturnValue(false);
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({}, repo));
+    expect(r).toEqual({ kind: "disabled" });
+    expect(calls.claim).toBe(0);
+  });
+  it("unauthorized → not_authorized (no claim)", async () => {
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ resolveContext: async () => ({ denied: "not_enabled" }) }, repo));
+    expect(r).toEqual({ kind: "not_authorized", reason: "not_enabled" });
+    expect(calls.claim).toBe(0);
+  });
+  it("missing idempotency key → invalid_input (no claim)", async () => {
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi" }, durableDeps({}, repo));
+    expect(r).toEqual({ kind: "invalid_input", reason: "missing_idempotency_key" });
+    expect(calls.claim).toBe(0);
+  });
+  it("non-UUID idempotency key → invalid_input (no claim; matches the uuid column)", async () => {
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: "not-a-uuid" }, durableDeps({}, repo));
+    expect(r).toEqual({ kind: "invalid_input", reason: "invalid_idempotency_key" });
+    expect(calls.claim).toBe(0);
+  });
+  it("empty message → invalid_input (no claim)", async () => {
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "  ", idempotencyKey: KEY_UUID }, durableDeps({}, repo));
+    expect(r).toMatchObject({ kind: "invalid_input", reason: "empty_message" });
+    expect(calls.claim).toBe(0);
+  });
+});
+
+describe("runDurableTurn — CLAIMED execution + checkpoints", () => {
+  it("claims, executes once, sets provider_started_at once, completes with a snapshot", async () => {
+    const { provider, seen } = makeProvider({ text: JSON.stringify({ assistant_message: "durable answer" }) });
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r.kind).toBe("executed");
+    if (r.kind === "executed") expect(r.result.ok).toBe(true);
+    expect(seen.calls).toBe(1); // provider called exactly once
+    expect(calls.providerStarted).toBe(1); // provider_started_at set once
+    expect(calls.thread.length).toBe(1);
+    expect(calls.userMsg.length).toBe(1);
+    expect(calls.assistant.length).toBe(1);
+    expect(calls.complete.length).toBe(1);
+    const snap = calls.complete[0] as TurnResultSnapshot;
+    expect(snap.assistantMessage).toBe("durable answer");
+    expect(snap.provider).toBe("trusted-provider");
+  });
+
+  it("links proposal + memory from bridge outcomes, then completes", async () => {
+    const both = JSON.stringify({
+      assistant_message: "ok",
+      proposed_intent: { capability_id: "portal.propose_internal_task", args: { title: "x" } },
+      memory_candidate: { scope: "agency", category: "company_knowledge", claim: "c" },
+    });
+    const { provider } = makeProvider({ text: both });
+    const invoke = vi.fn(async () => ({ status: "needs_approval", proposalId: "prop-1" }) as never);
+    const create = vi.fn(async () => ({ ok: true, id: "mem-1", state: "inferred" }) as never);
+    const { repo, calls } = makeTurnRepo();
+    await runDurableTurn({ message: "do it", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke }, memoryBridge: { create } }, repo));
+    expect(calls.proposal).toEqual(["prop-1"]);
+    expect(calls.memory).toEqual(["mem-1"]);
+    expect(calls.complete.length).toBe(1);
+  });
+
+  it("a failed turn is marked failed (not completed); no restart on replay", async () => {
+    const { provider } = makeProvider({ throwKind: "provider_5xx" });
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r.kind).toBe("executed");
+    if (r.kind === "executed") expect(r.result.ok).toBe(false);
+    expect(calls.fail).toEqual(["provider_5xx"]);
+    expect(calls.complete.length).toBe(0);
+    expect(calls.providerStarted).toBe(1); // boundary was crossed
+  });
+
+  it("clarification completes WITHOUT setting provider_started_at (no provider call)", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo, calls } = makeTurnRepo();
+    const r = await runDurableTurn({ message: "email that client", idempotencyKey: KEY_UUID }, durableDeps({ provider, router: async () => ({ kind: "unknown_client" }) }, repo));
+    expect(r.kind).toBe("executed");
+    expect(seen.calls).toBe(0);
+    expect(calls.providerStarted).toBe(0); // never set on a clarification
+    expect(calls.complete.length).toBe(1);
+    const snap = calls.complete[0] as TurnResultSnapshot;
+    expect(snap.clarification).toBe(true);
+  });
+});
+
+describe("runDurableTurn — replay (no second provider sequence, no side effects)", () => {
+  it("completed replay returns the stored snapshot; provider & bridges NOT invoked", async () => {
+    const { provider, seen } = makeProvider();
+    const invoke = vi.fn();
+    const create = vi.fn();
+    const { repo, calls } = makeTurnRepo({ existing: { status: "completed", result: validSnapshot } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider, actionBridge: { invoke: invoke as never }, memoryBridge: { create: create as never } }, repo));
+    expect(r.kind).toBe("completed_replay");
+    if (r.kind === "completed_replay") expect(r.result.assistantMessage).toBe("stored answer");
+    expect(seen.calls).toBe(0);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(calls.complete.length).toBe(0); // nothing re-written
+  });
+
+  it("processing replay ⇒ in_progress; provider NOT invoked (no second sequence)", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo } = makeTurnRepo({ existing: { status: "processing" } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r).toMatchObject({ kind: "in_progress" });
+    expect(seen.calls).toBe(0);
+  });
+
+  it("same key + DIFFERENT request hash ⇒ conflict; no data leaked, no provider call", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo } = makeTurnRepo({ existing: { status: "completed", hashMatches: false, result: validSnapshot } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r).toEqual({ kind: "conflict" }); // no turnId / result / metadata
+    expect(seen.calls).toBe(0);
+  });
+
+  it("failed replay does not restart the model", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo } = makeTurnRepo({ existing: { status: "failed", reason: "invalid_response" } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r).toMatchObject({ kind: "failed_replay", reason: "invalid_response" });
+    expect(seen.calls).toBe(0);
+  });
+
+  it("abandoned replay does not restart the model", async () => {
+    const { provider, seen } = makeProvider();
+    const { repo } = makeTurnRepo({ existing: { status: "abandoned", reason: "stale" } });
+    const r = await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider }, repo));
+    expect(r).toMatchObject({ kind: "abandoned_replay" });
+    expect(seen.calls).toBe(0);
+  });
+
+  it("new-thread replay creates NO second thread (executeLifecycle never runs)", async () => {
+    const { provider } = makeProvider();
+    const { repo: convRepo } = makeRepo();
+    const { repo: tRepo } = makeTurnRepo({ existing: { status: "processing" } });
+    await runDurableTurn({ message: "hi", idempotencyKey: KEY_UUID }, durableDeps({ provider, repo: convRepo }, tRepo));
+    expect(convRepo.createThread).not.toHaveBeenCalled();
+  });
+});
+
+describe("runDurableTurn — request hash binds owner/workspace (isolation)", () => {
+  it("two different workspaces produce different claim request hashes", async () => {
+    const hashes: string[] = [];
+    const repo: ConversationTurnRepo = { ...makeTurnRepo().repo, claim: vi.fn(async (input) => { hashes.push(input.requestHash); return { outcome: "claimed" as const, turn: turnRow({ request_hash: input.requestHash }) }; }) };
+    const { provider } = makeProvider();
+    await runDurableTurn({ message: "same message", idempotencyKey: KEY_UUID }, durableDeps({ provider, resolveContext: async () => ({ principalId: "u1", workspaceId: "wA", grants: new Set(RICH_GRANTS) }) }, repo));
+    await runDurableTurn({ message: "same message", idempotencyKey: KEY_UUID }, durableDeps({ provider, resolveContext: async () => ({ principalId: "u1", workspaceId: "wB", grants: new Set(RICH_GRANTS) }) }, repo));
+    expect(hashes[0]).not.toBe(hashes[1]);
+  });
 });
