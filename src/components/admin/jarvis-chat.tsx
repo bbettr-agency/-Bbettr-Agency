@@ -161,7 +161,7 @@ export function JarvisChat({ firstName }: { firstName?: string }) {
         </div>
       ) : (
         <>
-          <div className="mb-3 flex items-center justify-end">
+          <div className="mx-auto mb-3 flex w-full max-w-2xl items-center justify-end">
             <Button variant="ghost" size="sm" onClick={newChat} disabled={sending}>
               <Plus className="h-4 w-4" aria-hidden /> New chat
             </Button>
