@@ -4,12 +4,14 @@ vi.mock("@/lib/flags", () => ({ isJarvisEnabled: vi.fn(() => true), isJarvisInte
 vi.mock("@/lib/jarvis/identity", () => ({ resolveJarvisContextApi: vi.fn() }));
 vi.mock("@/lib/jarvis/llm/factory", () => ({ createLLMProvider: vi.fn(() => ({ id: "p", model: "m", complete: vi.fn() })) }));
 vi.mock("@/lib/jarvis/intelligence/orchestrator", () => ({ runDurableTurn: vi.fn() }));
+vi.mock("@/lib/jarvis/intelligence/rate-limit", () => ({ checkJarvisRateLimit: vi.fn() }));
 
 import { POST } from "./route";
 import { isJarvisEnabled, isJarvisIntelligenceEnabled } from "@/lib/flags";
 import { resolveJarvisContextApi } from "@/lib/jarvis/identity";
 import { createLLMProvider } from "@/lib/jarvis/llm/factory";
 import { runDurableTurn } from "@/lib/jarvis/intelligence/orchestrator";
+import { checkJarvisRateLimit } from "@/lib/jarvis/intelligence/rate-limit";
 
 const APP = "https://portal.example.com";
 const KEY = "11111111-1111-4111-8111-111111111111";
@@ -34,6 +36,7 @@ beforeEach(() => {
   vi.mocked(resolveJarvisContextApi).mockResolvedValue(CTX as never);
   vi.mocked(createLLMProvider).mockReturnValue({ id: "p", model: "m", complete: vi.fn() } as never);
   vi.mocked(runDurableTurn).mockResolvedValue(OK_OUTCOME as never);
+  vi.mocked(checkJarvisRateLimit).mockResolvedValue({ ok: true, allowed: true } as never);
 });
 
 describe("POST /api/jarvis/chat — origin / fetch-metadata", () => {
@@ -294,6 +297,57 @@ describe("POST /api/jarvis/chat — bounded top-level exception boundary", () =>
     expect(JSON.parse(text)).toEqual({ error: "payload_too_large" });
     expect(text).not.toContain("SENSITIVE-CANCEL");
     expect(runDurableTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/jarvis/chat — F2a rate guard", () => {
+  it("guard runs AFTER validation and BEFORE provider/turn (valid request → guard called once)", async () => {
+    await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(checkJarvisRateLimit).toHaveBeenCalledTimes(1);
+    expect(checkJarvisRateLimit).toHaveBeenCalledWith({ workspaceId: "w1", userId: "u1" });
+    expect(createLLMProvider).toHaveBeenCalledTimes(1);
+    expect(runDurableTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("denied → 429 rate_limited + Retry-After + no-store; provider + turn NOT called", async () => {
+    vi.mocked(checkJarvisRateLimit).mockResolvedValue({ ok: true, allowed: false, retryAfterSeconds: 37 } as never);
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(429);
+    expect(await r.json()).toEqual({ error: "rate_limited" });
+    expect(r.headers.get("retry-after")).toBe("37");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(createLLMProvider).not.toHaveBeenCalled();
+    expect(runDurableTurn).not.toHaveBeenCalled();
+  });
+
+  it("infrastructure failure → 503 unavailable + no-store; provider + turn NOT called", async () => {
+    vi.mocked(checkJarvisRateLimit).mockResolvedValue({ ok: false } as never);
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ error: "unavailable" });
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(createLLMProvider).not.toHaveBeenCalled();
+    expect(runDurableTurn).not.toHaveBeenCalled();
+  });
+
+  it("guard does NOT run while Intelligence is disabled (404, guard calls 0)", async () => {
+    vi.mocked(isJarvisIntelligenceEnabled).mockReturnValue(false);
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(404);
+    expect(checkJarvisRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("guard does NOT run for an unauthenticated caller (401 before guard)", async () => {
+    vi.mocked(resolveJarvisContextApi).mockResolvedValue({ denied: "unauthenticated" } as never);
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(401);
+    expect(checkJarvisRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("guard does NOT run for a malformed request (400 before guard)", async () => {
+    const r = await POST(req({ idempotencyKey: KEY })); // missing message
+    expect(r.status).toBe(400);
+    expect(checkJarvisRateLimit).not.toHaveBeenCalled();
   });
 });
 

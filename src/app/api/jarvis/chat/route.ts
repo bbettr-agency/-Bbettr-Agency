@@ -4,6 +4,7 @@ import { resolveJarvisContextApi } from "@/lib/jarvis/identity";
 import { createLLMProvider } from "@/lib/jarvis/llm/factory";
 import { runDurableTurn } from "@/lib/jarvis/intelligence/orchestrator";
 import { chatRequestSchema, mapOutcomeToResponse } from "@/lib/jarvis/intelligence/transport";
+import { checkJarvisRateLimit } from "@/lib/jarvis/intelligence/rate-limit";
 
 /**
  * Jarvis Intelligence — F1d authenticated chat transport (server-only Route Handler).
@@ -23,8 +24,8 @@ export const maxDuration = 60;
 
 const BODY_MAX_BYTES = 131_072; // 128 KiB hard ceiling
 
-function json(status: number, body: unknown): NextResponse {
-  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+function json(status: number, body: unknown, extraHeaders?: Record<string, string>): NextResponse {
+  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", ...(extraHeaders ?? {}) } });
 }
 
 /** Deterministic origin/fetch-metadata defense (defense-in-depth atop SameSite=Lax).
@@ -134,6 +135,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 8. Strict request schema (rejects unknown keys; validates message/threadId/key).
     const parsed = chatRequestSchema.safeParse(parsedJson);
     if (!parsed.success) return json(400, { error: "invalid_request" });
+
+    // 8b. RATE GUARD (F2a) — trusted, shared, atomic admission decision keyed by the
+    //     SERVER-resolved workspace/user. Runs AFTER validation and BEFORE the provider,
+    //     so a denied/failed guard can never trigger a paid provider call or a durable
+    //     turn. Deny → 429 + Retry-After; infrastructure failure → fail-closed 503.
+    const rate = await checkJarvisRateLimit({ workspaceId: ctx.workspaceId, userId: ctx.principalId });
+    if (!rate.ok) return json(503, { error: "unavailable" });
+    if (!rate.allowed) return json(429, { error: "rate_limited" }, { "Retry-After": String(rate.retryAfterSeconds) });
 
     // 9. Construct the server-selected provider ONLY now (enabled + valid). The caller
     //    cannot choose provider/model. A misconfiguration fails closed as 503 and no

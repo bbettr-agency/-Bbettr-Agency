@@ -492,6 +492,32 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["jarvis_action_events"]["Row"]>;
         Relationships: [];
       };
+      jarvis_rate_counters: {
+        Row: {
+          workspace_id: string;
+          user_id: string;
+          minute_start: string;
+          minute_count: number;
+          hour_start: string;
+          hour_count: number;
+          day_start: string;
+          day_count: number;
+          updated_at: string;
+        };
+        Insert: {
+          workspace_id: string;
+          user_id: string;
+          minute_start: string;
+          minute_count?: number;
+          hour_start: string;
+          hour_count?: number;
+          day_start: string;
+          day_count?: number;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["jarvis_rate_counters"]["Row"]>;
+        Relationships: [];
+      };
       jarvis_memories: {
         Row: {
           id: string;
@@ -1901,6 +1927,16 @@ export interface Database {
           p_reason: string;
         };
         Returns: string;
+      };
+      jarvis_rate_check: {
+        Args: {
+          p_workspace: string;
+          p_user: string;
+          p_per_minute: number;
+          p_per_hour: number;
+          p_per_day: number;
+        };
+        Returns: Json;
       };
       jarvis_memory_create: {
         // 0068 canonical 7-arg form. The idempotency pair is optional (defaults null in
