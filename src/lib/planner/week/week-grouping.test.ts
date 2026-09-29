@@ -29,6 +29,9 @@ function view(o: Partial<TaskView> = {}): TaskView {
     isRecurring: o.isRecurring ?? false,
     recurrenceLabel: o.recurrenceLabel ?? null,
     aggregateVersion: 1,
+    isProjected: o.isProjected ?? false,
+    recurrenceDefinitionId: o.recurrenceDefinitionId ?? null,
+    occurrenceSlot: o.occurrenceSlot ?? null,
   };
 }
 

@@ -5,6 +5,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getWeekTasks } from "@/lib/planner/tasks/read-adapters";
 import { listAdminTeam } from "@/lib/planner/team";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
+import { loadViewerProjectionContext, projectViewerOccurrences } from "@/lib/planner/recurrence/projected-read";
 import { groupWeek } from "@/lib/planner/week/week-grouping";
 import { TaskRow } from "@/components/planner/tasks/task-row";
 import { WeekDaySection } from "./week-day-section";
@@ -38,12 +39,22 @@ export async function WeekDashboard() {
     );
   }
 
-  const { today, weekStart, tasks } = weekRes.value;
+  const { today, weekStart, weekEnd, tasks } = weekRes.value;
 
   const nameById = new Map(teamRes.map((m) => [m.id, m.fullName]));
   const assign = profile ? { admins: teamRes.map((m) => ({ id: m.id, name: m.fullName })), currentAdminId: profile.id } : undefined;
 
-  const views = tasks.map((t) => toTaskView(t, nameById, today));
+  const materialisedViews = tasks.map((t) => toTaskView(t, nameById, today));
+
+  // Project the viewer's recurring occurrences falling within this week (plus bounded
+  // overdue recovery) DIRECTLY from the definitions, so future in-week reminders show
+  // even when the materialiser never ran. Deduped by (definition, slot); best-effort.
+  const projectedViews = profile
+    ? await loadViewerProjectionContext(profile.id)
+        .then((ctx) => projectViewerOccurrences(ctx, today, weekEnd, nameById))
+        .catch(() => [] as typeof materialisedViews)
+    : [];
+  const views = [...materialisedViews, ...projectedViews];
   const { overdue, days } = groupWeek(views, weekStart);
 
   if (views.length === 0) {

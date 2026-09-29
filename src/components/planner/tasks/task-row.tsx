@@ -4,6 +4,7 @@ import type { TaskView } from "@/lib/planner/tasks/task-view";
 import { TaskStatusBadge } from "./task-status-badge";
 import { TaskPriorityBadge } from "./task-priority-badge";
 import { TaskCommandControls } from "./task-command-controls";
+import { ProjectedOccurrenceControls } from "./projected-occurrence-controls";
 import type { AssignChoices, TaskCommandTarget } from "./task-command-target";
 
 /**
@@ -34,6 +35,9 @@ export function TaskRow({ view, now, assign }: { view: TaskView; now: Date; assi
     priority: view.priority,
     criticalReason: view.criticalReason,
   };
+  // A projected occurrence has no real task row yet, so it exposes ONLY the safe
+  // materialise-then-complete control — never the full lifecycle command set.
+  const projected = view.isProjected && view.recurrenceDefinitionId && view.occurrenceSlot;
   return (
     <li className="py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -62,7 +66,11 @@ export function TaskRow({ view, now, assign }: { view: TaskView; now: Date; assi
           </div>
           {view.criticalReason ? <p className="mt-1 text-xs text-red-600">Critical: {view.criticalReason}</p> : null}
         </div>
-        <TaskCommandControls target={target} assign={assign} />
+        {projected ? (
+          <ProjectedOccurrenceControls definitionId={view.recurrenceDefinitionId!} slot={view.occurrenceSlot!} title={view.title} />
+        ) : (
+          <TaskCommandControls target={target} assign={assign} />
+        )}
       </div>
     </li>
   );

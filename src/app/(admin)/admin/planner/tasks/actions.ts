@@ -35,8 +35,10 @@ import { listAdminTeam } from "@/lib/planner/team";
 import { isApprovedPlannerPath, type ApprovedPlannerPath, type EraseTaskResult, type TaskActionResult } from "@/lib/planner/tasks/action-result";
 import { createRecurringDefinition, activateRecurringDefinition } from "@/lib/planner/recurrence/definitions";
 import { generateForDefinitionId } from "@/lib/planner/recurrence/generator";
+import { generateOccurrence } from "@/lib/planner/recurrence/system-dispatch";
+import { addDays } from "@/lib/planner/recurrence/date-engine";
 import type { TaskCommand } from "@/lib/planner/tasks/state-machine";
-import type { Profile, RecurrenceRuleUnit, TaskPriority } from "@/lib/database.types";
+import type { Profile, RecurringDefinition, RecurrenceRuleUnit, TaskPriority } from "@/lib/database.types";
 
 const INBOX_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/inbox", "/admin/planner"];
 const MY_TASKS_REVALIDATE: ApprovedPlannerPath[] = ["/admin/planner/tasks", "/admin/planner"];
@@ -270,6 +272,80 @@ export async function triageAndScheduleRecurringAction(input: {
        activation itself failed the first occurrence still exists as a task */
   }
   return linked;
+}
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Complete a PROJECTED recurring occurrence — materialise-then-complete. A projected
+ * occurrence (surfaced on Today/This Week directly from the definition, before any
+ * scheduled materialisation) has no task row yet, so completing it must FIRST create
+ * the durable `(definition, slot)` task row and THEN complete that row.
+ *
+ * SECURITY: admin-gated; the caller must OWN or be the default assignee of the
+ * definition, re-validated server-side against the RLS-visible definition row (a
+ * browser can never materialise another series). IDEMPOTENT: the permanent
+ * `(definition, slot)` unique index means a double-click / refresh can never create
+ * two rows; an already-completed occurrence returns success WITHOUT re-completing.
+ * FAIL-SAFE: a failure never yields a false "completed" — the worst case is a real,
+ * materialised, still-open occurrence (which then behaves like any scheduled task).
+ * The schedule planner is deliberately bypassed (it would `skip` a past slot); this
+ * uses the low-level op that materialises the EXACT slot, overdue or not.
+ */
+export async function completeProjectedOccurrenceAction(input: {
+  definitionId: string;
+  slot: string;
+  idempotencyKey: string;
+}): Promise<TaskActionResult> {
+  if (!isTasksEnabled()) return failWith("NotAuthorized");
+  const profile = await getCurrentProfile();
+  if (!profile) return failWith("NotAuthenticated");
+  if (profile.role !== "admin") return failWith("NotAuthorized");
+  if (typeof input.definitionId !== "string" || input.definitionId.trim().length === 0) return failWith("InvalidCommand");
+  if (typeof input.slot !== "string" || !YMD_RE.test(input.slot)) return failWith("InvalidCommand");
+
+  const supabase = await createClient();
+  // RLS-scoped read (admins see their workspace's definitions). Authorize the caller
+  // as owner or default assignee — never materialise someone else's series.
+  const { data: def, error: defErr } = await supabase
+    .from("recurring_definitions")
+    .select("*")
+    .eq("id", input.definitionId)
+    .maybeSingle();
+  if (defErr) return { ok: false, code: "PersistenceError", error: mapDbError(defErr).message };
+  if (!def || !def.active) return failWith("InvalidCommand");
+  if (def.owner_user_id !== profile.id && def.default_assignee_id !== profile.id) return failWith("NotAuthorized");
+
+  // 1 — materialise the EXACT slot (idempotent via the (definition, slot) unique key).
+  const dueDate = addDays(input.slot, def.due_offset_days ?? 0);
+  const ownerDisplay = (profile.full_name ?? "").trim() || "Admin";
+  try {
+    await generateOccurrence({ definition: def as RecurringDefinition, slot: input.slot, scheduledDate: input.slot, dueDate, ownerDisplay });
+  } catch {
+    return failWith("InvalidCommand");
+  }
+
+  // 2 — read the now-materialised row (RLS-scoped) for its id, version and status.
+  const { data: row, error: rowErr } = await supabase
+    .from("tasks")
+    .select("id, status, aggregate_version")
+    .eq("recurrence_definition_id", input.definitionId)
+    .eq("occurrence_slot", input.slot)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (rowErr) return { ok: false, code: "PersistenceError", error: mapDbError(rowErr).message };
+  if (!row) return failWith("InvalidCommand");
+  // Already terminal ⇒ idempotent success (double-click / re-submit / race).
+  if (row.status === "completed" || row.status === "archived") {
+    return { ok: true, outcome: "accepted_noop", taskId: row.id, aggregateVersion: row.aggregate_version };
+  }
+
+  // 3 — complete THAT row through the normal command path (optimistic concurrency;
+  //     a VersionConflict surfaces as the standard result the UI already handles).
+  return runTaskCommand(
+    { command: { type: "CompleteTask" }, task_id: row.id, expected_aggregate_version: row.aggregate_version, idempotency_key: input.idempotencyKey },
+    { revalidate: RECUR_REVALIDATE }
+  );
 }
 
 /**

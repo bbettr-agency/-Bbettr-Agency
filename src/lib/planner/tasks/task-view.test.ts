@@ -25,6 +25,7 @@ describe("toTaskView", () => {
       scheduledDate: "2026-08-04", dueDate: null, estimatedMinutes: 30, isOverdue: false,
       isWaiting: false, blockedSince: null, ownerDisplay: "Eloff", assigneeDisplay: null,
       isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, description: null, aggregateVersion: 3,
+      isProjected: false, recurrenceDefinitionId: null, occurrenceSlot: null,
     });
   });
   it("flags recurring occurrences and resolves the cadence label", () => {

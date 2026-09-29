@@ -67,7 +67,15 @@ async function RecurrencesContent() {
                     <span className="text-ink-300">·</span>
                     <span>{d.ownerName}</span>
                     <span className="text-ink-300">·</span>
-                    <span>Next: {fmt(d.nextOccurrence)}</span>
+                    {d.nextOccurrence ? (
+                      d.nextOverdue ? (
+                        <span className="font-medium text-red-600">Overdue: {fmt(d.nextOccurrence)}</span>
+                      ) : (
+                        <span>Next: {fmt(d.nextOccurrence)}</span>
+                      )
+                    ) : (
+                      <span>Next: —</span>
+                    )}
                     {d.completedCount > 0 ? (
                       <>
                         <span className="text-ink-300">·</span>
