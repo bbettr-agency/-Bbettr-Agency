@@ -6,7 +6,7 @@ function v(overrides: Partial<TaskView> = {}): TaskView {
   return {
     id: "t", title: "T", status: "planned", priority: "normal", criticalReason: null, description: null,
     scheduledDate: null, dueDate: null, estimatedMinutes: null, isOverdue: false, isWaiting: false,
-    blockedSince: null, ownerDisplay: null, assigneeDisplay: null, isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 1, ...overrides,
+    blockedSince: null, ownerDisplay: null, assigneeDisplay: null, isCompleted: false, completedAt: null, isRecurring: false, recurrenceLabel: null, aggregateVersion: 1, isProjected: false, recurrenceDefinitionId: null, occurrenceSlot: null, ...overrides,
   };
 }
 const groupOf = (groups: ReturnType<typeof groupMyTasks>, id: string) => groups.find((g) => g.tasks.some((t) => t.id === id))?.key;

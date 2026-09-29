@@ -6,6 +6,7 @@ import type { TaskView } from "@/lib/planner/tasks/task-view";
 import type { TaskCommandTarget } from "@/components/planner/tasks/task-command-target";
 import { TaskPriorityBadge } from "@/components/planner/tasks/task-priority-badge";
 import { TaskCommandControls } from "@/components/planner/tasks/task-command-controls";
+import { ProjectedOccurrenceControls } from "@/components/planner/tasks/projected-occurrence-controls";
 import { MeetLink } from "@/components/planner/meet-link";
 import { MeetingCountdown } from "./meeting-countdown";
 
@@ -36,7 +37,11 @@ export function TodayNextBestAction({ nba, now, meetUrl }: { nba: NextBestAction
               </div>
               <p className="mt-1 text-sm text-ink-600">{nba.why}</p>
             </div>
-            <TaskCommandControls target={targetOf(nba.task)} />
+            {nba.task.isProjected && nba.task.recurrenceDefinitionId && nba.task.occurrenceSlot ? (
+              <ProjectedOccurrenceControls definitionId={nba.task.recurrenceDefinitionId} slot={nba.task.occurrenceSlot} title={nba.task.title} />
+            ) : (
+              <TaskCommandControls target={targetOf(nba.task)} />
+            )}
           </div>
         ) : (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">

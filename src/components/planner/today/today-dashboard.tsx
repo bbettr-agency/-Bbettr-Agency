@@ -4,6 +4,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getTodayWorkspace, getInboxTasks } from "@/lib/planner/tasks/read-adapters";
 import { toTaskView } from "@/lib/planner/tasks/task-view";
 import { getRecurrenceLabels } from "@/lib/planner/recurrence/recurrence-read";
+import { loadViewerProjectionContext, projectViewerOccurrences } from "@/lib/planner/recurrence/projected-read";
 import { listAdminTeam } from "@/lib/planner/team";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
 import { meetingsOnDate } from "@/lib/planner/meetings/date-views";
@@ -68,8 +69,18 @@ export async function TodayDashboard() {
 
   // Cadence labels for the subtle "REMINDER · Monthly" tag (one batched, RLS-scoped read).
   const recurrenceLabels = await getRecurrenceLabels([...ws.active, ...ws.completedToday].map((t) => t.recurrence_definition_id)).catch(() => new Map<string, string>());
-  const activeViews = ws.active.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
+  const materialisedViews = ws.active.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
   const completedViews = ws.completedToday.map((t) => toTaskView(t, nameById, today, recurrenceLabels));
+
+  // Canonical recurrence visibility: project the viewer's recurring occurrences due
+  // today (plus bounded overdue recovery) DIRECTLY from the definitions, so a due
+  // reminder appears even if the scheduled materialiser never ran. Deduped against
+  // real rows by (definition, slot); best-effort so it can never blank the page.
+  const projectedViews = await loadViewerProjectionContext(adminId)
+    .then((ctx) => projectViewerOccurrences(ctx, today, today, nameById))
+    .catch(() => [] as typeof materialisedViews);
+  const activeViews = [...materialisedViews, ...projectedViews];
+
   const groups = groupToday(activeViews, completedViews);
   const actionable = actionableToday(activeViews);
 
