@@ -183,7 +183,7 @@ export function JarvisChat({ firstName }: { firstName?: string }) {
               )}
             </div>
           </div>
-          <div className="sticky bottom-0 mt-2 bg-white/85 pt-2 backdrop-blur-lg">
+          <div className="sticky bottom-0 mt-2 bg-ink-50/85 pt-2 backdrop-blur-lg">
             <div className="mx-auto max-w-2xl">
               <Composer ref={composerRef} value={input} onChange={setInput} onKeyDown={onComposerKeyDown} onSend={send} sending={sending} />
             </div>
