@@ -116,7 +116,7 @@ function makeRepo(cfg: {
     }),
     loadBoundedHistory: vi.fn(async () => {
       order.push("loadBoundedHistory");
-      return [{ role: "user" as const, content: "prev" }, { role: "user" as const, content: "current" }];
+      return [{ id: "prev-1", role: "user" as const, content: "prev" }, { id: "umsg-1", role: "user" as const, content: "current" }];
     }),
     updateLastClientId: vi.fn(async () => {
       order.push("updateLastClientId");
@@ -340,7 +340,7 @@ describe("orchestrator — trusted prompt + provider isolation", () => {
     const { provider, seen } = makeProvider();
     // History carries the user's message as a normal message, never system.
     const repo = makeRepo().repo;
-    repo.loadBoundedHistory = vi.fn(async () => [{ role: "user" as const, content: injection }]);
+    repo.loadBoundedHistory = vi.fn(async () => [{ id: "hist-1", role: "user" as const, content: injection }]);
     await runIntelligenceTurn({ message: injection }, baseDeps({ provider, repo }));
     expect(seen.request!.system).not.toContain("Ignore all previous instructions");
     expect(seen.request!.messages.some((m) => m.content === injection)).toBe(true);
@@ -1191,5 +1191,97 @@ describe("orchestrator — R2 fresh bridge-time reauthorization (F-02)", () => {
     const reauthorize = vi.fn(async () => RICH_CTX);
     await runIntelligenceTurn({ message: "hi" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize }));
     expect(reauthorize).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- R3: provider-bound history secret redaction (F-04) ----------
+// Prior/replayed persisted messages are scanned/redacted before the provider; the
+// CURRENT persisted user message (exact durable row id + role==="user") is exempt.
+const SK_HIST = ["sk-", "A1b2C3d4E5f6G7h8I9j0K1l2"].join(""); // fabricated OpenAI-style key
+function repoWithHistory(rows: Array<{ id: string; role: "user" | "assistant"; content: string }>, currentId = "umsg-1") {
+  const r = makeRepo().repo;
+  r.persistUserMessage = vi.fn(async () => currentId);
+  r.loadBoundedHistory = vi.fn(async () => rows);
+  return r;
+}
+
+describe("orchestrator — R3 provider-bound history redaction (F-04)", () => {
+  it("redacts secret-bearing PRIOR messages, preserves the CURRENT one, strips id, keeps roles", async () => {
+    const raw = [
+      { id: "hist-1", role: "user" as const, content: `old key ${SK_HIST}` },
+      { id: "hist-2", role: "assistant" as const, content: `deployed ${SK_HIST}` },
+      { id: "hist-3", role: "user" as const, content: "hello there" },
+      { id: "umsg-1", role: "user" as const, content: `current ${SK_HIST}` },
+    ];
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory(raw) }));
+    const msgs = seen.request!.messages;
+    expect(msgs[0]).toEqual({ role: "user", content: "[REDACTED_SECRET]" }); // prior user secret
+    expect(msgs[1]).toEqual({ role: "assistant", content: "[REDACTED_SECRET]" }); // prior assistant secret
+    expect(msgs[2]).toEqual({ role: "user", content: "hello there" }); // benign prior unchanged
+    expect(msgs[3]).toEqual({ role: "user", content: `current ${SK_HIST}` }); // CURRENT exempt
+    expect(msgs.every((m) => Object.keys(m).sort().join(",") === "content,role")).toBe(true); // id stripped
+    expect(msgs[0].content).not.toContain(SK_HIST);
+    expect(msgs[1].content).not.toContain(SK_HIST);
+    expect(raw[0].content).toContain(SK_HIST); // raw repo array NOT mutated
+    expect(raw[3].content).toContain(SK_HIST);
+  });
+
+  it("identical content but a DIFFERENT id ⇒ prior (redacted); the current id ⇒ intact", async () => {
+    const secretMsg = `token ${SK_HIST}`;
+    const raw = [
+      { id: "other", role: "user" as const, content: secretMsg },
+      { id: "umsg-1", role: "user" as const, content: secretMsg },
+    ];
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory(raw) }));
+    const msgs = seen.request!.messages;
+    expect(msgs[0]).toEqual({ role: "user", content: "[REDACTED_SECRET]" });
+    expect(msgs[1]).toEqual({ role: "user", content: secretMsg });
+  });
+
+  it("an ASSISTANT row sharing the current id is NOT exempt (requires role === 'user')", async () => {
+    const raw = [{ id: "umsg-1", role: "assistant" as const, content: `leaked ${SK_HIST}` }];
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory(raw) }));
+    expect(seen.request!.messages[0]).toEqual({ role: "assistant", content: "[REDACTED_SECRET]" });
+  });
+
+  it("a row lacking a matching id is treated as PRIOR (fail closed)", async () => {
+    const raw = [{ id: "unknown", role: "user" as const, content: `x ${SK_HIST}` }];
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory(raw) }));
+    expect(seen.request!.messages[0].content).toBe("[REDACTED_SECRET]");
+  });
+
+  it("LIFECYCLE: the same persisted user row is EXEMPT while current, then REDACTED once prior", async () => {
+    const row = { id: "m-42", role: "user" as const, content: `key ${SK_HIST}` };
+    // Turn N: m-42 IS the current message ⇒ exempt.
+    {
+      const { provider, seen } = makeProvider();
+      await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory([row], "m-42") }));
+      expect(seen.request!.messages[0].content).toBe(`key ${SK_HIST}`);
+    }
+    // Turn N+1: a new current message; m-42 is now PRIOR ⇒ redacted.
+    {
+      const { provider, seen } = makeProvider();
+      const rows = [row, { id: "m-99", role: "user" as const, content: "new turn" }];
+      await runIntelligenceTurn({ message: "new turn" }, baseDeps({ provider, repo: repoWithHistory(rows, "m-99") }));
+      expect(seen.request!.messages[0].content).toBe("[REDACTED_SECRET]");
+      expect(seen.request!.messages[1].content).toBe("new turn");
+    }
+  });
+
+  it("normal history (no secrets) is unchanged and id-stripped", async () => {
+    const raw = [
+      { id: "h1", role: "user" as const, content: "how many tasks are in the inbox?" },
+      { id: "umsg-1", role: "user" as const, content: "invoice the client" },
+    ];
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "x" }, baseDeps({ provider, repo: repoWithHistory(raw) }));
+    expect(seen.request!.messages).toEqual([
+      { role: "user", content: "how many tasks are in the inbox?" },
+      { role: "user", content: "invoice the client" },
+    ]);
   });
 });

@@ -33,12 +33,25 @@ export interface AssistantRow {
   provenance?: TrustedProvenance | Record<string, unknown>;
 }
 
+/**
+ * One bounded-history row for trusted orchestration. `id` is the durable
+ * `jarvis_messages` primary key, carried so trusted code can distinguish the CURRENT
+ * persisted user message from replayed history at the provider-context boundary (R3 /
+ * F-04). `id` is INTERNAL ONLY — it must be stripped before any provider/prompt/DTO/
+ * telemetry use; only `role`+`content` are ever model-visible.
+ */
+export interface BoundedHistoryMessage {
+  id: string;
+  role: LLMMessage["role"];
+  content: string;
+}
+
 export interface ConversationRepo {
   createThread(ctx: JarvisContext): Promise<ConversationThread>;
   loadAuthorizedThread(ctx: JarvisContext, threadId: string): Promise<ConversationThread | null>;
   /** Returns the inserted message id (used by the F1b turn ledger for set-once linkage). */
   persistUserMessage(ctx: JarvisContext, threadId: string, content: string, requestId: string): Promise<string>;
-  loadBoundedHistory(ctx: JarvisContext, threadId: string, limitMessages: number): Promise<LLMMessage[]>;
+  loadBoundedHistory(ctx: JarvisContext, threadId: string, limitMessages: number): Promise<BoundedHistoryMessage[]>;
   updateLastClientId(ctx: JarvisContext, threadId: string, clientId: string): Promise<void>;
   /** Returns the inserted assistant message id (used by the F1b turn ledger for set-once linkage). */
   persistAssistant(ctx: JarvisContext, threadId: string, requestId: string, row: AssistantRow): Promise<string>;
@@ -114,14 +127,14 @@ export function createConversationRepo(): ConversationRepo {
 
       const { data } = await admin
         .from("jarvis_messages")
-        .select("role, content, seq")
+        .select("id, role, content, seq") // id: INTERNAL trusted row identity (R3); stripped before the provider
         .eq("thread_id", threadId)
         .eq("workspace_id", ctx.workspaceId)
         .eq("status", "ok") // exclude prior failure rows from model history
         .order("seq", { ascending: false })
         .limit(Math.max(1, limitMessages));
       const rows = (data ?? []).slice().reverse(); // chronological
-      return rows.map((r) => ({ role: r.role as LLMMessage["role"], content: r.content as string }));
+      return rows.map((r) => ({ id: r.id as string, role: r.role as LLMMessage["role"], content: r.content as string }));
     },
 
     async updateLastClientId(ctx, threadId, clientId) {

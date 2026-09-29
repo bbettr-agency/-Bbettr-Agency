@@ -15,6 +15,7 @@ import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 
 import { planContext as defaultPlanContext } from "./context-router";
 import { buildSystemPrompt } from "./prompt";
+import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
 import { parseAssistantResponse } from "./response-contract";
 import { callProviderWithPolicy } from "./provider-call";
 import { bridgeProposedIntent, type ActionBridgeDeps, type ActionBridgeResult } from "./action-bridge";
@@ -322,8 +323,21 @@ async function executeLifecycle(params: {
 
   // Bounded history: last (historyTurns * 2) ok messages, chronological. Loaded
   // AFTER persisting the user message, so the current turn is included exactly
-  // once (no duplication). Role + content only — no provenance/intents/system.
+  // once (no duplication). Carries the durable row `id` (INTERNAL only).
   const history = await repo.loadBoundedHistory(ctx, thread.id, limits.historyTurns * 2);
+
+  // R3 / F-04: build the PROVIDER-BOUND copy. Redact secrets in REPLAYED persisted
+  // messages; preserve the CURRENT persisted user message unchanged (live input),
+  // identified by EXACT durable row identity (id === userMessageId AND role === "user")
+  // — never by content/position/timestamp. Any other row (incl. an assistant message,
+  // or one lacking/mismatching the id) is replayed context and is scanned/redacted.
+  // The raw repo result is NOT mutated; the internal `id` is stripped here so only
+  // { role, content } reaches the provider.
+  const providerMessages = history.map((m) =>
+    m.id === userMessageId && m.role === "user"
+      ? { role: m.role, content: m.content }
+      : { role: m.role, content: redactIfSecret(m.content) }
+  );
 
   // (8) Build the trusted prompt and call the provider under an owned deadline.
   //     CORRECTNESS-CRITICAL: durably mark provider_started_at BEFORE the provider
@@ -345,7 +359,7 @@ async function executeLifecycle(params: {
   let model: string;
   let usage: unknown;
   try {
-    const result = await callProviderWithPolicy(deps.provider, { system, messages: history }, limits);
+    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessages }, limits);
     resultText = result.text;
     providerId = result.providerId; // TRUSTED adapter metadata, never model-claimed
     model = result.model;

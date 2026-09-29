@@ -15,7 +15,7 @@ const THREAD = "22222222-2222-4222-8222-222222222222";
  * order/limit — so tests can assert the trusted three-dimension gate AND that the
  * message query is NEVER built when ownership fails.
  */
-function makeAdmin(opts: { owned: boolean; messages?: Array<{ role: string; content: string; seq: number }> }) {
+function makeAdmin(opts: { owned: boolean; messages?: Array<{ id: string; role: string; content: string; seq: number }> }) {
   const calls = {
     tables: [] as string[],
     threadEq: {} as Record<string, unknown>,
@@ -69,18 +69,18 @@ describe("loadBoundedHistory — owner-scoped read (F-03 defense-in-depth)", () 
     const { admin, calls } = makeAdmin({
       owned: true,
       messages: [
-        { role: "assistant", content: "b", seq: 2 },
-        { role: "user", content: "a", seq: 1 },
+        { id: "b1", role: "assistant", content: "b", seq: 2 },
+        { id: "a1", role: "user", content: "a", seq: 1 },
       ],
     });
     vi.mocked(createAdminClient).mockReturnValue(admin as never);
 
     const out = await createConversationRepo().loadBoundedHistory(CTX, THREAD, 10);
 
-    // Chronological + role/content only (seq dropped).
+    // Chronological + { id, role, content } (seq dropped; id is INTERNAL row identity, R3).
     expect(out).toEqual([
-      { role: "user", content: "a" },
-      { role: "assistant", content: "b" },
+      { id: "a1", role: "user", content: "a" },
+      { id: "b1", role: "assistant", content: "b" },
     ]);
     // Owner gate ran first, then the message read.
     expect(calls.tables).toEqual(["jarvis_threads", "jarvis_messages"]);
@@ -127,10 +127,10 @@ describe("loadBoundedHistory — owner-scoped read (F-03 defense-in-depth)", () 
     const { admin } = makeAdmin({
       owned: true,
       messages: [
-        { role: "assistant", content: "a2", seq: 4 },
-        { role: "user", content: "q2", seq: 3 },
-        { role: "assistant", content: "a1", seq: 2 },
-        { role: "user", content: "q1", seq: 1 },
+        { id: "a2", role: "assistant", content: "a2", seq: 4 },
+        { id: "q2", role: "user", content: "q2", seq: 3 },
+        { id: "a1", role: "assistant", content: "a1", seq: 2 },
+        { id: "q1", role: "user", content: "q1", seq: 1 },
       ],
     });
     vi.mocked(createAdminClient).mockReturnValue(admin as never);
@@ -138,10 +138,10 @@ describe("loadBoundedHistory — owner-scoped read (F-03 defense-in-depth)", () 
     const out = await createConversationRepo().loadBoundedHistory(CTX, THREAD, 20);
 
     expect(out).toEqual([
-      { role: "user", content: "q1" },
-      { role: "assistant", content: "a1" },
-      { role: "user", content: "q2" },
-      { role: "assistant", content: "a2" },
+      { id: "q1", role: "user", content: "q1" },
+      { id: "a1", role: "assistant", content: "a1" },
+      { id: "q2", role: "user", content: "q2" },
+      { id: "a2", role: "assistant", content: "a2" },
     ]);
   });
 
