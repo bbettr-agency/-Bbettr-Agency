@@ -102,6 +102,25 @@ export function scanForSecrets(text: string, declaredSecret = false): SecretScan
   return { blocked: found.size > 0, categories: [...found] };
 }
 
+/** The fixed, inert marker substituted for a blocked value at the provider-context
+ *  boundary (R3 / F-04). Plain DATA — never an instruction; never carries secret text. */
+export const REDACTED_SECRET_MARKER = "[REDACTED_SECRET]";
+
+/**
+ * Read-time provider-context redaction (R3 / F-04). Returns `REDACTED_SECRET_MARKER`
+ * when `value` scans as a high-confidence secret (reusing the SAME write-path detector —
+ * no expanded patterns), else the value unchanged. Deterministic, pure, and FAIL-CLOSED:
+ * if scanning unexpectedly throws, the value is redacted. It NEVER returns, exposes, or
+ * logs the matched secret (or any substring) — only the fixed marker.
+ */
+export function redactIfSecret(value: string): string {
+  try {
+    return scanForSecrets(value).blocked ? REDACTED_SECRET_MARKER : value;
+  } catch {
+    return REDACTED_SECRET_MARKER; // fail closed for an unscannable persisted value
+  }
+}
+
 /** Convenience: scan several fields (claim + body + serialized structured). */
 export function scanMemoryContent(parts: {
   claim?: string | null;

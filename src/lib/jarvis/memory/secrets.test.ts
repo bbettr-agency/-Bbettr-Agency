@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scanForSecrets, scanMemoryContent } from "./secrets";
+import { scanForSecrets, scanMemoryContent, redactIfSecret, REDACTED_SECRET_MARKER } from "./secrets";
 
 /**
  * Secret-detection fixtures are FABRICATED and assembled at runtime from
@@ -73,5 +73,34 @@ describe("scanMemoryContent — scans claim + body + structured", () => {
   it("passes clean content", () => {
     const r = scanMemoryContent({ claim: "Client likes concise updates", structured: { channel: "email" } });
     expect(r.blocked).toBe(false);
+  });
+});
+
+// R3 / F-04 — read-time provider-context redaction helper.
+describe("redactIfSecret (R3/F-04)", () => {
+  const SK = j("sk-", "A1b2C3d4E5f6G7h8I9j0K1l2"); // OpenAI-style key (fabricated, not real)
+  it("A1: a high-confidence secret value → exactly the marker", () => {
+    expect(redactIfSecret(`please use ${SK} to call the API`)).toBe(REDACTED_SECRET_MARKER);
+    expect(redactIfSecret(SK)).toBe(REDACTED_SECRET_MARKER);
+  });
+  it("A2: normal text unchanged", () => {
+    const s = "Invoice the Fine Art client on the 28th; two tasks are unassigned.";
+    expect(redactIfSecret(s)).toBe(s);
+  });
+  it("A3: benign UUID unchanged", () => {
+    const u = "3e7cc8ae-ad72-4cf9-b051-1fa5a9ac70a4";
+    expect(redactIfSecret(u)).toBe(u);
+  });
+  it("A4: benign phone number unchanged", () => {
+    const p = "Call the client on +27 82 555 1234 tomorrow";
+    expect(redactIfSecret(p)).toBe(p);
+  });
+  it("A5: benign invoice/tracking identifiers unchanged", () => {
+    const s = "Invoice INV-2026-000915; tracking 1Z999AA10123456784; order #A1000042";
+    expect(redactIfSecret(s)).toBe(s);
+  });
+  it("A6: never returns the secret literal", () => {
+    expect(redactIfSecret(SK)).not.toContain(SK);
+    expect(REDACTED_SECRET_MARKER).toBe("[REDACTED_SECRET]");
   });
 });

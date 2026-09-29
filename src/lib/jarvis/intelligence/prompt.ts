@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 import { buildActionCatalog } from "./action-catalog";
+import { redactIfSecret, REDACTED_SECRET_MARKER } from "@/lib/jarvis/memory/secrets";
 
 /**
  * Jarvis Intelligence — trusted prompt construction (Slice C).
@@ -33,6 +34,20 @@ function clip(s: unknown, n: number): string {
   return str.length > n ? str.slice(0, n) + "…" : str;
 }
 
+/**
+ * Read-time provider-context redaction (R3 / F-04). Scans the FULL value for a
+ * high-confidence secret BEFORE clipping; a blocked value renders as the fixed inert
+ * marker (never a clipped/partial secret), otherwise it is clipped exactly as before.
+ * Applied to Portal fact labels/values and Memory claims — the only persisted/derived
+ * DATA rendered into model context here. Deterministic; ordering/caps unchanged.
+ * (Portal "labels" can themselves carry free text — e.g. update/task titles — so both
+ * label and value are scanned to fully honor "no secret reaches the provider".)
+ */
+function safeClip(s: unknown, n: number): string {
+  const raw = typeof s === "string" ? s : JSON.stringify(s);
+  return redactIfSecret(raw) === REDACTED_SECRET_MARKER ? REDACTED_SECRET_MARKER : clip(raw, n);
+}
+
 /** Deterministically serialize a ContextPackage into a bounded DATA block. */
 export function serializeContext(pkg: ContextPackage): string {
   const lines: string[] = [];
@@ -41,21 +56,21 @@ export function serializeContext(pkg: ContextPackage): string {
   for (const section of pkg.portal.sections) {
     lines.push(`### ${section.title}`);
     for (const f of section.facts.slice(0, SECTION_CAP)) {
-      lines.push(`- ${clip(f.label, 120)}: ${clip(f.value, 300)}  [src: ${f.source}]`);
+      lines.push(`- ${safeClip(f.label, 120)}: ${safeClip(f.value, 300)}  [src: ${f.source}]`);
     }
   }
   const renderMem = (title: string, items: ContextPackage["memory"]) => {
     if (items.length === 0) return;
     lines.push(`## ${title} (durable memory — NOT authoritative Portal truth)`);
     for (const m of items.slice(0, MEMORY_CAP)) {
-      lines.push(`- (${m.category}) ${clip(m.claim, CLAIM_CAP)}  [state: ${m.provenance.state}; via ${m.provenance.sourceKind}${m.provenance.suppliedDisplay ? ` · ${m.provenance.suppliedDisplay}` : ""}]`);
+      lines.push(`- (${m.category}) ${safeClip(m.claim, CLAIM_CAP)}  [state: ${m.provenance.state}; via ${m.provenance.sourceKind}${m.provenance.suppliedDisplay ? ` · ${m.provenance.suppliedDisplay}` : ""}]`);
     }
   };
   renderMem("DURABLE MEMORY", pkg.memory);
   renderMem("OPEN COMMITMENTS", pkg.openCommitments);
   if (pkg.unresolvedConflicts.length > 0) {
     lines.push("## UNRESOLVED MEMORY CONFLICTS (surface, do not silently resolve)");
-    for (const m of pkg.unresolvedConflicts.slice(0, MEMORY_CAP)) lines.push(`- (${m.category}) ${clip(m.claim, CLAIM_CAP)}`);
+    for (const m of pkg.unresolvedConflicts.slice(0, MEMORY_CAP)) lines.push(`- (${m.category}) ${safeClip(m.claim, CLAIM_CAP)}`);
   }
   return lines.join("\n");
 }
