@@ -91,6 +91,27 @@ export function createConversationRepo(): ConversationRepo {
 
     async loadBoundedHistory(ctx, threadId, limitMessages) {
       const admin = createAdminClient();
+      // Defense-in-depth (F-03): this service-role read bypasses RLS, so the read
+      // boundary itself must enforce OWNERSHIP before returning any transcript.
+      // `jarvis_messages` has no user_id column — ownership lives on the parent
+      // thread — so we first require the owning thread to match ALL THREE trusted
+      // dimensions (id + workspace_id + user_id), sourced only from the trusted
+      // JarvisContext (never model/browser/content). Any mismatch ⇒ fail closed
+      // ([], and the message query is NEVER executed). These are the SAME three
+      // predicates loadAuthorizedThread uses (kept identical, intentionally); an
+      // explicit owner check is used here rather than reusing that method because
+      // it returns thread ROW DATA (last_client_id) for referent resolution, not a
+      // boolean gate — reusing it would either require a redundant read or broaden
+      // its responsibility. The message query below is otherwise UNCHANGED.
+      const { data: owned } = await admin
+        .from("jarvis_threads")
+        .select("id")
+        .eq("id", threadId)
+        .eq("workspace_id", ctx.workspaceId) // trusted workspace
+        .eq("user_id", ctx.principalId) // trusted principal (owner)
+        .maybeSingle();
+      if (!owned) return [];
+
       const { data } = await admin
         .from("jarvis_messages")
         .select("role, content, seq")
