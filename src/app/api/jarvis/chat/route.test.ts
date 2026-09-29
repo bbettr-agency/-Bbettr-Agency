@@ -368,3 +368,28 @@ describe("POST /api/jarvis/chat — strict Content-Type", () => {
     expect(r.headers.get("cache-control")).toBe("no-store");
   });
 });
+
+describe("POST /api/jarvis/chat — R2 fresh bridge-time reauthorization (F-02)", () => {
+  it("supplies a reauthorize callback that re-invokes resolveJarvisContextApi AFRESH (not a captured snapshot)", async () => {
+    const r = await POST(req({ message: "hi", idempotencyKey: KEY }));
+    expect(r.status).toBe(200);
+    // Request-entry auth ran exactly once so far.
+    expect(vi.mocked(resolveJarvisContextApi)).toHaveBeenCalledTimes(1);
+
+    const deps = vi.mocked(runDurableTurn).mock.calls[0][1] as {
+      resolveContext: () => Promise<unknown>;
+      reauthorize: () => Promise<unknown>;
+    };
+    expect(typeof deps.reauthorize).toBe("function");
+
+    // Invoking reauthorize performs a genuinely FRESH resolve (call count increments).
+    await deps.reauthorize();
+    expect(vi.mocked(resolveJarvisContextApi)).toHaveBeenCalledTimes(2);
+
+    // The preflight/durable resolveContext is the STABLE snapshot — it returns the
+    // entry-time ctx and does NOT trigger another resolveJarvisContextApi call.
+    const snap = await deps.resolveContext();
+    expect(snap).toBe(CTX);
+    expect(vi.mocked(resolveJarvisContextApi)).toHaveBeenCalledTimes(2); // unchanged by resolveContext
+  });
+});

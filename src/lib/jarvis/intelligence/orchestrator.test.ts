@@ -1089,3 +1089,107 @@ describe("runDurableTurn — F1c operation keys are trusted + derived from turn.
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+// ---------- R2: fresh bridge-time reauthorization (F-02) ----------
+// A denial/throw/identity-change at the DEDICATED bridge reauthorize seam must fail
+// closed BEFORE any capability invocation, proposal creation, or auto-read execution.
+const READ_INTENT_TEXT = JSON.stringify({
+  assistant_message: "Here are the counts.",
+  proposed_intent: { capability_id: "portal.read_task_counts", args: {} },
+});
+
+describe("orchestrator — R2 fresh bridge-time reauthorization (F-02)", () => {
+  it("the dedicated reauthorize seam takes precedence over resolveContext at the bridge", async () => {
+    // resolveContext says AUTHORIZED but the fresh reauthorize says DENIED ⇒ deny.
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams();
+    const reauthorize = vi.fn(async () => ({ denied: "not_enabled" as const }));
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize, actionBridge: { invoke } })
+    );
+    expect(reauthorize).toHaveBeenCalledTimes(1); // bridge used the dedicated fresh seam
+    expect(invoke).not.toHaveBeenCalled(); // capability path NEVER reached
+    if (r.ok) expect(r.action?.status).toBe("unauthorized");
+  });
+
+  it("REVOKED approval-required capability ⇒ no invoke, no proposal, no approval_required", async () => {
+    const { provider } = makeProvider({ text: INTENT_TEXT }); // portal.propose_internal_task
+    const { invoke } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => ({ denied: "not_enabled" as const }), actionBridge: { invoke } })
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    if (r.ok) {
+      expect(r.action?.status).toBe("unauthorized");
+      expect(r.action?.status).not.toBe("approval_required");
+    }
+  });
+
+  it("REVOKED auto/read capability ⇒ handler/invoke NEVER executed (no stale-authorized read)", async () => {
+    const { provider } = makeProvider({ text: READ_INTENT_TEXT }); // portal.read_task_counts (auto)
+    const { invoke } = bridgeSeams({ invokeResult: { status: "allow", result: { counts: {} }, verification: {} } });
+    const r = await runIntelligenceTurn(
+      { message: "counts?" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => ({ denied: "not_enabled" as const }), actionBridge: { invoke } })
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    if (r.ok) expect(r.action?.status).toBe("unauthorized");
+  });
+
+  it("resolver THROWS ⇒ fail closed (no invoke, no fabricated success)", async () => {
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => { throw new Error("db blip"); }, actionBridge: { invoke } })
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    if (r.ok) expect(r.action?.status).toBe("unauthorized");
+  });
+
+  it("IDENTITY CHANGE (different principal) ⇒ fail closed, capability not invoked", async () => {
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => ({ principalId: "attacker", workspaceId: "w1", grants: new Set(RICH_GRANTS) }), actionBridge: { invoke } })
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    if (r.ok) expect(r.action?.status).toBe("unauthorized");
+  });
+
+  it("WORKSPACE CHANGE ⇒ fail closed, capability not invoked", async () => {
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams();
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => ({ principalId: "u1", workspaceId: "w-other", grants: new Set(RICH_GRANTS) }), actionBridge: { invoke } })
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    if (r.ok) expect(r.action?.status).toBe("unauthorized");
+  });
+
+  it("HAPPY PATH ⇒ bridge proceeds; capability invocation is bound to the FRESH ctx (model non-authority)", async () => {
+    const { provider } = makeProvider({ text: INTENT_TEXT });
+    const { invoke } = bridgeSeams({ invokeResult: { status: "needs_approval", proposalId: "prop-fresh" } });
+    const fresh: JarvisContext = { principalId: "u1", workspaceId: "w1", grants: new Set(RICH_GRANTS) };
+    const r = await runIntelligenceTurn(
+      { message: "make a task" },
+      baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize: async () => fresh, actionBridge: { invoke } })
+    );
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // The capability call is bound to the FRESH context (identity/workspace/grants),
+    // never to model output.
+    expect((invoke.mock.calls[0] as unknown[])[0]).toEqual(fresh);
+    if (r.ok) expect(r.action).toEqual({ status: "approval_required", capabilityId: "portal.propose_internal_task", proposalId: "prop-fresh" });
+  });
+
+  it("no proposal ⇒ reauthorize is NOT called (no bridge work)", async () => {
+    const { provider } = makeProvider({ text: JSON.stringify({ assistant_message: "hello" }) });
+    const reauthorize = vi.fn(async () => RICH_CTX);
+    await runIntelligenceTurn({ message: "hi" }, baseDeps({ provider, resolveContext: async () => RICH_CTX, reauthorize }));
+    expect(reauthorize).not.toHaveBeenCalled();
+  });
+});

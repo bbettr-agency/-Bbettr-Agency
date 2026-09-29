@@ -2,7 +2,7 @@ import "server-only";
 
 import { isJarvisEnabled } from "@/lib/flags";
 import { isJarvisIntelligenceEnabled } from "@/lib/flags";
-import { resolveJarvisContext, type JarvisContext, type JarvisResolution } from "@/lib/jarvis/identity";
+import { resolveJarvisContext, type JarvisContext, type JarvisResolution, type JarvisApiDenial } from "@/lib/jarvis/identity";
 import { getIntelligenceLimits, type IntelligenceLimits } from "@/lib/jarvis/llm/limits";
 import type { LLMProvider } from "@/lib/jarvis/llm/provider";
 import { isLLMProviderError } from "@/lib/jarvis/llm/errors";
@@ -115,8 +115,20 @@ export interface ContextAssembler {
 export interface TurnDeps {
   /** The LLM provider — ALWAYS the mock in Slice C (no real provider exists). */
   provider: LLMProvider;
-  /** Auth seam (defaults to the non-redirecting resolver). */
+  /** Auth seam (defaults to the non-redirecting resolver). Used for preflight and as
+   *  the stable request-time context source for the durable turn. */
   resolveContext?: () => Promise<JarvisResolution>;
+  /**
+   * DEDICATED BRIDGE-TIME reauthorization seam (R2 / F-02). Invoked AFRESH immediately
+   * before the action/memory bridges cross into F1 capability invocation / proposal
+   * creation / auto-read execution, so authorization reflects CURRENT server-side state
+   * (grants/role/workspace can change after request entry). It must perform a genuinely
+   * fresh, trusted, DB-backed resolve — NOT return a captured snapshot. Falls back to
+   * `resolveContext`, then the default resolver, for existing internal/test callers.
+   * Typed to the API resolver's richer denial union; a `JarvisResolution` resolver is a
+   * subtype and remains assignable. A denial/throw/identity-change here fails closed.
+   */
+  reauthorize?: () => Promise<JarvisContext | JarvisApiDenial>;
   /** Storage boundary seam. */
   repo?: ConversationRepo;
   /** Deterministic router seam. */
@@ -224,7 +236,10 @@ async function executeLifecycle(params: {
   turnId?: string;
 }): Promise<TurnResult> {
   const { ctx, message, input, deps, requestId, hooks, turnId } = params;
-  const resolve = deps.resolveContext ?? resolveJarvisContext;
+  // Bridge-time reauthorization (R2 / F-02): prefer the dedicated fresh resolver, then
+  // the request-time context seam, then the default. This is used ONLY for the bridge
+  // boundary — preflight/claim keep using the stable request-time context.
+  const reauthorize = deps.reauthorize ?? deps.resolveContext ?? resolveJarvisContext;
   const repo = deps.repo ?? createConversationRepo();
   const limits = deps.limits ?? getIntelligenceLimits();
   const assembler = deps.assembler ?? defaultAssembler;
@@ -385,7 +400,7 @@ async function executeLifecycle(params: {
   //      bridges gate them into the existing trusted F1 / Memory systems.
   const { action, memory } = await runBridges({
     turnCtx: ctx,
-    resolve,
+    reauthorize,
     proposedIntent: value.proposedIntent,
     memoryCandidate: value.memoryCandidate,
     plan,
@@ -561,7 +576,8 @@ export async function runDurableTurn(input: TurnInput, deps: TurnDeps): Promise<
  */
 async function runBridges(args: {
   turnCtx: JarvisContext;
-  resolve: () => Promise<JarvisResolution>;
+  /** Fresh, trusted, DB-backed bridge-time reauthorization (R2 / F-02) — never a snapshot. */
+  reauthorize: () => Promise<JarvisContext | JarvisApiDenial>;
   proposedIntent?: ValidatedProposedIntent;
   memoryCandidate?: ValidatedMemoryCandidate;
   plan: ContextPlan;
@@ -570,7 +586,7 @@ async function runBridges(args: {
   /** Durable turn id (F1c). Present ⇒ derive trusted per-slot operation keys. */
   turnId?: string;
 }): Promise<{ action?: ActionBridgeResult; memory?: MemoryBridgeResult }> {
-  const { turnCtx, resolve, proposedIntent, memoryCandidate, plan, requestId, deps, turnId } = args;
+  const { turnCtx, reauthorize, proposedIntent, memoryCandidate, plan, requestId, deps, turnId } = args;
 
   // Trusted, server-generated operation keys for the current one-action/one-memory
   // turn. Derived ONLY from the durable jarvis_turns.id — never from the model, the
@@ -584,10 +600,11 @@ async function runBridges(args: {
     return { action: { status: "not_requested" }, memory: { status: "not_requested" } };
   }
 
-  // Reauthorize ONCE at bridge time; both bridges share the fresh, checked context.
-  let reauth: JarvisResolution;
+  // Reauthorize ONCE at bridge time with a genuinely FRESH, trusted, DB-backed resolve
+  // (R2 / F-02); both bridges share the fresh, checked context. A throw fails closed.
+  let reauth: JarvisContext | JarvisApiDenial;
   try {
-    reauth = await resolve();
+    reauth = await reauthorize();
   } catch {
     reauth = { denied: "not_enabled" };
   }

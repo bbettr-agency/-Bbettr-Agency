@@ -159,7 +159,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     //     req.signal is deliberately NOT propagated into the durable lifecycle.
     const outcome = await runDurableTurn(
       { message: parsed.data.message, threadId: parsed.data.threadId, idempotencyKey: parsed.data.idempotencyKey },
-      { provider, resolveContext: async () => ctx }
+      {
+        provider,
+        // Stable request-time context for preflight/claim (the identity already
+        // authenticated above at request entry).
+        resolveContext: async () => ctx,
+        // R2 / F-02: dedicated FRESH bridge-time reauthorization. Pass the resolver
+        // itself (NOT a pre-captured snapshot) so it re-resolves current server-side
+        // identity/role/workspace/grants at the bridge boundary. It reads only trusted
+        // server state (session cookie → getCurrentProfile, current_workspace_id(),
+        // DB grants) — never model/body/proposed_intent/browser input — and never
+        // depends on req.signal, so a client disconnect cannot detach it.
+        reauthorize: resolveJarvisContextApi,
+      }
     );
 
     // 11-12. Map to the bounded public DTO, no-store.
