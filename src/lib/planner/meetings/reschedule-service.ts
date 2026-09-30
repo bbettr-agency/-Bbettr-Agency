@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { newCorrelationId } from "@/lib/net";
 import { reconcileMeeting } from "@/lib/planner/scheduling/service";
 import { sendMeetingConfirmationEmail } from "@/lib/email/meeting-notifications";
+import { emitMeetingInvitations } from "@/lib/calendar/invitation-service";
+import { isMeetingInvitesViaResendEnabled } from "@/lib/flags";
 import { listBusyIntervals } from "@/lib/google/calendar/availability";
 import { hashRescheduleToken, isWellFormedRawToken } from "./reschedule-token";
 import {
@@ -229,9 +231,19 @@ export async function confirmRescheduleByToken(
     /* pending for scheduler */
   }
 
-  // Best-effort branded confirmation to attendees (makes the "a confirmation
-  // will be sent" promise real). Never blocks or fails the reschedule.
-  await sendRescheduleConfirmations(meetingId, meeting.title, slotStartIso, slotEndIso, tz);
+  // Best-effort attendee notification of the new time. With the invitation fix on,
+  // this emits an updated .ics REQUEST (same UID, higher SEQUENCE) so the guest's
+  // existing calendar entry moves in place; otherwise the legacy branded
+  // confirmation runs. Never blocks or fails the reschedule.
+  if (isMeetingInvitesViaResendEnabled()) {
+    try {
+      await emitMeetingInvitations(meetingId);
+    } catch {
+      /* best-effort */
+    }
+  } else {
+    await sendRescheduleConfirmations(meetingId, meeting.title, slotStartIso, slotEndIso, tz);
+  }
 
   return {
     status: "ok",
