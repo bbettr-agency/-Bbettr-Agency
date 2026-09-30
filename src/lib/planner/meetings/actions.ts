@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isPlannerEnabled } from "@/lib/flags";
+import { isPlannerEnabled, isMeetingInvitesViaResendEnabled } from "@/lib/flags";
 import { newCorrelationId } from "@/lib/net";
 import { reconcileMeeting } from "@/lib/planner/scheduling/service";
 import {
@@ -12,6 +12,7 @@ import {
   sendNoShowFollowUpEmail,
   sendMeetingFollowUpEmail,
 } from "@/lib/email/meeting-notifications";
+import { emitMeetingInvitations, type InvitationSummary } from "@/lib/calendar/invitation-service";
 import { validateMeetingInput, normaliseAttendees } from "./validate";
 import { issueRescheduleToken } from "./reschedule-token";
 import { personalise } from "./followup-templates";
@@ -98,6 +99,39 @@ async function sendConfirmations(
 }
 
 /**
+ * Map an invitation-delivery summary to the honest email fields of a meeting
+ * action result. No recipients → no claim; any per-recipient failure → NOT "sent",
+ * and the failed addresses are surfaced (never a clean "delivered" on API-accept).
+ */
+function invitationToResult(inv: InvitationSummary): {
+  emailSent?: boolean;
+  emailWarning?: string;
+  failedRecipients?: string[];
+} {
+  if (inv.attempted === 0) return {};
+  const failed = inv.recipients.filter((r) => r.outcome === "failed").map((r) => r.email);
+  if (inv.failed === 0 && inv.sent > 0) return { emailSent: true };
+  if (failed.length > 0) {
+    return {
+      emailSent: false,
+      emailWarning: `Invitation could not be delivered to ${failed.length} recipient(s).`,
+      failedRecipients: failed,
+    };
+  }
+  return {}; // everything was already up to date (skipped) — nothing new to report
+}
+
+/** Deliver invitations for a meeting's current state (flag-gated). Best-effort. */
+async function emitInvitationsSafely(meetingId: string): Promise<InvitationSummary | null> {
+  if (!isMeetingInvitesViaResendEnabled()) return null;
+  try {
+    return await emitMeetingInvitations(meetingId);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Invoke the reconciliation service after a committed write, threading the one
  * correlation id for this request so every downstream log line (service →
  * engine → provider) shares it. Bounded and best-effort: it is AWAITED (not
@@ -174,16 +208,22 @@ export async function createMeetingAction(
   }
 
   await project(newId, correlationId);
-  // Branded Portal confirmation — STRUCTURALLY non-fatal (the meeting is already
-  // committed): the send is wrapped so it can never throw out of the action and
-  // leave a created meeting reported as failed. Sent only on a genuine first create
-  // (the idempotency replay/adopt paths above return earlier, so a refresh/double-
-  // click never re-sends).
-  let email: { emailSent?: boolean; emailWarning?: string } = {};
-  try {
-    email = await sendConfirmations(newId, input, attendees);
-  } catch {
-    email = { emailSent: false, emailWarning: "Confirmation email could not be delivered." };
+  // Guest notification — STRUCTURALLY non-fatal (the meeting is already committed):
+  // wrapped so it can never throw out of the action and leave a created meeting
+  // reported as failed. With MEETING_INVITES_VIA_RESEND on, this sends the single
+  // consolidated .ics invitation (Google sends none); otherwise the legacy branded
+  // confirmation runs unchanged. The idempotency replay/adopt paths above return
+  // earlier, so a refresh/double-click never re-sends.
+  let email: { emailSent?: boolean; emailWarning?: string; failedRecipients?: string[] } = {};
+  const inv = await emitInvitationsSafely(newId);
+  if (inv) {
+    email = invitationToResult(inv);
+  } else if (!isMeetingInvitesViaResendEnabled()) {
+    try {
+      email = await sendConfirmations(newId, input, attendees);
+    } catch {
+      email = { emailSent: false, emailWarning: "Confirmation email could not be delivered." };
+    }
   }
   revalidatePath(MEETINGS_PATH);
   return { ok: true, id: newId, ...email };
@@ -254,8 +294,11 @@ export async function updateMeetingAction(
   }
 
   await project(id, correlationId);
+  // Emit updated invitations (attendee-visible change → higher SEQUENCE REQUEST;
+  // newly added → REQUEST; removed → CANCEL). Internal-only edits send nothing.
+  const inv = await emitInvitationsSafely(id);
   revalidatePath(MEETINGS_PATH);
-  return { ok: true, id };
+  return { ok: true, id, ...(inv ? invitationToResult(inv) : {}) };
 }
 
 export async function cancelMeetingAction(id: string): Promise<MeetingActionResult> {
@@ -278,8 +321,11 @@ export async function cancelMeetingAction(id: string): Promise<MeetingActionResu
   if (error) return { error: error.message };
 
   await project(id, correlationId);
+  // Emit CANCEL invitations to invited guests (same UID, higher SEQUENCE,
+  // METHOD:CANCEL) — the guest-facing source of truth now that Google is silent.
+  const inv = await emitInvitationsSafely(id);
   revalidatePath(MEETINGS_PATH);
-  return { ok: true, id };
+  return { ok: true, id, ...(inv ? invitationToResult(inv) : {}) };
 }
 
 /**

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // must not re-send.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireAdmin: vi.fn(async () => ({ id: "admin-uid", role: "admin" })) }));
-vi.mock("@/lib/flags", () => ({ isPlannerEnabled: vi.fn(() => true) }));
+vi.mock("@/lib/flags", () => ({ isPlannerEnabled: vi.fn(() => true), isMeetingInvitesViaResendEnabled: () => false }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/planner/scheduling/service", () => ({ reconcileMeeting: vi.fn(async () => ({ result: "success" })) }));

@@ -159,6 +159,14 @@ export type Json = string | number | boolean | null | { [key: string]: Json } | 
 // Phase 3 — meetings + calendar projection.
 export type MeetingStatus = "scheduled" | "cancelled";
 export type MeetState = "not_requested" | "pending" | "ready" | "failed";
+export type MeetingInvitationMethod = "request" | "cancel";
+export type MeetingInvitationStatus =
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "bounced"
+  | "complained"
+  | "failed";
 export type ProjectionSyncState =
   | "not_applicable"
   | "pending"
@@ -1863,6 +1871,48 @@ export interface Database {
           }
         ];
       };
+      meeting_invitations: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          attendee_email: string;
+          method: MeetingInvitationMethod;
+          sequence: number;
+          ics_uid: string;
+          content_signature: string;
+          resend_message_id: string | null;
+          status: MeetingInvitationStatus;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+          sent_at: string | null;
+          delivered_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          attendee_email: string;
+          method: MeetingInvitationMethod;
+          sequence: number;
+          ics_uid: string;
+          content_signature: string;
+          resend_message_id?: string | null;
+          status?: MeetingInvitationStatus;
+          last_error?: string | null;
+          sent_at?: string | null;
+          delivered_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["meeting_invitations"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "meeting_invitations_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "meetings";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
       calendar_projections: {
         Row: {
           id: string;
@@ -2116,6 +2166,7 @@ export type CommandReceipt = Database["public"]["Tables"]["command_receipts"]["R
 export type CalendarCredential = Database["public"]["Tables"]["calendar_credentials"]["Row"];
 export type Meeting = Database["public"]["Tables"]["meetings"]["Row"];
 export type MeetingAttendee = Database["public"]["Tables"]["meeting_attendees"]["Row"];
+export type MeetingInvitation = Database["public"]["Tables"]["meeting_invitations"]["Row"];
 export type CalendarProjection = Database["public"]["Tables"]["calendar_projections"]["Row"];
 
 // ─────────────────────────────────────────────────────────────────────────────

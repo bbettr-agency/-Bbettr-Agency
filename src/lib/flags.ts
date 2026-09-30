@@ -65,3 +65,17 @@ export function isJarvisEnabled(): boolean {
 export function isJarvisIntelligenceEnabled(): boolean {
   return isJarvisEnabled() && process.env.JARVIS_INTELLIGENCE_ENABLED === "true";
 }
+
+/**
+ * MEETING_INVITES_VIA_RESEND — the calendar invitation delivery fix. When ON,
+ * external meeting attendees are invited by the Portal via an authenticated,
+ * DMARC-aligned Resend email carrying a standards-compliant .ics (Google Calendar
+ * still stores the event/Meet but sends NO guest email — GOOGLE_CALENDAR_SEND_UPDATES
+ * must be set to "none"). When OFF (default), the legacy branded-confirmation path
+ * runs unchanged, so this flag is a safe, reversible rollout switch. Read at
+ * request time; anything other than "true" ⇒ off. Server-only. NOT a security
+ * boundary — admin-only access is enforced independently by requireAdmin()/RLS.
+ */
+export function isMeetingInvitesViaResendEnabled(): boolean {
+  return process.env.MEETING_INVITES_VIA_RESEND === "true";
+}
