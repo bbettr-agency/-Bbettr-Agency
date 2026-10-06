@@ -68,6 +68,21 @@ describe("callProviderWithPolicy — success + limits", () => {
     expect(req.timeoutMs).toBe(5000); // full budget on the first (only) attempt
     expect(req.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("threads an optional structured-output jsonSchema into the provider request", async () => {
+    const provider = createMockProvider({ text: '{"assistant_message":"ok"}' });
+    const spy = vi.spyOn(provider, "complete");
+    const schema = { name: "emit_assistant_response", schema: { type: "object" } };
+    await callProviderWithPolicy(provider, { ...INPUT, jsonSchema: schema }, limits(), { now: () => 0 });
+    expect(spy.mock.calls[0][0].jsonSchema).toEqual(schema);
+  });
+
+  it("omits jsonSchema when the caller doesn't request structured output", async () => {
+    const provider = createMockProvider({ text: '{"assistant_message":"ok"}' });
+    const spy = vi.spyOn(provider, "complete");
+    await callProviderWithPolicy(provider, INPUT, limits(), { now: () => 0 });
+    expect(spy.mock.calls[0][0].jsonSchema).toBeUndefined();
+  });
 });
 
 describe("callProviderWithPolicy — retry policy (1 call + ≤1 transient retry)", () => {

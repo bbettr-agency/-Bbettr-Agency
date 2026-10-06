@@ -25,7 +25,7 @@ import type { IntelligenceLimits } from "@/lib/jarvis/llm/limits";
  * implemented in Slice C; if one is ever added it MUST consume this same budget.
  */
 
-export type ProviderCallInput = Pick<LLMCompletionRequest, "system" | "messages">;
+export type ProviderCallInput = Pick<LLMCompletionRequest, "system" | "messages" | "jsonSchema">;
 
 export interface ProviderCallOptions {
   /** Injectable clock for deterministic tests. Defaults to Date.now. */
@@ -61,6 +61,7 @@ export async function callProviderWithPolicy(
         maxOutputTokens: limits.maxOutputTokens,
         timeoutMs: remaining, // ONLY the remaining overall budget — never a fresh full timeout
         signal: controller.signal,
+        jsonSchema: input.jsonSchema, // structured-output request (undefined ⇒ plain text)
       };
 
       try {

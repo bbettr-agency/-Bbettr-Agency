@@ -316,11 +316,13 @@ describe("orchestrator — deterministic routing + clarification", () => {
 // ---------- (7/8) context + prompt + provider request ----------
 
 describe("orchestrator — trusted prompt + provider isolation", () => {
-  it("passes ONLY {system, messages, maxOutputTokens, timeoutMs, signal} to the provider — no authority", async () => {
+  it("passes ONLY {system, messages, maxOutputTokens, timeoutMs, signal, jsonSchema} to the provider — no authority", async () => {
     const { provider, seen } = makeProvider();
     await runIntelligenceTurn({ message: "hi" }, baseDeps({ provider }));
     const req = seen.request!;
-    expect(Object.keys(req).sort()).toEqual(["maxOutputTokens", "messages", "signal", "system", "timeoutMs"]);
+    // jsonSchema is a trusted, caller-built structured-output descriptor (the
+    // AssistantResponse contract) — NOT authority and NOT model/user data.
+    expect(Object.keys(req).sort()).toEqual(["jsonSchema", "maxOutputTokens", "messages", "signal", "system", "timeoutMs"]);
     const blob = JSON.stringify(req);
     expect(blob).not.toContain("w1"); // no workspace id
     expect(blob).not.toContain("jarvis.use"); // no grants

@@ -59,6 +59,12 @@ export interface AnthropicMessageCreateBody {
    * surface as provider_4xx (safe failure) — the adapter targets Sonnet 5.
    */
   thinking?: { type: "disabled" };
+  /** Native structured output: a single tool whose input_schema is the response
+   *  contract, FORCED via tool_choice so the model must emit a conforming JSON
+   *  object (no prose, no fences, no multiple objects). Present only when the
+   *  caller requests structured output; absent ⇒ identical plain-text behaviour. */
+  tools?: Array<{ name: string; description?: string; input_schema: Record<string, unknown> }>;
+  tool_choice?: { type: "tool"; name: string } | { type: "auto" } | { type: "any" };
 }
 export interface AnthropicContentBlockLike {
   type: string;
@@ -91,6 +97,26 @@ export interface AnthropicAdapterConfig {
 
 /** Extract ONLY text blocks, in order, concatenated deterministically. Non-text
  *  blocks (including any thinking/reasoning) are ignored entirely. */
+/** Extract a FORCED tool-use block's input (the structured response object) as a
+ *  JSON string, or null if no matching tool_use block with an object input exists.
+ *  The SDK has already parsed `input` into an object, so this is a canonical,
+ *  prose-free serialization that the strict response contract then validates. */
+function extractToolInput(content: AnthropicContentBlockLike[], toolName: string): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (
+      block &&
+      block.type === "tool_use" &&
+      block.name === toolName &&
+      block.input !== null &&
+      typeof block.input === "object"
+    ) {
+      return JSON.stringify(block.input);
+    }
+  }
+  return null;
+}
+
 function extractText(content: AnthropicContentBlockLike[]): string {
   if (!Array.isArray(content)) return "";
   let out = "";
@@ -187,6 +213,9 @@ export function createAnthropicProvider(config: AnthropicAdapterConfig): LLMProv
     async complete(request: LLMCompletionRequest): Promise<LLMCompletionResult> {
       const started = Date.now();
       try {
+        // Native structured output: when a schema is requested, force a single tool
+        // call whose input IS the response object. Absent ⇒ unchanged plain-text path.
+        const structured = request.jsonSchema;
         const message = await client.messages.create(
           {
             model, // trusted configured model
@@ -194,13 +223,24 @@ export function createAnthropicProvider(config: AnthropicAdapterConfig): LLMProv
             system: request.system, // top-level system; NEVER a system-role message
             messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
             thinking: { type: "disabled" }, // reserve the whole budget for the JSON contract (see body type)
+            ...(structured
+              ? {
+                  tools: [{ name: structured.name, description: structured.description, input_schema: structured.schema }],
+                  tool_choice: { type: "tool", name: structured.name },
+                }
+              : {}),
           },
           // The orchestrator's AbortSignal is the cancellation authority; keep the
           // SDK from adding its own retries on this request too.
           { signal: request.signal, maxRetries: 0 }
         );
 
-        const text = extractText(message.content);
+        // Prefer the forced tool input (structured); fall back to text blocks so an
+        // unexpected non-tool reply still flows through the strict contract (and fails
+        // closed as invalid_response if it isn't valid).
+        const text = structured
+          ? (extractToolInput(message.content, structured.name) ?? extractText(message.content))
+          : extractText(message.content);
         if (text.length === 0) {
           throw new LLMProviderError("invalid_response", {
             providerId: ANTHROPIC_PROVIDER_ID,

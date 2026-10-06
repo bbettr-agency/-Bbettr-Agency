@@ -21,7 +21,7 @@ import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 import { planContext as defaultPlanContext } from "./context-router";
 import { buildSystemPrompt, buildSystemPromptFromData } from "./prompt";
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
-import { parseAssistantResponse } from "./response-contract";
+import { parseAssistantResponse, ASSISTANT_RESPONSE_SCHEMA } from "./response-contract";
 import { callProviderWithPolicy } from "./provider-call";
 import { bridgeProposedIntent, type ActionBridgeDeps, type ActionBridgeResult } from "./action-bridge";
 import { bridgeMemoryCandidate, type MemoryBridgeDeps, type MemoryBridgeResult } from "./memory-bridge";
@@ -440,7 +440,14 @@ async function executeLifecycle(params: {
   let finishReason: string | null = null;
   let outputTokens: number | null = null;
   try {
-    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessagesFinal }, effectiveLimits);
+    const result = await callProviderWithPolicy(
+      deps.provider,
+      // Every Jarvis turn (V1 and V2) requires the AssistantResponse contract, so we
+      // request it as native structured output — the model returns one conforming JSON
+      // object instead of free text. The strict parseAssistantResponse below still runs.
+      { system, messages: providerMessagesFinal, jsonSchema: ASSISTANT_RESPONSE_SCHEMA },
+      effectiveLimits
+    );
     resultText = result.text;
     providerId = result.providerId; // TRUSTED adapter metadata, never model-claimed
     model = result.model;
