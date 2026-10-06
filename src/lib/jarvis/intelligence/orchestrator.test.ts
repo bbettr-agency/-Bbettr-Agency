@@ -5,6 +5,7 @@ vi.mock("@/lib/flags", () => ({
   isJarvisEnabled: vi.fn(() => true),
   isJarvisIntelligenceEnabled: vi.fn(() => true),
   isJarvisRetrievalV2Enabled: vi.fn(() => false),
+  isJarvisAgenticReadEnabled: vi.fn(() => false),
 }));
 
 // The orchestrator statically imports the real auth/identity/supabase modules

@@ -139,3 +139,26 @@ export function buildSystemPromptFromData(dataBlock: string): string {
     "===== END CONTEXT =====",
   ].join("\n");
 }
+
+/**
+ * Additional instructions for the Milestone A AGENTIC READ loop. The model gathers
+ * authoritative Portal data by calling READ TOOLS (never by inventing facts), then
+ * answers. Kept separate from V1/V2 instruction blocks; combined with the frozen
+ * SYSTEM_INSTRUCTIONS and the shared RETRIEVAL_V2_INSTRUCTIONS (confidence/money/
+ * formatting discipline) so behaviour is consistent with the deterministic path.
+ */
+const AGENTIC_READ_INSTRUCTIONS = [
+  "You can gather authoritative Portal data by calling the provided READ TOOLS. You may call several tools and do so over a few rounds, but you MUST be efficient: request only what the question needs, and STOP and answer as soon as you have enough evidence. There is a hard cap on rounds.",
+  "Every fact in your answer MUST come from a tool result you actually received this turn. NEVER invent clients, ids, counts, amounts, statuses, or dates, and never state a fact a tool did not return. If a tool could not retrieve something, say you could not check it — do not assume it is empty or zero.",
+  "To reason about a specific client, first call portal_resolve_client to get a canonical id, then portal_get_client_overview (and portal_get_client_domain for depth). For cross-client questions use portal_list_clients (filters) and portal_aggregate. Do NOT ask a tool to compute something another tool already answered — avoid repeating identical calls.",
+  "Agency-wide counts, sums and currency come from portal_aggregate / portal_list_clients, which compute them deterministically. NEVER compute operational or financial totals yourself from listed rows, and never combine amounts in different currencies.",
+  "When you have enough evidence, respond by emitting the assistant response object (the final-answer tool). Base your confidence on the evidence actually gathered — the application sets the authoritative confidence; do not inflate it.",
+] as const;
+
+export function buildAgenticSystemPrompt(): string {
+  const instructions = [...SYSTEM_INSTRUCTIONS, ...RETRIEVAL_V2_INSTRUCTIONS, ...AGENTIC_READ_INSTRUCTIONS].join("\n");
+  const actionCatalog = buildActionCatalog();
+  return [instructions, "", actionCatalog].join("\n");
+}
+
+export const AGENTIC_READ_INSTRUCTION_LINES = AGENTIC_READ_INSTRUCTIONS;
