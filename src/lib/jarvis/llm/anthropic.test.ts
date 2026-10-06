@@ -398,3 +398,57 @@ describe("anthropic adapter — native structured output (forced tool use)", () 
     await expect(provider.complete(req({ jsonSchema: SCHEMA }))).rejects.toMatchObject({ kind: "invalid_response" });
   });
 });
+
+describe("anthropic adapter — completeWithTools (agentic read)", () => {
+  const toolReq = () => ({
+    system: "SYS",
+    messages: [{ role: "user" as const, content: "what is happening across the agency?" }],
+    tools: [{ name: "portal_aggregate", description: "agg", inputSchema: { type: "object" } }],
+    toolChoice: { type: "any" as const },
+    maxOutputTokens: 2000,
+    timeoutMs: 30_000,
+  });
+
+  it("sends tools + tool_choice and extracts ALL tool_use blocks", async () => {
+    const { provider, seen } = withFake({
+      respond: async () =>
+        okMessage({
+          content: [
+            { type: "tool_use", id: "tu1", name: "portal_aggregate", input: { metric: "open_tasks" } },
+            { type: "tool_use", id: "tu2", name: "portal_list_clients", input: { status: "active" } },
+          ],
+          stop_reason: "tool_use",
+        }),
+    });
+    const r = await provider.completeWithTools!(toolReq());
+    expect(seen.body?.tools?.[0]).toMatchObject({ name: "portal_aggregate", input_schema: { type: "object" } });
+    expect(seen.body?.tool_choice).toEqual({ type: "any" });
+    expect(r.toolUses).toHaveLength(2);
+    expect(r.toolUses[0]).toMatchObject({ type: "tool_use", id: "tu1", name: "portal_aggregate" });
+    expect(r.providerId).toBe(ANTHROPIC_PROVIDER_ID);
+  });
+
+  it("maps tool_result content blocks into the SDK message shape", async () => {
+    const { provider, seen } = withFake({ respond: async () => okMessage({ content: [{ type: "tool_use", id: "x", name: "emit_assistant_response", input: { assistant_message: "ok" } }], stop_reason: "tool_use" }) });
+    await provider.completeWithTools!({
+      ...toolReq(),
+      messages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: [{ type: "tool_use", id: "tu1", name: "portal_aggregate", input: { metric: "open_tasks" } }] },
+        { role: "user", content: [{ type: "tool_result", toolUseId: "tu1", content: "open tasks: 4" }] },
+      ],
+      toolChoice: { type: "tool", name: "emit_assistant_response" },
+    });
+    const msgs = seen.body?.messages as Array<{ role: string; content: unknown }>;
+    const toolResultMsg = msgs[2].content as Array<Record<string, unknown>>;
+    expect(toolResultMsg[0]).toEqual({ type: "tool_result", tool_use_id: "tu1", content: "open tasks: 4" });
+    expect(seen.body?.tool_choice).toEqual({ type: "tool", name: "emit_assistant_response" });
+  });
+
+  it("disables thinking and forces maxRetries:0 on the tool turn too", async () => {
+    const { provider, seen } = withFake({ respond: async () => okMessage({ content: [{ type: "tool_use", id: "x", name: "portal_aggregate", input: {} }], stop_reason: "tool_use" }) });
+    await provider.completeWithTools!(toolReq());
+    expect(seen.body?.thinking).toEqual({ type: "disabled" });
+    expect(seen.options?.maxRetries).toBe(0);
+  });
+});

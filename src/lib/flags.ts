@@ -91,3 +91,16 @@ export function isMeetingInvitesViaResendEnabled(): boolean {
 export function isJarvisRetrievalV2Enabled(): boolean {
   return process.env.JARVIS_RETRIEVAL_V2 === "true";
 }
+
+/**
+ * JARVIS_AGENTIC_READ — Milestone A: the bounded, multi-tool agentic READ loop that
+ * lets Jarvis dynamically combine authorised Portal reads to answer cross-client
+ * questions. Default OFF and ADDITIVE: while off, the deterministic Slice 1 V2 path
+ * (and V1) are used byte-for-byte unchanged. Read-only — it adds NO write capability.
+ * Read at request time; anything other than "true" ⇒ off. Server-only. NOT a security
+ * boundary — all tool reads still run under the caller's RLS identity + grants, never
+ * service-role, and the model can invoke only registered read tools (no arbitrary SQL).
+ */
+export function isJarvisAgenticReadEnabled(): boolean {
+  return process.env.JARVIS_AGENTIC_READ === "true";
+}

@@ -76,13 +76,71 @@ export interface LLMCompletionResult {
   latencyMs: number;
 }
 
+// ── Bounded tool-use (agentic read) — Milestone A ────────────────────────────
+// An OPTIONAL provider capability for the bounded multi-tool read loop. It does NOT
+// widen the provider's authority: the provider only relays tool SCHEMAS and returns
+// the model's tool-call requests; all tool EXECUTION (and all data access) happens in
+// the trusted orchestrator/executor under RLS. Providers that cannot do tool use omit
+// `completeWithTools`, and the agentic path simply stays unavailable for them.
+
+/** A read-tool the model may invoke this round. `inputSchema` is JSON Schema. */
+export interface LLMToolSpec {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Forcing strategy. "any" forces SOME tool call every round (keeps every model output
+ *  schema-controlled — no free prose); "tool" forces one specific tool; "auto" lets the
+ *  model choose whether to call a tool. */
+export type LLMToolChoice = { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
+
+export type LLMTextBlock = { type: "text"; text: string };
+export type LLMToolUseBlock = { type: "tool_use"; id: string; name: string; input: unknown };
+export type LLMToolResultBlock = { type: "tool_result"; toolUseId: string; content: string; isError?: boolean };
+export type LLMContentBlock = LLMTextBlock | LLMToolUseBlock | LLMToolResultBlock;
+
+/** A conversation entry that may carry structured content blocks (tool_use/tool_result)
+ *  in addition to plain text. Still no system role — system travels separately. */
+export interface LLMToolMessage {
+  role: "user" | "assistant";
+  content: string | LLMContentBlock[];
+}
+
+export interface LLMToolRequest {
+  /** Trusted system instructions (never model/user text). */
+  system: string;
+  messages: LLMToolMessage[];
+  /** The registered read tools exposed this round (plus the final-answer tool). */
+  tools: LLMToolSpec[];
+  toolChoice: LLMToolChoice;
+  maxOutputTokens: number;
+  /** Per-call wall-clock budget; the orchestrator owns the overall turn deadline. */
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+export interface LLMToolResult {
+  /** Every tool-call the model requested this round (zero or more). */
+  toolUses: LLMToolUseBlock[];
+  /** Any text blocks (normally empty under tool_choice "any"/"tool"). */
+  text: string;
+  providerId: string;
+  model: string;
+  finishReason: string | null;
+  usage: LLMUsage;
+  latencyMs: number;
+}
+
 /**
  * A configured provider. `complete` resolves with a result on success, or throws
  * an LLMProviderError (see errors.ts) on any failure — so callers classify
  * retryable vs non-retryable via the typed error, not by parsing strings.
+ * `completeWithTools` is the OPTIONAL bounded tool-use turn (agentic read).
  */
 export interface LLMProvider {
   readonly id: string;
   readonly model: string;
   complete(request: LLMCompletionRequest): Promise<LLMCompletionResult>;
+  completeWithTools?(request: LLMToolRequest): Promise<LLMToolResult>;
 }

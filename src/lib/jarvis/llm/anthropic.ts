@@ -6,7 +6,15 @@ import Anthropic, {
   APIConnectionTimeoutError,
   APIUserAbortError,
 } from "@anthropic-ai/sdk";
-import type { LLMProvider, LLMCompletionRequest, LLMCompletionResult, LLMUsage } from "./provider";
+import type {
+  LLMProvider,
+  LLMCompletionRequest,
+  LLMCompletionResult,
+  LLMUsage,
+  LLMToolRequest,
+  LLMToolResult,
+  LLMToolUseBlock,
+} from "./provider";
 import { LLMProviderError, type LLMErrorKind } from "./errors";
 
 /**
@@ -39,7 +47,9 @@ export interface AnthropicMessageCreateBody {
   model: string;
   max_tokens: number;
   system?: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  // content is a plain string for the structured path, or an array of content blocks
+  // (text / tool_use / tool_result) for the agentic tool-use path.
+  messages: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>;
   /**
    * Extended thinking is DISABLED for Jarvis operational chat. Deliberate V1
    * policy (not a casual hack), justified by four facts:
@@ -115,6 +125,19 @@ function extractToolInput(content: AnthropicContentBlockLike[], toolName: string
     }
   }
   return null;
+}
+
+/** Extract ALL tool_use blocks (agentic read loop) as provider-independent tool
+ *  calls. The SDK has already parsed each `input` into an object. */
+function extractToolUses(content: AnthropicContentBlockLike[]): LLMToolUseBlock[] {
+  if (!Array.isArray(content)) return [];
+  const out: LLMToolUseBlock[] = [];
+  for (const block of content) {
+    if (block && block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
+      out.push({ type: "tool_use", id: block.id, name: block.name, input: block.input ?? {} });
+    }
+  }
+  return out;
 }
 
 function extractText(content: AnthropicContentBlockLike[]): string {
@@ -252,6 +275,55 @@ export function createAnthropicProvider(config: AnthropicAdapterConfig): LLMProv
           text,
           providerId: ANTHROPIC_PROVIDER_ID, // trusted
           model, // trusted configured identity (never from model text)
+          finishReason: mapFinishReason(message.stop_reason),
+          usage: mapUsage(message.usage),
+          latencyMs: Date.now() - started,
+        };
+      } catch (e) {
+        throw mapError(e, request.signal);
+      }
+    },
+
+    // Bounded tool-use turn for the agentic read loop. Same transport invariants as
+    // `complete` (maxRetries:0, orchestrator-owned signal, thinking disabled, no key in
+    // output). The model's tool CHOICE is relayed back; execution happens in trusted code.
+    async completeWithTools(request: LLMToolRequest): Promise<LLMToolResult> {
+      const started = Date.now();
+      try {
+        const message = await client.messages.create(
+          {
+            model, // trusted configured model
+            max_tokens: request.maxOutputTokens,
+            system: request.system,
+            messages: request.messages.map((m) => ({
+              role: m.role,
+              content:
+                typeof m.content === "string"
+                  ? m.content
+                  : m.content.map((b) =>
+                      b.type === "tool_use"
+                        ? { type: "tool_use", id: b.id, name: b.name, input: b.input }
+                        : b.type === "tool_result"
+                          ? { type: "tool_result", tool_use_id: b.toolUseId, content: b.content, ...(b.isError ? { is_error: true } : {}) }
+                          : { type: "text", text: b.text }
+                    ),
+            })),
+            thinking: { type: "disabled" },
+            tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
+            tool_choice:
+              request.toolChoice.type === "tool"
+                ? { type: "tool", name: request.toolChoice.name }
+                : request.toolChoice.type === "any"
+                  ? { type: "any" }
+                  : { type: "auto" },
+          },
+          { signal: request.signal, maxRetries: 0 }
+        );
+        return {
+          toolUses: extractToolUses(message.content),
+          text: extractText(message.content),
+          providerId: ANTHROPIC_PROVIDER_ID,
+          model,
           finishReason: mapFinishReason(message.stop_reason),
           usage: mapUsage(message.usage),
           latencyMs: Date.now() - started,
