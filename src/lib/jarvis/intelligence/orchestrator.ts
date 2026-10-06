@@ -308,8 +308,12 @@ async function executeLifecycle(params: {
   if (plan.kind === "ambiguous_client" || plan.kind === "unknown_client") {
     const clarification =
       plan.kind === "ambiguous_client"
-        ? `I can help with that — which client do you mean: ${plan.candidates.map((c) => c.name).join(", ")}?`
-        : "I couldn't confidently tell which client you mean. Which client should I look at?";
+        ? // MULTIPLE credible matches ⇒ ask which, listing candidates.
+          `I can help with that — which client do you mean: ${plan.candidates.map((c) => c.name).join(", ")}?`
+        : // ZERO credible matches ⇒ NOT found (never phrased as ambiguity).
+          plan.query
+          ? `I couldn't find a client matching "${plan.query}" in the Portal.`
+          : "I couldn't find a matching client in the Portal.";
     // A clarification IS an assistant success turn — only claim ok if it stored.
     const clarificationId = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
       status: "ok",

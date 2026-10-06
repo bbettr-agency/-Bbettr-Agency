@@ -16,7 +16,7 @@ export type ContextPlan =
   | { kind: "user" }
   | { kind: "client"; clientId: string; clientName: string }
   | { kind: "ambiguous_client"; candidates: { id: string; name: string }[] }
-  | { kind: "unknown_client" };
+  | { kind: "unknown_client"; query?: string };
 
 /** The validated (NOT executed) proposed action shape. capability_id has ZERO
  *  authority in Slice C — the F1 bridge (Slice D) allowlists/executes. */

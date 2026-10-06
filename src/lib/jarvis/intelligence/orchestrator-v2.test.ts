@@ -175,6 +175,18 @@ describe("orchestrator — Retrieval V2 integration", () => {
     expect(seen.calls).toBe(0);
   });
 
+  it("unknown client is phrased as NOT-FOUND (names the query), never as ambiguity", async () => {
+    const seam = vi.fn(async () => ({ plan: { kind: "unknown_client", query: "Globex" } as ContextPlan, dataBlock: null, trace: TRACE }));
+    const res = await runIntelligenceTurn({ message: "What about Globex?" }, deps({ runRetrieval: seam }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // ZERO matches ⇒ "couldn't find … Globex", NOT the ambiguous "which client do you mean".
+      expect(res.assistantMessage).toContain("couldn't find");
+      expect(res.assistantMessage).toContain("Globex");
+      expect(res.assistantMessage).not.toContain("which client do you mean");
+    }
+  });
+
   it("attaches the V2 trace to persisted provenance (client plan)", async () => {
     const seam = vi.fn(async () => ({ plan: { kind: "client", clientId: "c1", clientName: "A&S" } as ContextPlan, dataBlock: "B", trace: TRACE }));
     const repo = makeRepo();

@@ -75,7 +75,9 @@ export async function runRetrievalV2Turn(
   } else if (plan.intent === "clarify") {
     contextPlan = { kind: "ambiguous_client", candidates: (plan.clarify?.candidates ?? []).map((c) => ({ id: c.id, name: c.canonicalName })) };
   } else if (plan.intent === "unresolved") {
-    contextPlan = { kind: "unknown_client" };
+    // Zero credible matches ⇒ NOT found (distinct from ambiguous). Carry the
+    // referenced name so the turn says exactly what it couldn't find.
+    contextPlan = { kind: "unknown_client", query: referencedName(message) };
   } else if (plan.mode === "discovery") {
     contextPlan = { kind: "agency" };
     dataBlock = await buildDiscoveryBlock(rc);
@@ -98,13 +100,37 @@ export async function runRetrievalV2Turn(
   return { plan: contextPlan, dataBlock, trace };
 }
 
+/** Extract the capitalized proper-noun phrase the user referred to (for a not-found
+ *  message). Mirrors the planner's client-reference cue; falls back to null. */
+function referencedName(originalMessage: string): string | undefined {
+  const m = originalMessage.match(
+    /\b(?:with|about|on|for|regarding|re)\s+([A-Z][A-Za-z0-9&'-]+(?:\s+[A-Z&][A-Za-z0-9&'-]+){0,4})/
+  );
+  return m ? m[1].trim() : undefined;
+}
+
 async function buildDiscoveryBlock(rc: RetrieverContext): Promise<string> {
   const d = await retrieveClientDiscovery(rc);
-  const lines = ["# client directory", "## AUTHORITATIVE PORTAL FACTS (source of operational truth)", `### Clients (${d.total} total)`];
-  if (d.status === "error") lines.push("- could not be retrieved this turn (do not assume none).");
-  else if (d.clients.length === 0) lines.push("- none on file.");
-  for (const c of d.clients) lines.push(`- ${redactIfSecret(c.name)} — ${c.status}`);
-  if (d.truncated) lines.push(`- (showing ${d.clients.length} of ${d.total}; narrow by status or service to see more)`);
+  const lines = [
+    "# client directory",
+    "## AUTHORITATIVE PORTAL FACTS (source of operational truth)",
+    // Deterministic, code-computed counts — the model MUST present these numbers
+    // exactly and MUST NOT recount or regroup the rows itself.
+    `### Clients — ${d.total} total${d.truncated ? ` (showing ${d.shown})` : ""}`,
+  ];
+  if (d.status === "error") {
+    lines.push("- could not be retrieved this turn (do not assume none).");
+    return lines.join("\n");
+  }
+  if (d.shown === 0) {
+    lines.push("- none on file.");
+    return lines.join("\n");
+  }
+  for (const g of d.groups) {
+    lines.push(`#### ${redactIfSecret(g.status)} (${g.count})`);
+    for (const c of g.clients) lines.push(`- ${redactIfSecret(c.name)}`);
+  }
+  if (d.truncated) lines.push(`- coverage: showing ${d.shown} of ${d.total} clients; narrow by status or service to see more.`);
   return lines.join("\n");
 }
 

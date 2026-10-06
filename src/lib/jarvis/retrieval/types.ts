@@ -204,6 +204,11 @@ export interface EvidencePackage {
   intent: QueryIntent;
   mode: RetrievalPlan["mode"];
   subject: EntityRef | null;
+  /** Deterministic answer-quality signal. "high" when identity resolved and no
+   *  retrieval FAILED/denied/unavailable; "qualified" otherwise. Bounded lists
+   *  (truncation) are COVERAGE and never reduce this. */
+  answerConfidence: "high" | "qualified";
+  confidenceBasis: string;
   /** Class 1/5 — authoritative Portal truth. */
   portalAuthoritative: DomainEvidence[];
   /** Class 2 — supplementary memory (kept separate). */

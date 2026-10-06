@@ -155,4 +155,34 @@ describe("buildSystemPromptFromData — Retrieval V2 output-shape hardening", ()
     expect(prompt).toMatch(/Distinguish ABSENCE from NON-RETRIEVAL/i);
     expect(prompt).toMatch(/DURABLE MEMORY is supplementary/i);
   });
+
+  it("instructs confidence to MIRROR the ANSWER QUALITY block and treat bounded lists as coverage", () => {
+    expect(prompt).toMatch(/match the ANSWER QUALITY block/i);
+    expect(prompt).toMatch(/is COVERAGE, not uncertainty/i);
+    expect(prompt).toMatch(/NEVER lower confidence because a list is bounded/i);
+  });
+
+  it("forbids inventing currency symbols/codes and '$0'", () => {
+    expect(prompt).toMatch(/currency CODE/i);
+    expect(prompt).toContain("no '$'");
+    expect(prompt).toMatch(/never assume ZAR/i);
+    expect(prompt).toMatch(/never '\$0'/i);
+    expect(prompt).toMatch(/Do not combine mixed-currency/i);
+  });
+
+  it("forbids idle action offers — propose_intent or a non-interactive suggestion only", () => {
+    expect(prompt).toMatch(/Do NOT ask 'Would you like me to/i);
+    expect(prompt).toMatch(/emit a `proposed_intent`/i);
+  });
+
+  it("forbids over-inference (valid negative onboarding answer, unestablished causes)", () => {
+    expect(prompt).toMatch(/valid negative onboarding answer/i);
+    expect(prompt).toMatch(/COMPLETE answer, not a missing field/i);
+    expect(prompt).toMatch(/Do not assert operational causes/i);
+  });
+
+  it("requires real line breaks + Markdown and forbids literal escape sequences", () => {
+    expect(prompt).toMatch(/real line breaks and Markdown/i);
+    expect(prompt).toMatch(/NEVER output literal escape sequences/i);
+  });
 });

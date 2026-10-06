@@ -117,3 +117,26 @@ describe("assembleClientEvidence — broad overview", () => {
     expect(a.budget.droppedDomains).toEqual(b.budget.droppedDomains);
   });
 });
+
+describe("assembleClientEvidence — confidence reflects retrieval, not coverage", () => {
+  it("is QUALIFIED when a domain could not be retrieved, and names it in the basis", async () => {
+    // fakeRegistry marks `contracts` as an error (non-retrieval, not absence).
+    const plan = planQuery({ message: "What is happening with A&S Wholesalers?", resolution: resolvedOne });
+    const pkg = await assembleClientEvidence(plan, rc, fakeRegistry());
+    expect(pkg.answerConfidence).toBe("qualified");
+    expect(pkg.confidenceBasis).toContain("contracts");
+  });
+
+  it("is HIGH when every Portal domain retrieved — truncation (bounded lists) does NOT lower it", async () => {
+    // All-ok registry: every domain returns ok, Pass-B detail is truncated under budget,
+    // yet confidence stays HIGH because truncation is coverage, not non-retrieval.
+    const allOk = new Map<DomainKey, RetrieverDescriptor>();
+    for (const d of PORTAL_OPERATIONAL_DOMAINS) allOk.set(d, fakeDescriptor(d, "ok"));
+    allOk.set("memory", fakeDescriptor("memory", "ok"));
+    const plan = planQuery({ message: "What is happening with A&S Wholesalers?", resolution: resolvedOne });
+    const pkg = await assembleClientEvidence(plan, rc, allOk);
+    expect(pkg.answerConfidence).toBe("high");
+    // A bounded list exists this turn, proving coverage≠confidence.
+    expect(pkg.portalAuthoritative.some((d) => d.truncated)).toBe(true);
+  });
+});

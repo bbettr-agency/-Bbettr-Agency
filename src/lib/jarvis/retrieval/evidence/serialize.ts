@@ -32,12 +32,23 @@ function isFinancialSummary(v: unknown): v is FinancialSummary {
   return !!v && typeof v === "object" && "basis" in v && "unpaidCount" in v;
 }
 
+/** Render an amount with its AUTHORITATIVE currency code only — NEVER invent a
+ *  symbol. Known currency ⇒ "ZAR 1999.99"; unknown ⇒ bare number (no "$", no code). */
+function amountWithCurrency(f: FinancialSummary): string {
+  return f.currency && f.currency !== "mixed" ? `${f.currency} ${f.amountRetrieved}` : `${f.amountRetrieved}`;
+}
+
 function financialLine(f: FinancialSummary): string {
-  const cur = f.currency && f.currency !== "mixed" ? `${f.currency} ` : f.currency === "mixed" ? "(mixed currencies) " : "";
-  if (f.exact) {
-    return `${f.unpaidCount} unpaid invoice(s), totalling ${cur}${f.amountRetrieved} (exact total)`;
+  // Zero unpaid: state it plainly with NO amount/symbol for the model to invent on.
+  if (f.unpaidCount === 0) return "0 unpaid invoices — nothing currently outstanding";
+  // Mixed currencies must NOT be collapsed into one fake total.
+  if (f.currency === "mixed") {
+    return `${f.unpaidCount} unpaid invoice(s) across MULTIPLE currencies — not summable into a single total; report per-invoice amounts, do not combine`;
   }
-  return `${f.unpaidCount} unpaid invoice(s); ${cur}${f.amountRetrieved} summed from ${f.rowsCounted} of ${f.unpaidCount} retrieved (PARTIAL — lower bound, NOT the exact total outstanding)`;
+  if (f.exact) {
+    return `${f.unpaidCount} unpaid invoice(s) totalling ${amountWithCurrency(f)} (exact total)`;
+  }
+  return `${f.unpaidCount} unpaid invoice(s); ${amountWithCurrency(f)} summed from ${f.rowsCounted} of ${f.unpaidCount} retrieved (PARTIAL — lower bound, NOT the exact total outstanding)`;
 }
 
 function renderValue(v: unknown): string {
@@ -79,6 +90,26 @@ const DOMAIN_LABEL: Record<DomainKey, string> = {
   people: "People / contact",
 };
 
+/** Per-domain unit noun so a bounded-list disclosure is unambiguous and never mixes
+ *  domains (e.g. "showing 8 of 21 events" vs "showing 10 of 12 files"). */
+const DOMAIN_UNIT: Partial<Record<DomainKey, string>> = {
+  activity: "events",
+  files: "files",
+  updates: "updates",
+  tasks: "tasks",
+  reports: "reports",
+  contracts: "contracts",
+  invoices: "invoices",
+  payments: "payments",
+  retainers: "retainers",
+  weekly_updates: "weekly updates",
+  deals: "deals",
+  project_stages: "stages",
+  onboarding: "submissions",
+  update_questions: "questions",
+  memory: "memory items",
+};
+
 function statusNote(status: RetrieverStatus): string | null {
   switch (status) {
     case "empty":
@@ -116,7 +147,9 @@ export function serializeDomainEvidence(de: DomainEvidence, now: Date): string {
   }
   for (const f of de.facts) lines.push(renderFact(f));
   if (de.truncated && de.availableCount != null) {
-    lines.push(`- (showing ${de.returnedCount} of ${de.availableCount})`);
+    const unit = DOMAIN_UNIT[de.domain] ?? "items";
+    // COVERAGE disclosure for THIS domain only — never mixed with another domain's counts.
+    lines.push(`- coverage: showing ${de.returnedCount} of ${de.availableCount} ${unit} (bounded list — this is coverage, not lower confidence)`);
   }
   const stale = staleNote(de, now);
   if (stale) lines.push(`- note: ${stale}`);
@@ -126,6 +159,11 @@ export function serializeDomainEvidence(de: DomainEvidence, now: Date): string {
 export function serializeEvidencePackage(pkg: EvidencePackage, now: Date = new Date()): string {
   const lines: string[] = [];
   lines.push(`# subject: ${pkg.subject ? clip(redactIfSecret(pkg.subject.name), 80) : pkg.mode}`);
+  // Deterministic answer-quality basis so confidence reflects claim TRUSTWORTHINESS,
+  // never list COVERAGE. The model is instructed to mirror this, not infer its own.
+  lines.push("## ANSWER QUALITY (deterministic — use this for confidence)");
+  lines.push(`- Overall confidence: ${pkg.answerConfidence === "high" ? "HIGH" : "QUALIFIED"}`);
+  lines.push(`- Basis: ${pkg.confidenceBasis}`);
   lines.push("## AUTHORITATIVE PORTAL FACTS (source of operational truth)");
   for (const de of pkg.portalAuthoritative) lines.push(serializeDomainEvidence(de, now));
   if (pkg.memory.length > 0) {

@@ -83,6 +83,8 @@ describe("serialize — package separation", () => {
       intent: "client_detail",
       mode: "broad",
       subject: ENTITY,
+      answerConfidence: "high",
+      confidenceBasis: "test",
       portalAuthoritative: [de({ domain: "client_identity", status: "ok", facts: [f("Status", "active")] })],
       memory: [de({ domain: "memory", authority: "memory", status: "ok", facts: [f("m", "a decision")] })],
       domainStatus: {},
@@ -92,6 +94,88 @@ describe("serialize — package separation", () => {
     expect(out).toContain("AUTHORITATIVE PORTAL FACTS");
     expect(out).toContain("DURABLE MEMORY (supplementary");
     expect(out.indexOf("AUTHORITATIVE")).toBeLessThan(out.indexOf("DURABLE MEMORY"));
+  });
+});
+
+describe("serialize — currency safety (never invented)", () => {
+  it("renders a known currency as a CODE, never a symbol", () => {
+    const value = summarizeUnpaid([{ amount: 1999.99, currency: "ZAR" }], 1);
+    const out = serializeDomainEvidence(de({ facts: [f("Outstanding", value)] }), NOW);
+    expect(out).toContain("ZAR 1999.99");
+    expect(out).not.toContain("$");
+    expect(out).not.toContain("R1999");
+  });
+  it("never emits '$' or an assumed code when currency is unknown", () => {
+    // currency null (no rows summed but a count exists) ⇒ bare number, no symbol/code.
+    const value = summarizeUnpaid([], 3);
+    const out = serializeDomainEvidence(de({ facts: [f("Outstanding", value)] }), NOW);
+    expect(out).not.toContain("$");
+    expect(out).not.toContain("ZAR");
+  });
+  it("does not collapse mixed currencies into one total", () => {
+    const value = summarizeUnpaid([{ amount: 100, currency: "ZAR" }, { amount: 50, currency: "USD" }], 2);
+    const out = serializeDomainEvidence(de({ facts: [f("Outstanding", value)] }), NOW);
+    expect(out).toContain("MULTIPLE currencies");
+    expect(out).toContain("do not combine");
+    expect(out).not.toContain("exact total");
+  });
+  it("zero unpaid renders no amount and no '$0'", () => {
+    const value = summarizeUnpaid([], 0);
+    const out = serializeDomainEvidence(de({ facts: [f("Outstanding", value)] }), NOW);
+    expect(out).toContain("nothing currently outstanding");
+    expect(out).not.toContain("$0");
+    expect(out).not.toContain("$");
+  });
+});
+
+describe("serialize — coverage is NOT lowered confidence", () => {
+  it("a bounded list is disclosed as coverage, explicitly not confidence", () => {
+    const out = serializeDomainEvidence(
+      de({ domain: "activity", status: "truncated", facts: [f("e", "x")], returnedCount: 8, availableCount: 21, truncated: true }),
+      NOW
+    );
+    // Per-domain unit noun, and the explicit coverage-not-confidence disclaimer.
+    expect(out).toContain("showing 8 of 21 events");
+    expect(out).toContain("this is coverage, not lower confidence");
+  });
+  it("each domain carries its OWN unit and counts — never mixed", () => {
+    const activity = serializeDomainEvidence(
+      de({ domain: "activity", status: "truncated", facts: [f("e", "x")], returnedCount: 8, availableCount: 21, truncated: true }),
+      NOW
+    );
+    const files = serializeDomainEvidence(
+      de({ domain: "files", status: "truncated", facts: [f("fl", "x")], returnedCount: 10, availableCount: 12, truncated: true }),
+      NOW
+    );
+    expect(activity).toContain("8 of 21 events");
+    expect(activity).not.toContain("files");
+    expect(files).toContain("10 of 12 files");
+    expect(files).not.toContain("events");
+  });
+});
+
+describe("serialize — deterministic ANSWER QUALITY block", () => {
+  const pkg = (answerConfidence: "high" | "qualified", confidenceBasis: string): EvidencePackage => ({
+    generatedAt: NOW.toISOString(),
+    intent: "client_detail",
+    mode: "broad",
+    subject: ENTITY,
+    answerConfidence,
+    confidenceBasis,
+    portalAuthoritative: [de({ domain: "client_identity", status: "ok", facts: [f("Status", "active")] })],
+    memory: [],
+    domainStatus: {},
+    budget: { totalBudgetTokens: 10000, estimatedTokens: 10, droppedDomains: [], clippedDomains: [] },
+  });
+  it("renders HIGH when the package is high-confidence", () => {
+    const out = serializeEvidencePackage(pkg("high", "all authoritative"), NOW);
+    expect(out).toContain("ANSWER QUALITY");
+    expect(out).toContain("Overall confidence: HIGH");
+    expect(out).toContain("all authoritative");
+  });
+  it("renders QUALIFIED only when a depended-on domain could not be retrieved", () => {
+    const out = serializeEvidencePackage(pkg("qualified", "invoices could NOT be retrieved"), NOW);
+    expect(out).toContain("Overall confidence: QUALIFIED");
   });
 });
 

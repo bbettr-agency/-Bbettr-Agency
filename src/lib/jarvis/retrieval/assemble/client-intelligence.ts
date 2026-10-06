@@ -154,6 +154,18 @@ export async function assembleClientEvidence(
   const domainStatus: Record<string, RetrieverStatus> = {};
   for (const de of [...portalAuthoritative, ...memoryEvidence]) domainStatus[de.domain] = de.status;
 
+  // Deterministic answer confidence: bounded lists (truncated) are COVERAGE, not a
+  // confidence degrader. Only a genuine retrieval failure/denied/unavailable on a
+  // Portal domain qualifies the answer. (Identity is resolved here — subject present.)
+  const degraded = portalAuthoritative
+    .filter((de) => de.status === "error" || de.status === "denied" || de.status === "unavailable")
+    .map((de) => de.domain);
+  const answerConfidence: "high" | "qualified" = degraded.length === 0 ? "high" : "qualified";
+  const confidenceBasis =
+    degraded.length === 0
+      ? "All stated Portal facts are authoritative and were retrieved successfully. Some lists may be bounded (see per-domain coverage) — that is COVERAGE, not lower confidence."
+      : `Authoritative Portal facts were retrieved, but these domains could NOT be retrieved this turn: ${degraded.join(", ")}. Qualify any claim that depends on them; do not assert they are empty.`;
+
   const estimatedTokens = portalAuthoritative.reduce((s, de) => s + est(de, now), 0) + memoryTokens;
   const budget: BudgetReport = {
     totalBudgetTokens: BUDGET.EVIDENCE_HARD,
@@ -167,6 +179,8 @@ export async function assembleClientEvidence(
     intent: plan.intent,
     mode: plan.mode,
     subject,
+    answerConfidence,
+    confidenceBasis,
     portalAuthoritative,
     memory: memoryEvidence,
     domainStatus,

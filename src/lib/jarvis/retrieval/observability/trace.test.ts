@@ -20,6 +20,8 @@ const evidence: EvidencePackage = {
   intent: "client_detail",
   mode: "broad",
   subject: ENTITY,
+  answerConfidence: "high",
+  confidenceBasis: "test",
   portalAuthoritative: [
     {
       domain: "updates",
