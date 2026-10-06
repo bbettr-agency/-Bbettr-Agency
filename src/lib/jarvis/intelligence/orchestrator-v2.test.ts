@@ -11,7 +11,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 // The real pipeline would hit the DB; mock it so flag-ON (no seam) routes here.
 vi.mock("@/lib/jarvis/retrieval/pipeline", () => ({ runRetrievalV2Turn: vi.fn() }));
 
-import { runIntelligenceTurn, type TurnDeps, type ContextAssembler } from "./orchestrator";
+import { runIntelligenceTurn, deterministicUncertainty, type TurnDeps, type ContextAssembler } from "./orchestrator";
 import { runRetrievalV2Turn } from "@/lib/jarvis/retrieval/pipeline";
 import { isJarvisRetrievalV2Enabled } from "@/lib/flags";
 import type { ConversationRepo, ConversationThread, AssistantRow } from "./repository";
@@ -120,7 +120,7 @@ beforeEach(() => {
 
 describe("orchestrator — Retrieval V2 integration", () => {
   it("flag ON (no seam) routes through the pipeline and feeds its DATA block to the provider; V1 assembler NOT called", async () => {
-    vi.mocked(runRetrievalV2Turn).mockResolvedValue({ plan: { kind: "client", clientId: "c1", clientName: "A&S Wholesalers" }, dataBlock: "EVIDENCE-BLOCK-XYZ", trace: TRACE });
+    vi.mocked(runRetrievalV2Turn).mockResolvedValue({ plan: { kind: "client", clientId: "c1", clientName: "A&S Wholesalers" }, dataBlock: "EVIDENCE-BLOCK-XYZ", trace: TRACE, confidence: "high", confidenceBasis: "all authoritative" });
     const { provider, seen } = makeProvider();
     const assembler = makeAssembler();
     const repo = makeRepo();
@@ -248,5 +248,94 @@ describe("orchestrator — Retrieval V2 integration", () => {
     const msgs = seen.request!.messages;
     expect(msgs.length).toBeLessThan(history.length); // oldest replayed dropped
     expect(msgs[msgs.length - 1].content).toBe("CURRENT-MESSAGE"); // current preserved
+  });
+});
+
+describe("orchestrator — deterministic, app-owned confidence (V2)", () => {
+  // A model response that self-reports LOW confidence with a bounded-coverage note —
+  // exactly the contradictory Preview output we are fixing.
+  const MODEL_SAYS_LOW = JSON.stringify({
+    assistant_message: "Here is the A&S overview.",
+    uncertainty: { level: "low", notes: "some lists are bounded/coverage-limited" },
+  });
+  const clientSeam = (confidence: "high" | "qualified", basis: string) =>
+    vi.fn(async () => ({ plan: { kind: "client", clientId: "c1", clientName: "A&S" } as ContextPlan, dataBlock: "B", trace: TRACE, confidence, confidenceBasis: basis }));
+
+  it("HIGH evidence + model-reported LOW ⇒ rendered HIGH (model cannot override)", async () => {
+    const seam = clientSeam("high", "all authoritative");
+    const { provider } = makeProvider({ text: MODEL_SAYS_LOW });
+    const res = await runIntelligenceTurn({ message: "A&S" }, deps({ provider, runRetrieval: seam }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.uncertainty?.level).toBe("high");
+      // The contradictory model note is NOT carried on a HIGH answer.
+      expect(res.uncertainty?.notes).toBeUndefined();
+    }
+  });
+
+  it("the HIGH confidence is also what gets PERSISTED (not the model's LOW)", async () => {
+    const seam = clientSeam("high", "all authoritative");
+    const repo = makeRepo();
+    const { provider } = makeProvider({ text: MODEL_SAYS_LOW });
+    await runIntelligenceTurn({ message: "A&S" }, deps({ provider, runRetrieval: seam, repo: repo.repo }));
+    const ok = repo.persisted.find((p) => p.status === "ok")!;
+    expect((ok.uncertainty as { level: string }).level).toBe("high");
+  });
+
+  it("QUALIFIED evidence ⇒ medium with the deterministic basis (not the model's note)", async () => {
+    const seam = clientSeam("qualified", "invoices could NOT be retrieved this turn");
+    const { provider } = makeProvider({ text: MODEL_SAYS_LOW });
+    const res = await runIntelligenceTurn({ message: "A&S" }, deps({ provider, runRetrieval: seam }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.uncertainty?.level).toBe("medium");
+      expect(res.uncertainty?.notes).toContain("could NOT be retrieved");
+      expect(res.uncertainty?.notes).not.toContain("coverage-limited"); // model's note discarded
+    }
+  });
+
+  it("complete client discovery (agency plan) ⇒ HIGH confidence", async () => {
+    const seam = vi.fn(async () => ({
+      plan: { kind: "agency" } as ContextPlan,
+      dataBlock: "### Clients — 13 total\n#### active (6)",
+      trace: TRACE,
+      confidence: "high" as const,
+      confidenceBasis: "directory retrieved in full",
+    }));
+    const { provider } = makeProvider({ text: JSON.stringify({ assistant_message: "We have 13 clients." }) });
+    const res = await runIntelligenceTurn({ message: "Who are all our clients?" }, deps({ provider, runRetrieval: seam }));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.uncertainty?.level).toBe("high");
+  });
+
+  it("flag OFF (V1) ⇒ model-reported uncertainty is PRESERVED (deterministic override is V2-only)", async () => {
+    vi.mocked(isJarvisRetrievalV2Enabled).mockReturnValue(false);
+    const { provider } = makeProvider({ text: MODEL_SAYS_LOW });
+    const res = await runIntelligenceTurn({ message: "status please" }, deps({ provider }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.uncertainty?.level).toBe("low"); // V1 keeps the model's self-report
+      expect(res.uncertainty?.notes).toContain("coverage-limited");
+    }
+  });
+});
+
+describe("deterministicUncertainty (pure mapping)", () => {
+  it("HIGH ⇒ level high, no notes (coverage never attaches here)", () => {
+    expect(deterministicUncertainty("high", "anything")).toEqual({ level: "high" });
+  });
+  it("QUALIFIED ⇒ level medium with the deterministic basis as notes", () => {
+    expect(deterministicUncertainty("qualified", "invoices not retrieved")).toEqual({ level: "medium", notes: "invoices not retrieved" });
+  });
+  it("QUALIFIED with no basis ⇒ level medium, no notes", () => {
+    expect(deterministicUncertainty("qualified", null)).toEqual({ level: "medium" });
+  });
+  it("null ⇒ undefined (never falls back to a model self-report)", () => {
+    expect(deterministicUncertainty(null, "x")).toBeUndefined();
+  });
+  it("can NEVER produce 'low' for any deterministic input", () => {
+    for (const c of ["high", "qualified", null] as const) {
+      expect(deterministicUncertainty(c, "b")?.level).not.toBe("low");
+    }
   });
 });

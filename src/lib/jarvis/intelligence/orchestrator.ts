@@ -47,6 +47,7 @@ import type {
   TurnResult,
   ValidatedProposedIntent,
   ValidatedMemoryCandidate,
+  ValidatedUncertainty,
 } from "./types";
 
 /**
@@ -152,7 +153,15 @@ export interface TurnDeps {
     ctx: JarvisContext,
     message: string,
     thread: { lastClientId: string | null }
-  ) => Promise<{ plan: ContextPlan; dataBlock: string | null; trace: RetrievalTrace }>;
+  ) => Promise<{
+    plan: ContextPlan;
+    dataBlock: string | null;
+    trace: RetrievalTrace;
+    /** Deterministic, app-owned answer confidence (never model-generated). Optional on
+     *  the seam type for test ergonomics; the real pipeline always supplies it. */
+    confidence?: "high" | "qualified" | null;
+    confidenceBasis?: string | null;
+  }>;
   /** Context Engine seam. */
   assembler?: ContextAssembler;
   /** Central limits seam. */
@@ -292,6 +301,11 @@ async function executeLifecycle(params: {
   let plan: ContextPlan;
   let v2DataBlock: string | null = null;
   let v2Trace: RetrievalTrace | undefined;
+  // Deterministic, APP-OWNED confidence from the retrieval layer. On the V2 path this
+  // — never the model's self-reported uncertainty — is what we persist and render, so
+  // the model cannot contradict a HIGH evidence determination with a LOW label.
+  let v2Confidence: "high" | "qualified" | null = null;
+  let v2ConfidenceBasis: string | null = null;
   const useV2 = !!deps.runRetrieval || isJarvisRetrievalV2Enabled();
   if (useV2) {
     const runV2 = deps.runRetrieval ?? ((c, m, t) => runRetrievalV2Turn(c, m, t, requestId));
@@ -299,6 +313,8 @@ async function executeLifecycle(params: {
     plan = v2.plan;
     v2DataBlock = v2.dataBlock;
     v2Trace = v2.trace;
+    v2Confidence = v2.confidence ?? null;
+    v2ConfidenceBasis = v2.confidenceBasis ?? null;
   } else {
     plan = await router(ctx, message, { lastClientId: thread.lastClientId });
   }
@@ -482,6 +498,13 @@ async function executeLifecycle(params: {
   }
   const value = parsed.value;
 
+  // Confidence resolution. On the V2 path the displayed/persisted confidence is
+  // APP-OWNED — derived from the retrieval layer's deterministic answerConfidence, with
+  // the model's self-reported uncertainty DISCARDED so it can never downgrade HIGH→LOW.
+  // The V1 path is byte-for-byte unchanged (keeps the model's uncertainty).
+  const effectiveUncertainty: ValidatedUncertainty | undefined =
+    v2DataBlock !== null ? deterministicUncertainty(v2Confidence, v2ConfidenceBasis) : value.uncertainty;
+
   // (10) Persist assistant success with TRUSTED provenance/metadata, then return.
   const provenance: TrustedProvenance = {
     contextKind: plan.kind,
@@ -499,7 +522,7 @@ async function executeLifecycle(params: {
     status: "ok",
     content: value.assistantMessage,
     reasoningSummary: value.reasoningSummary,
-    uncertainty: value.uncertainty,
+    uncertainty: effectiveUncertainty,
     // proposed_intent HAS a column (0067) — persist the VALIDATED (not executed)
     // proposal. memory_candidate has no column and is NOT written in Slice C;
     // it is returned to the caller only.
@@ -534,11 +557,26 @@ async function executeLifecycle(params: {
     assistantMessage: value.assistantMessage,
     proposedIntent: value.proposedIntent,
     memoryCandidate: value.memoryCandidate,
-    uncertainty: value.uncertainty,
+    uncertainty: effectiveUncertainty,
     persisted: true,
     action,
     memory,
   };
+}
+
+/**
+ * Map the retrieval layer's deterministic confidence to the response-contract
+ * uncertainty shape. HIGH ⇒ level "high" (no notes); QUALIFIED ⇒ level "medium" with
+ * the deterministic basis as notes. `null` (no provider turn, or a defensive miss) ⇒
+ * no uncertainty shown — NEVER falls back to the model's self-report. PURE.
+ */
+export function deterministicUncertainty(
+  confidence: "high" | "qualified" | null,
+  basis: string | null
+): ValidatedUncertainty | undefined {
+  if (confidence === "high") return { level: "high" };
+  if (confidence === "qualified") return basis ? { level: "medium", notes: basis } : { level: "medium" };
+  return undefined;
 }
 
 /** F1b lease window: a claimed turn is stale for future recovery after this. Never

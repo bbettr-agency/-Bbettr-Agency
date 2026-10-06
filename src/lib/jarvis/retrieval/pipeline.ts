@@ -10,7 +10,7 @@ import { resolveClientFromList, type ClientLike } from "./resolve/match";
 import { planQuery } from "./plan/query-planner";
 import { assembleClientEvidence } from "./assemble/client-intelligence";
 import { serializeEvidencePackage } from "./evidence/serialize";
-import { retrieveClientDiscovery } from "./retrievers/discovery";
+import { retrieveClientDiscovery, type DiscoveryResult } from "./retrievers/discovery";
 import { buildTrace } from "./observability/trace";
 
 /**
@@ -24,11 +24,21 @@ import { buildTrace } from "./observability/trace";
 const STRONG_REFERENT_RE = /\b(that|this|the)\s+client\b/i;
 const WEAK_REFERENT_RE = /\b(them|they|their|it|those)\b/i;
 
+/** Deterministic, APP-OWNED answer confidence. Computed here from retrieval outcome
+ *  (never generated or reinterpreted by the model). `null` only on the clarify/unknown
+ *  paths, which short-circuit before any provider call. */
+export type RetrievalConfidence = "high" | "qualified";
+
 export interface RetrievalV2Result {
   plan: ContextPlan;
   /** Provider DATA block; null for clarify/unresolved (handled by the orchestrator). */
   dataBlock: string | null;
   trace: RetrievalTrace;
+  /** Deterministic confidence for THIS turn; the orchestrator renders this, not the
+   *  model's self-reported uncertainty. null ⇒ no provider call (clarify/unknown). */
+  confidence: RetrievalConfidence | null;
+  /** Short deterministic basis string (shown with a qualified answer). */
+  confidenceBasis: string | null;
 }
 
 export async function runRetrievalV2Turn(
@@ -66,12 +76,17 @@ export async function runRetrievalV2Turn(
   let contextPlan: ContextPlan;
   let dataBlock: string | null = null;
   let evidence: EvidencePackage | undefined;
+  let confidence: RetrievalConfidence | null = null;
+  let confidenceBasis: string | null = null;
 
   if (plan.mode === "broad" || plan.mode === "focused") {
     const subject = plan.subject!;
     contextPlan = { kind: "client", clientId: subject.id, clientName: subject.name };
     evidence = await assembleClientEvidence(plan, rc);
     dataBlock = serializeEvidencePackage(evidence, rc.now());
+    // App-owned confidence IS the assembler's deterministic answerConfidence.
+    confidence = evidence.answerConfidence;
+    confidenceBasis = evidence.confidenceBasis;
   } else if (plan.intent === "clarify") {
     contextPlan = { kind: "ambiguous_client", candidates: (plan.clarify?.candidates ?? []).map((c) => ({ id: c.id, name: c.canonicalName })) };
   } else if (plan.intent === "unresolved") {
@@ -80,11 +95,15 @@ export async function runRetrievalV2Turn(
     contextPlan = { kind: "unknown_client", query: referencedName(message) };
   } else if (plan.mode === "discovery") {
     contextPlan = { kind: "agency" };
-    dataBlock = await buildDiscoveryBlock(rc);
+    const d = await retrieveClientDiscovery(rc);
+    dataBlock = serializeDiscoveryBlock(d);
+    ({ confidence, confidenceBasis } = discoveryConfidence(d.status));
   } else {
     // agency_fallback OR an unsupported FUTURE intent (graceful, agency-scoped).
+    const unsupportedIntent = plan.supported ? null : plan.intent;
     contextPlan = { kind: "agency" };
-    dataBlock = await buildAgencyBlock(rc, plan.supported ? null : plan.intent);
+    dataBlock = await buildAgencyBlock(rc, unsupportedIntent);
+    ({ confidence, confidenceBasis } = agencyConfidence(unsupportedIntent));
   }
 
   const trace = buildTrace({
@@ -97,7 +116,41 @@ export async function runRetrievalV2Turn(
     totalMs: Date.now() - startMs,
   });
 
-  return { plan: contextPlan, dataBlock, trace };
+  return { plan: contextPlan, dataBlock, trace, confidence, confidenceBasis };
+}
+
+/** Deterministic confidence for client discovery. A COMPLETE authorized list (ok or
+ *  legitimately empty) is HIGH — truncation is coverage (disclosed in the block), not a
+ *  confidence degrader. Only a genuine retrieval FAILURE qualifies the answer. */
+export function discoveryConfidence(
+  status: DiscoveryResult["status"]
+): { confidence: RetrievalConfidence; confidenceBasis: string } {
+  if (status === "error") {
+    return {
+      confidence: "qualified",
+      confidenceBasis: "The client directory could NOT be retrieved this turn; do not assert the list is complete or empty.",
+    };
+  }
+  return {
+    confidence: "high",
+    confidenceBasis: "The authorized client directory was retrieved in full (counts/grouping are deterministic). Any 'showing N of M' is coverage, not lower confidence.",
+  };
+}
+
+/** Deterministic confidence for the agency-scope fallback. An unsupported (not-yet-enabled)
+ *  intent is QUALIFIED; a plain agency answer from retrieved counts is HIGH. */
+export function agencyConfidence(
+  unsupportedIntent: string | null
+): { confidence: RetrievalConfidence; confidenceBasis: string } {
+  return unsupportedIntent
+    ? {
+        confidence: "qualified",
+        confidenceBasis: `The requested capability (${unsupportedIntent}) is not enabled in this version; only agency-level data supports this answer.`,
+      }
+    : {
+        confidence: "high",
+        confidenceBasis: "Answered from authoritative agency-level Portal data.",
+      };
 }
 
 /** Extract the capitalized proper-noun phrase the user referred to (for a not-found
@@ -109,8 +162,9 @@ function referencedName(originalMessage: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
-async function buildDiscoveryBlock(rc: RetrieverContext): Promise<string> {
-  const d = await retrieveClientDiscovery(rc);
+/** Serialize an already-retrieved discovery result into the provider DATA block.
+ *  PURE (no I/O) so retrieval and serialization are independently testable. */
+function serializeDiscoveryBlock(d: DiscoveryResult): string {
   const lines = [
     "# client directory",
     "## AUTHORITATIVE PORTAL FACTS (source of operational truth)",
