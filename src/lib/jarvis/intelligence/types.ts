@@ -56,6 +56,8 @@ export interface TrustedProvenance {
   historyMessages: number;
   contextMemoryCount: number;
   contextPortalFactCount: number;
+  /** Retrieval V2 safe observability trace (counts/ids/status only; no free text). */
+  retrieval?: import("@/lib/jarvis/retrieval/types").RetrievalTrace;
 }
 
 /**

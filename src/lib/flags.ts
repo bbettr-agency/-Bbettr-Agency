@@ -79,3 +79,15 @@ export function isJarvisIntelligenceEnabled(): boolean {
 export function isMeetingInvitesViaResendEnabled(): boolean {
   return process.env.MEETING_INVITES_VIA_RESEND === "true";
 }
+
+/**
+ * JARVIS_RETRIEVAL_V2 — the Client Intelligence retrieval pipeline (resolve → plan
+ * → retrieve → assemble → two-pass evidence). Default OFF and additive: while off,
+ * the original Jarvis Context Engine retrieval path is used unchanged, so this is a
+ * safe, reversible rollout switch. Read at request time; anything other than "true"
+ * ⇒ off. Server-only. NOT a security boundary — reads still run under the caller's
+ * RLS identity and admin-only access is enforced independently.
+ */
+export function isJarvisRetrievalV2Enabled(): boolean {
+  return process.env.JARVIS_RETRIEVAL_V2 === "true";
+}

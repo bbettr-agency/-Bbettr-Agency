@@ -2,6 +2,11 @@ import "server-only";
 
 import { isJarvisEnabled } from "@/lib/flags";
 import { isJarvisIntelligenceEnabled } from "@/lib/flags";
+import { isJarvisRetrievalV2Enabled } from "@/lib/flags";
+import { runRetrievalV2Turn } from "@/lib/jarvis/retrieval/pipeline";
+import { fitHistory } from "@/lib/jarvis/retrieval/evidence/budget";
+import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
+import type { RetrievalTrace } from "@/lib/jarvis/retrieval/types";
 import { resolveJarvisContext, type JarvisContext, type JarvisResolution, type JarvisApiDenial } from "@/lib/jarvis/identity";
 import { getIntelligenceLimits, type IntelligenceLimits } from "@/lib/jarvis/llm/limits";
 import type { LLMProvider } from "@/lib/jarvis/llm/provider";
@@ -14,7 +19,7 @@ import {
 import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 
 import { planContext as defaultPlanContext } from "./context-router";
-import { buildSystemPrompt } from "./prompt";
+import { buildSystemPrompt, buildSystemPromptFromData } from "./prompt";
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
 import { parseAssistantResponse } from "./response-contract";
 import { callProviderWithPolicy } from "./provider-call";
@@ -132,8 +137,16 @@ export interface TurnDeps {
   reauthorize?: () => Promise<JarvisContext | JarvisApiDenial>;
   /** Storage boundary seam. */
   repo?: ConversationRepo;
-  /** Deterministic router seam. */
+  /** Deterministic router seam (Retrieval V1). */
   router?: (ctx: JarvisContext, message: string, thread: { lastClientId: string | null }) => Promise<ContextPlan>;
+  /** Retrieval V2 seam (Client Intelligence). Defaults to the real pipeline when the
+   *  JARVIS_RETRIEVAL_V2 flag is on. Returns a ContextPlan + a pre-serialized DATA
+   *  block (null for clarify/unresolved) + a safe trace. Injectable for tests. */
+  runRetrieval?: (
+    ctx: JarvisContext,
+    message: string,
+    thread: { lastClientId: string | null }
+  ) => Promise<{ plan: ContextPlan; dataBlock: string | null; trace: RetrievalTrace }>;
   /** Context Engine seam. */
   assembler?: ContextAssembler;
   /** Central limits seam. */
@@ -268,8 +281,21 @@ async function executeLifecycle(params: {
   await runHook(hooks?.onUserMessage ? () => hooks.onUserMessage!(userMessageId) : undefined);
 
   // (6) Deterministic context routing. The model never selects its own data, and
-  //     a model-supplied client id would have zero authority here.
-  const plan = await router(ctx, message, { lastClientId: thread.lastClientId });
+  //     a model-supplied client id would have zero authority here. Retrieval V2
+  //     (Client Intelligence) is used when enabled; otherwise the original router.
+  let plan: ContextPlan;
+  let v2DataBlock: string | null = null;
+  let v2Trace: RetrievalTrace | undefined;
+  const useV2 = !!deps.runRetrieval || isJarvisRetrievalV2Enabled();
+  if (useV2) {
+    const runV2 = deps.runRetrieval ?? ((c, m, t) => runRetrievalV2Turn(c, m, t, requestId));
+    const v2 = await runV2(ctx, message, { lastClientId: thread.lastClientId });
+    plan = v2.plan;
+    v2DataBlock = v2.dataBlock;
+    v2Trace = v2.trace;
+  } else {
+    plan = await router(ctx, message, { lastClientId: thread.lastClientId });
+  }
 
   // Ambiguous / unresolved referent ⇒ ask, deterministically. No provider call,
   // no data leaked. Persist the clarification as an ok assistant turn.
@@ -297,28 +323,40 @@ async function executeLifecycle(params: {
     };
   }
 
-  // (7) Assemble bounded context (via the Context Engine) + bounded history.
-  let contexts: ContextPackage[];
-  try {
+  // (7) Assemble bounded context. Retrieval V2 (Client Intelligence) supplies a
+  //     pre-serialized, bounded, secret-scanned evidence DATA block instead of V1
+  //     ContextPackages — so when it is active we SKIP the V1 Context Engine
+  //     assembly entirely (no duplicate reads), and only maintain the deterministic
+  //     thread referent for a resolved client. When V2 is OFF, the V1 path below is
+  //     byte-for-byte unchanged.
+  let contexts: ContextPackage[] = [];
+  if (v2DataBlock !== null) {
     if (plan.kind === "client") {
-      const pkg = await assembler.client(plan.clientId);
-      if (!pkg) {
-        // Router resolved an authorized client but assembly returned nothing —
-        // do NOT answer as if context were complete. Safe failure.
-        const stored = await persistFailure(repo, ctx, thread.id, requestId, "context_unavailable");
-        return { ok: false, reason: "context_unavailable", threadId: thread.id, requestId, persisted: stored };
-      }
-      contexts = [pkg];
       // Update the deterministic thread referent ONLY after a successful resolve.
       await repo.updateLastClientId(ctx, thread.id, plan.clientId);
-    } else if (plan.kind === "user") {
-      contexts = [await assembler.user(ctx.principalId), await assembler.agency()];
-    } else {
-      contexts = [await assembler.agency()];
     }
-  } catch {
-    const stored = await persistFailure(repo, ctx, thread.id, requestId, "context_unavailable");
-    return { ok: false, reason: "context_unavailable", threadId: thread.id, requestId, persisted: stored };
+  } else {
+    try {
+      if (plan.kind === "client") {
+        const pkg = await assembler.client(plan.clientId);
+        if (!pkg) {
+          // Router resolved an authorized client but assembly returned nothing —
+          // do NOT answer as if context were complete. Safe failure.
+          const stored = await persistFailure(repo, ctx, thread.id, requestId, "context_unavailable");
+          return { ok: false, reason: "context_unavailable", threadId: thread.id, requestId, persisted: stored };
+        }
+        contexts = [pkg];
+        // Update the deterministic thread referent ONLY after a successful resolve.
+        await repo.updateLastClientId(ctx, thread.id, plan.clientId);
+      } else if (plan.kind === "user") {
+        contexts = [await assembler.user(ctx.principalId), await assembler.agency()];
+      } else {
+        contexts = [await assembler.agency()];
+      }
+    } catch {
+      const stored = await persistFailure(repo, ctx, thread.id, requestId, "context_unavailable");
+      return { ok: false, reason: "context_unavailable", threadId: thread.id, requestId, persisted: stored };
+    }
   }
 
   // Bounded history: last (historyTurns * 2) ok messages, chronological. Loaded
@@ -339,13 +377,36 @@ async function executeLifecycle(params: {
       : { role: m.role, content: redactIfSecret(m.content) }
   );
 
+  // Retrieval V2 history-fit: current authoritative evidence must never be crowded
+  // out by old conversation. When the whole prompt would exceed its ceiling, trim
+  // the OLDEST replayed history first (never the current user message, never the
+  // evidence). V1 path is untouched.
+  let providerMessagesFinal = providerMessages;
+  if (v2DataBlock !== null && providerMessages.length > 1) {
+    const replayed = providerMessages.slice(0, -1);
+    const current = providerMessages[providerMessages.length - 1];
+    const fixedTokens = estimateTokens(buildSystemPromptFromData("")); // instructions + action catalog, excluding evidence
+    const fit = fitHistory({
+      fixedTokens,
+      evidenceTokens: estimateTokens(v2DataBlock),
+      historyTexts: replayed.map((m) => m.content),
+    });
+    providerMessagesFinal = [...replayed.slice(replayed.length - fit.keptCount), current];
+    if (v2Trace) {
+      v2Trace = {
+        ...v2Trace,
+        history: { turnsIncluded: providerMessagesFinal.length, estTokens: fit.keptTokens, reducedFromTarget: fit.reducedFromTarget },
+      };
+    }
+  }
+
   // (8) Build the trusted prompt and call the provider under an owned deadline.
   //     CORRECTNESS-CRITICAL: durably mark provider_started_at BEFORE the provider
   //     sequence. Unlike the best-effort audit hooks, this is a HARD precondition —
   //     if the marker write fails we must NOT call the provider (or run bridges) and
   //     must NOT claim a provider request occurred. The failure is entirely before
   //     the external boundary, so it is an honest internal processing failure.
-  const system = buildSystemPrompt(contexts);
+  const system = v2DataBlock !== null ? buildSystemPromptFromData(v2DataBlock) : buildSystemPrompt(contexts);
   if (hooks?.beforeProvider) {
     try {
       await hooks.beforeProvider();
@@ -359,7 +420,7 @@ async function executeLifecycle(params: {
   let model: string;
   let usage: unknown;
   try {
-    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessages }, limits);
+    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessagesFinal }, limits);
     resultText = result.text;
     providerId = result.providerId; // TRUSTED adapter metadata, never model-claimed
     model = result.model;
@@ -387,6 +448,8 @@ async function executeLifecycle(params: {
     historyMessages: history.length,
     contextMemoryCount: countMemory(contexts),
     contextPortalFactCount: countPortalFacts(contexts),
+    // Retrieval V2 safe observability trace (counts/ids/status only; no free text).
+    ...(v2Trace ? { retrieval: v2Trace } : {}),
   };
 
   // Durable persistence is a PRECONDITION of an ok:true result. If the write
