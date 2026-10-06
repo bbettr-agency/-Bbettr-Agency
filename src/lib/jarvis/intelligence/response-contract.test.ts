@@ -32,6 +32,39 @@ describe("parseAssistantResponse — happy path", () => {
     expect(r.value.proposedIntent).toEqual({ capabilityId: "task.create", args: { title: "x" }, rationale: "why" });
     expect(r.value.memoryCandidate).toEqual({ scope: "client", category: "client_knowledge", claim: "c", body: "b" });
   });
+
+  it("accepts a valid object with a large-but-bounded assistant_message", () => {
+    const r = parseAssistantResponse(ok({ assistant_message: "x".repeat(7999) }));
+    expect(r.ok).toBe(true);
+  });
+});
+
+// DIAD regression (invalid_response:not_json): a reply truncated at the output-token
+// limit is cut off mid-object and must fail as not_json — NOT be leniently repaired.
+describe("parseAssistantResponse — truncation / malformed / oversize", () => {
+  it("TRUNCATED JSON (cut off mid-object, no closing brace) → not_json", () => {
+    const truncated = '{"assistant_message":"Here is the full overview of the client including tasks and invo';
+    expect(parseAssistantResponse(truncated)).toEqual({ ok: false, reason: "not_json" });
+  });
+
+  it("TRUNCATED JSON ending mid-value with an open string → not_json", () => {
+    const truncated = '{"assistant_message":"line one\\nline two';
+    expect(parseAssistantResponse(truncated)).toEqual({ ok: false, reason: "not_json" });
+  });
+
+  it("MALFORMED JSON (trailing comma / bad token) → not_json", () => {
+    expect(parseAssistantResponse('{"assistant_message":"x",}')).toEqual({ ok: false, reason: "not_json" });
+    expect(parseAssistantResponse('{"assistant_message": undefined}')).toEqual({ ok: false, reason: "not_json" });
+  });
+
+  it("OVERSIZED assistant_message (> 8000) → schema (valid JSON, fails the bound)", () => {
+    expect(parseAssistantResponse(ok({ assistant_message: "x".repeat(8001) }))).toEqual({ ok: false, reason: "schema" });
+  });
+
+  it("does NOT silently repair a truncated object into a valid one", () => {
+    const r = parseAssistantResponse('{"assistant_message":"partial');
+    expect(r.ok).toBe(false);
+  });
 });
 
 // F2b (CONSERVATIVE): the live model returned invalid_response:not_json for a fenced

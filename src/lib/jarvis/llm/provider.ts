@@ -48,6 +48,15 @@ export interface LLMCompletionRequest {
   timeoutMs: number;
   /** Cancellation signal the orchestrator wires to the deadline; adapters honor it. */
   signal?: AbortSignal;
+  /**
+   * OPTIONAL structured-output request. When set, the adapter should use a
+   * provider-NATIVE mechanism (e.g. Anthropic forced tool use) to make the model
+   * return EXACTLY one JSON object conforming to `schema`, and return that object
+   * serialized as `result.text`. Adapters that cannot enforce it MUST ignore this
+   * field and return plain text — the caller validates strictly either way, so this
+   * only improves reliability and never relaxes the response contract.
+   */
+  jsonSchema?: { name: string; description?: string; schema: Record<string, unknown> };
 }
 
 export interface LLMUsage {

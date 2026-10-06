@@ -329,10 +329,21 @@ describe("anthropic adapter — source hygiene (Slice-E scope lock)", () => {
   it("does not stream", () => {
     expect(code).not.toMatch(/\.stream\s*\(/);
   });
-  it("uses no beta APIs / tools / web search / sampling tuning in code", () => {
-    for (const banned of ["client.beta", "betas:", "tools:", "tool_choice", "web_search", "web_fetch", "temperature", "top_p", "top_k", "cache_control"]) {
+  it("uses no beta APIs / web search / sampling tuning in code", () => {
+    // NOTE: `tools` / `tool_choice` are now INTENTIONALLY used — but ONLY as the
+    // forced structured-output response tool (reliable JSON contract). Web search /
+    // web fetch, beta APIs, and sampling tuning remain banned.
+    for (const banned of ["client.beta", "betas:", "web_search", "web_fetch", "temperature", "top_p", "top_k", "cache_control"]) {
       expect(code).not.toContain(banned);
     }
+  });
+  it("tool use is restricted to the forced structured-output response tool", () => {
+    // tools are present, but only as a single forced tool_choice (not auto/any,
+    // not web tools) — the structured AssistantResponse contract.
+    expect(code).toContain("tool_choice");
+    expect(code).toContain('tool_choice: { type: "tool", name: structured.name }');
+    expect(code).not.toContain('tool_choice: { type: "auto" }');
+    expect(code).not.toContain('tool_choice: { type: "any" }');
   });
   it("does not enable manual/extended thinking, effort, or budget_tokens (thinking is DISABLED)", () => {
     expect(code).not.toContain("budget_tokens");
@@ -343,5 +354,47 @@ describe("anthropic adapter — source hygiene (Slice-E scope lock)", () => {
   });
   it("uses the non-beta messages.create path", () => {
     expect(src).toContain("client.messages.create");
+  });
+});
+
+describe("anthropic adapter — native structured output (forced tool use)", () => {
+  const SCHEMA = {
+    name: "emit_assistant_response",
+    description: "return the reply",
+    schema: { type: "object", additionalProperties: false, required: ["assistant_message"], properties: { assistant_message: { type: "string" } } },
+  };
+
+  it("WITHOUT jsonSchema: body sends no tools/tool_choice (plain-text path unchanged)", async () => {
+    const { provider, seen } = withFake({});
+    await provider.complete(req());
+    expect(seen.body?.tools).toBeUndefined();
+    expect(seen.body?.tool_choice).toBeUndefined();
+  });
+
+  it("WITH jsonSchema: forces exactly the one response tool and returns its input as JSON text", async () => {
+    const toolMsg: AnthropicMessageLike = {
+      content: [{ type: "tool_use", name: "emit_assistant_response", input: { assistant_message: "Here is the overview." } } as never],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 20, output_tokens: 30 },
+    };
+    const { provider, seen } = withFake({ respond: async () => toolMsg });
+    const r = await provider.complete(req({ jsonSchema: SCHEMA }));
+
+    expect(seen.body?.tools).toEqual([{ name: "emit_assistant_response", description: "return the reply", input_schema: SCHEMA.schema }]);
+    expect(seen.body?.tool_choice).toEqual({ type: "tool", name: "emit_assistant_response" });
+    // The returned text is the tool input serialized → the strict contract parses it.
+    expect(JSON.parse(r.text)).toEqual({ assistant_message: "Here is the overview." });
+    expect(r.finishReason).toBe("tool_use");
+  });
+
+  it("WITH jsonSchema: falls back to text blocks if (defensively) no tool_use block is present", async () => {
+    const { provider } = withFake({ respond: async () => okMessage() }); // returns a text block only
+    const r = await provider.complete(req({ jsonSchema: SCHEMA }));
+    expect(r.text).toBe('{"assistant_message":"hello"}');
+  });
+
+  it("WITH jsonSchema: an empty reply (no tool_use, no text) is invalid_response", async () => {
+    const { provider } = withFake({ respond: async () => okMessage({ content: [] }) });
+    await expect(provider.complete(req({ jsonSchema: SCHEMA }))).rejects.toMatchObject({ kind: "invalid_response" });
   });
 });

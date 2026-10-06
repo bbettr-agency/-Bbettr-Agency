@@ -5,6 +5,7 @@ import { ArrowUp, Plus, AlertCircle, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { MarkdownMessage } from "./markdown-message";
 import { approveProposalAction, rejectProposalAction } from "@/app/(admin)/admin/jarvis/actions";
 import {
   newSubmission,
@@ -295,7 +296,7 @@ function JarvisTurnView({ item, onRetry }: { item: JarvisItem; onRetry: () => vo
   // completed
   return (
     <div className="space-y-3">
-      <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-900">{r.assistantMessage}</div>
+      <MarkdownMessage text={r.assistantMessage} className="text-[15px] leading-relaxed text-ink-900" />
       {r.uncertainty && (
         <p className="text-xs text-ink-400">
           Confidence: {r.uncertainty.level}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isBadOrigin } from "@/lib/security/origin";
 import { isJarvisEnabled, isJarvisIntelligenceEnabled } from "@/lib/flags";
 import { resolveJarvisContextApi } from "@/lib/jarvis/identity";
 import { createLLMProvider } from "@/lib/jarvis/llm/factory";
@@ -26,26 +27,6 @@ const BODY_MAX_BYTES = 131_072; // 128 KiB hard ceiling
 
 function json(status: number, body: unknown, extraHeaders?: Record<string, string>): NextResponse {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", ...(extraHeaders ?? {}) } });
-}
-
-/** Deterministic origin/fetch-metadata defense (defense-in-depth atop SameSite=Lax).
- *  Trusted origin = NEXT_PUBLIC_APP_URL's origin. Returns true when the request must be
- *  rejected. Fails CLOSED when an Origin is present but the trusted origin is
- *  unresolvable. Host is never trusted. */
-function isBadOrigin(req: Request): boolean {
-  const sfs = req.headers.get("sec-fetch-site");
-  if (sfs && sfs !== "same-origin" && sfs !== "same-site" && sfs !== "none") return true;
-  const origin = req.headers.get("origin");
-  if (origin) {
-    let trusted: string;
-    try {
-      trusted = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "").origin;
-    } catch {
-      return true; // Origin present but trusted origin unresolvable ⇒ fail closed.
-    }
-    if (!trusted || trusted === "null" || origin !== trusted) return true;
-  }
-  return false; // Both absent ⇒ proceed to cookie/session auth (not a bypass).
 }
 
 /** Read the body with a genuine incremental byte ceiling; never buffers an unbounded

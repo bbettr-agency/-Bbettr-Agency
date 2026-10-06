@@ -60,6 +60,61 @@ const responseSchema = z
   })
   .strict();
 
+/**
+ * Provider-native structured-output descriptor mirroring `responseSchema` above.
+ * Passed to the provider (Anthropic forced tool use) so the model returns EXACTLY
+ * one JSON object instead of free text — eliminating the prose/markdown/multiple-
+ * object failure classes at the source. This is a RELIABILITY aid only: the strict
+ * Zod `parseAssistantResponse` below STILL runs on the returned object and remains
+ * the fail-closed authority (the schema here is not trusted to be perfectly enforced).
+ */
+export const ASSISTANT_RESPONSE_TOOL_NAME = "emit_assistant_response";
+
+export const ASSISTANT_RESPONSE_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["assistant_message"],
+  properties: {
+    assistant_message: { type: "string", minLength: 1, maxLength: 8000 },
+    reasoning_summary: { type: "string", maxLength: 4000 },
+    uncertainty: {
+      type: "object",
+      additionalProperties: false,
+      required: ["level"],
+      properties: { level: { type: "string", enum: ["low", "medium", "high"] }, notes: { type: "string", maxLength: 1000 } },
+    },
+    proposed_intent: {
+      type: "object",
+      additionalProperties: false,
+      required: ["capability_id", "args"],
+      properties: {
+        capability_id: { type: "string", minLength: 1, maxLength: 120 },
+        args: { type: "object" },
+        rationale: { type: "string", maxLength: 1000 },
+      },
+    },
+    memory_candidate: {
+      type: "object",
+      additionalProperties: false,
+      required: ["scope", "category", "claim"],
+      properties: {
+        scope: { type: "string", enum: ["agency", "client", "user"] },
+        category: { type: "string", enum: [...MEMORY_CATEGORIES] },
+        claim: { type: "string", minLength: 1, maxLength: 2000 },
+        body: { type: "string", maxLength: 8000 },
+      },
+    },
+  },
+};
+
+/** The structured-output request every Jarvis turn sends to the provider. */
+export const ASSISTANT_RESPONSE_SCHEMA = {
+  name: ASSISTANT_RESPONSE_TOOL_NAME,
+  description:
+    "Return the assistant's reply to the user as this single structured object. This is the ONLY way to respond; put the user-facing answer in assistant_message.",
+  schema: ASSISTANT_RESPONSE_JSON_SCHEMA,
+} as const;
+
 export type ParseResult =
   | { ok: true; value: ValidatedAssistantResponse }
   | { ok: false; reason: "too_large" | "not_json" | "schema" };
