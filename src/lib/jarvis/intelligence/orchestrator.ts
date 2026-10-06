@@ -8,7 +8,7 @@ import { fitHistory } from "@/lib/jarvis/retrieval/evidence/budget";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
 import type { RetrievalTrace } from "@/lib/jarvis/retrieval/types";
 import { resolveJarvisContext, type JarvisContext, type JarvisResolution, type JarvisApiDenial } from "@/lib/jarvis/identity";
-import { getIntelligenceLimits, type IntelligenceLimits } from "@/lib/jarvis/llm/limits";
+import { getIntelligenceLimits, INTELLIGENCE_LIMIT_BOUNDS, type IntelligenceLimits } from "@/lib/jarvis/llm/limits";
 import type { LLMProvider } from "@/lib/jarvis/llm/provider";
 import { isLLMProviderError } from "@/lib/jarvis/llm/errors";
 import {
@@ -95,6 +95,12 @@ import type {
 
 /** Slice-A DB CHECK bound on jarvis_messages.content (1..20000). */
 const MAX_MESSAGE_CHARS = 20_000;
+
+/** Retrieval V2 gives the model a modestly higher output-token allowance so a
+ *  COMPLETE response object fits (the V2 client overview is richer than V1's
+ *  context). Scoped to the V2 path only and still inside the hard clamp — V1 is
+ *  unchanged. A higher env override (JARVIS_LLM_MAX_OUTPUT_TOKENS) is respected. */
+const V2_MIN_OUTPUT_TOKENS = 2000;
 
 export interface TurnInput {
   /** Existing thread to continue, or omit to start a new one. */
@@ -415,16 +421,32 @@ async function executeLifecycle(params: {
       return { ok: false, reason: "provider_start_failed", threadId: thread.id, requestId, persisted: stored };
     }
   }
+  // Scope the output-token allowance: V2 gets at least V2_MIN_OUTPUT_TOKENS (clamped);
+  // V1 is byte-for-byte unchanged.
+  const effectiveLimits: IntelligenceLimits =
+    v2DataBlock !== null
+      ? {
+          ...limits,
+          maxOutputTokens: Math.min(
+            INTELLIGENCE_LIMIT_BOUNDS.maxOutputTokens.max,
+            Math.max(limits.maxOutputTokens, V2_MIN_OUTPUT_TOKENS)
+          ),
+        }
+      : limits;
   let resultText: string;
   let providerId: string;
   let model: string;
   let usage: unknown;
+  let finishReason: string | null = null;
+  let outputTokens: number | null = null;
   try {
-    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessagesFinal }, limits);
+    const result = await callProviderWithPolicy(deps.provider, { system, messages: providerMessagesFinal }, effectiveLimits);
     resultText = result.text;
     providerId = result.providerId; // TRUSTED adapter metadata, never model-claimed
     model = result.model;
     usage = result.usage;
+    finishReason = result.finishReason; // "length" ⇒ stopped at the output-token limit (truncation)
+    outputTokens = result.usage?.outputTokens ?? null;
   } catch (e) {
     const errorClass = isLLMProviderError(e) ? e.kind : "unavailable";
     const stored = await persistFailure(repo, ctx, thread.id, requestId, errorClass);
@@ -433,10 +455,18 @@ async function executeLifecycle(params: {
   await runHook(hooks?.onProviderResult ? () => hooks.onProviderResult!({ provider: providerId, model, usage }) : undefined);
 
   // (9) Validate the UNTRUSTED model output. Malformed ⇒ safe failure; never
-  //     persist the raw blob as assistant content.
+  //     persist the raw blob as assistant content. On failure we persist ONLY safe,
+  //     non-sensitive diagnostics (parse sub-reason, provider finishReason, output
+  //     size) — never the raw text, prompt, or evidence — so truncation (finishReason
+  //     "length") is self-evident next time without storing any content.
   const parsed = parseAssistantResponse(resultText);
   if (!parsed.ok) {
-    const stored = await persistFailure(repo, ctx, thread.id, requestId, `invalid_response:${parsed.reason}`);
+    const stored = await persistFailure(repo, ctx, thread.id, requestId, `invalid_response:${parsed.reason}`, {
+      parseReason: parsed.reason,
+      finishReason,
+      rawLength: resultText.length,
+      outputTokens,
+    });
     return { ok: false, reason: "invalid_response", threadId: thread.id, requestId, persisted: stored };
   }
   const value = parsed.value;
@@ -736,12 +766,15 @@ async function persistFailure(
   ctx: JarvisContext,
   threadId: string,
   requestId: string,
-  errorClass: string
+  errorClass: string,
+  /** SAFE, non-sensitive diagnostics only (sizes/enums) — NEVER raw output, prompt,
+   *  evidence content, secrets, or free-text provider content. */
+  extra?: Record<string, unknown>
 ): Promise<boolean> {
   const id = await tryPersistAssistant(repo, ctx, threadId, requestId, {
     status: "error",
     content: SAFE_FAILURE_MESSAGE,
-    provenance: { errorClass },
+    provenance: { errorClass, ...(extra ?? {}) },
   });
   return id !== null;
 }

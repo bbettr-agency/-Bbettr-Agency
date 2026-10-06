@@ -106,6 +106,9 @@ const RETRIEVAL_V2_INSTRUCTIONS = [
   "AUTHORITATIVE PORTAL FACTS are the source of operational truth; DURABLE MEMORY is supplementary and must never override or be presented as equal to Portal facts.",
   "Where an aggregate is marked partial/lower-bound (e.g. outstanding invoices), NEVER restate it as an exact total; report it as a lower bound and say the exact figure was not fully retrieved.",
   "When results are marked as showing N of M, make clear the list is bounded and not necessarily complete.",
+  // Output-shape discipline (prevents truncated/invalid JSON on data-rich clients).
+  "OUTPUT FORMAT IS CRITICAL. Return EXACTLY ONE complete, valid JSON object matching the response contract. Never wrap it in markdown or code fences. Completing a valid JSON object is MORE important than adding detail: if you are running long, shorten `assistant_message` so the JSON object is always closed and parseable.",
+  "Keep `assistant_message` concise and well under the contract limits. Summarise large datasets (many tasks, updates, files, invoices) with counts and the few most important items rather than exhaustively enumerating every row. Never exceed the response-contract field limits.",
 ] as const;
 
 /**

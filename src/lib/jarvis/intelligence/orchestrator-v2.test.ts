@@ -41,7 +41,7 @@ const TRACE: RetrievalTrace = {
   totalMs: 2,
 };
 
-function makeProvider() {
+function makeProvider(cfg: { text?: string; finishReason?: string | null; outputTokens?: number } = {}) {
   const seen = { request: undefined as LLMCompletionRequest | undefined, calls: 0 };
   const provider: LLMProvider = {
     id: "mockP",
@@ -49,7 +49,14 @@ function makeProvider() {
     complete: vi.fn(async (req: LLMCompletionRequest): Promise<LLMCompletionResult> => {
       seen.request = req;
       seen.calls += 1;
-      return { text: OK_TEXT, providerId: "trusted-provider", model: "trusted-model", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1 };
+      return {
+        text: cfg.text ?? OK_TEXT,
+        providerId: "trusted-provider",
+        model: "trusted-model",
+        finishReason: cfg.finishReason ?? "stop",
+        usage: { inputTokens: 1, outputTokens: cfg.outputTokens ?? 1 },
+        latencyMs: 1,
+      };
     }),
   };
   return { provider, seen };
@@ -179,6 +186,41 @@ describe("orchestrator — Retrieval V2 integration", () => {
     expect(prov.retrieval?.intent).toBe("client_detail");
     // safe trace: no free-text fact values anywhere in the serialized provenance
     expect(JSON.stringify(prov.retrieval)).not.toContain("assistant_message");
+  });
+
+  it("V2 raises the output-token allowance to >= 2000 (V1 default is lower)", async () => {
+    const seam = vi.fn(async () => ({ plan: { kind: "client", clientId: "c1", clientName: "A&S" } as ContextPlan, dataBlock: "B", trace: TRACE }));
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "A&S" }, deps({ provider, runRetrieval: seam }));
+    expect(seen.request!.maxOutputTokens).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("flag OFF → V1 output-token allowance is UNCHANGED (not globally raised)", async () => {
+    vi.mocked(isJarvisRetrievalV2Enabled).mockReturnValue(false);
+    const { provider, seen } = makeProvider();
+    await runIntelligenceTurn({ message: "status please" }, deps({ provider }));
+    expect(seen.request!.maxOutputTokens).toBe(LIMITS.maxOutputTokens); // 1200, unchanged
+  });
+
+  it("invalid_response (truncated non-JSON) persists SAFE diagnostics and NO raw output", async () => {
+    const RAW = "this is not json, it was cut off mid-answer and never closed";
+    const seam = vi.fn(async () => ({ plan: { kind: "client", clientId: "c1", clientName: "A&S" } as ContextPlan, dataBlock: "B", trace: TRACE }));
+    const { provider } = makeProvider({ text: RAW, finishReason: "length", outputTokens: 1999 });
+    const repo = makeRepo();
+    const res = await runIntelligenceTurn({ message: "A&S" }, deps({ provider, runRetrieval: seam, repo: repo.repo }));
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("invalid_response");
+    const err = repo.persisted.find((p) => p.status === "error")!;
+    const prov = err.provenance as Record<string, unknown>;
+    expect(prov.errorClass).toBe("invalid_response:not_json");
+    expect(prov.parseReason).toBe("not_json");
+    expect(prov.finishReason).toBe("length"); // ⇒ truncated at the output-token limit
+    expect(prov.rawLength).toBe(RAW.length);
+    expect(prov.outputTokens).toBe(1999);
+    // the raw model text is NEVER persisted (content is the safe failure message)
+    expect(err.content).not.toContain("cut off");
+    expect(JSON.stringify(err)).not.toContain(RAW);
   });
 
   it("history-fit: large evidence trims OLDEST replayed history but keeps the current message", async () => {
