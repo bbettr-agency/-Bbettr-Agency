@@ -60,6 +60,9 @@ export interface TrustedProvenance {
   retrieval?: import("@/lib/jarvis/retrieval/types").RetrievalTrace;
   /** Milestone A agentic-read safe trace (tool names/counts/status/termination only). */
   agentic?: import("./agentic/trace").AgenticTrace;
+  /** ⚠️ TEMPORARY DIAGNOSTIC — safe derived flag/runtime booleans (+ one length int);
+   *  never raw env values/secrets. Remove once the Milestone-A flag issue is resolved. */
+  flags?: import("./flag-diagnostics").FlagDiagnostics;
 }
 
 /**

@@ -8,6 +8,7 @@ import { runRetrievalV2Turn } from "@/lib/jarvis/retrieval/pipeline";
 import { createClient } from "@/lib/supabase/server";
 import type { RetrieverContext } from "@/lib/jarvis/retrieval/types";
 import { runAgenticLoop, type AgenticOutcome } from "./agentic/loop";
+import { collectFlagDiagnostics } from "./flag-diagnostics"; // ⚠️ TEMPORARY DIAGNOSTIC — remove with the provenance.flags field
 import type { LLMToolMessage } from "@/lib/jarvis/llm/provider";
 import { fitHistory } from "@/lib/jarvis/retrieval/evidence/budget";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
@@ -535,6 +536,8 @@ async function executeLifecycle(params: {
     contextPortalFactCount: countPortalFacts(contexts),
     // Retrieval V2 safe observability trace (counts/ids/status only; no free text).
     ...(v2Trace ? { retrieval: v2Trace } : {}),
+    // ⚠️ TEMPORARY DIAGNOSTIC — safe derived flag booleans; remove after diagnosis.
+    flags: collectFlagDiagnostics(),
   };
 
   // Durable persistence is a PRECONDITION of an ok:true result. If the write
@@ -671,6 +674,8 @@ async function runAgenticLifecycle(params: {
     contextMemoryCount: 0,
     contextPortalFactCount: 0,
     agentic: outcome.trace,
+    // ⚠️ TEMPORARY DIAGNOSTIC — safe derived flag booleans; remove after diagnosis.
+    flags: collectFlagDiagnostics(),
   };
 
   const assistantId = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
