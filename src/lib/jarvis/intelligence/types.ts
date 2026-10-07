@@ -58,6 +58,8 @@ export interface TrustedProvenance {
   contextPortalFactCount: number;
   /** Retrieval V2 safe observability trace (counts/ids/status only; no free text). */
   retrieval?: import("@/lib/jarvis/retrieval/types").RetrievalTrace;
+  /** Milestone A agentic-read safe trace (tool names/counts/status/termination only). */
+  agentic?: import("./agentic/trace").AgenticTrace;
 }
 
 /**

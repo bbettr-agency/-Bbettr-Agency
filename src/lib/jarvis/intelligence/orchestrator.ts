@@ -3,7 +3,12 @@ import "server-only";
 import { isJarvisEnabled } from "@/lib/flags";
 import { isJarvisIntelligenceEnabled } from "@/lib/flags";
 import { isJarvisRetrievalV2Enabled } from "@/lib/flags";
+import { isJarvisAgenticReadEnabled } from "@/lib/flags";
 import { runRetrievalV2Turn } from "@/lib/jarvis/retrieval/pipeline";
+import { createClient } from "@/lib/supabase/server";
+import type { RetrieverContext } from "@/lib/jarvis/retrieval/types";
+import { runAgenticLoop, type AgenticOutcome } from "./agentic/loop";
+import type { LLMToolMessage } from "@/lib/jarvis/llm/provider";
 import { fitHistory } from "@/lib/jarvis/retrieval/evidence/budget";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
 import type { RetrievalTrace } from "@/lib/jarvis/retrieval/types";
@@ -19,7 +24,7 @@ import {
 import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 
 import { planContext as defaultPlanContext } from "./context-router";
-import { buildSystemPrompt, buildSystemPromptFromData } from "./prompt";
+import { buildSystemPrompt, buildSystemPromptFromData, buildAgenticSystemPrompt } from "./prompt";
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
 import { parseAssistantResponse, ASSISTANT_RESPONSE_SCHEMA } from "./response-contract";
 import { callProviderWithPolicy } from "./provider-call";
@@ -176,6 +181,12 @@ export interface TurnDeps {
   turnRepo?: ConversationTurnRepo;
   /** Injectable clock (ms) for the lease, deterministic in tests. */
   now?: () => number;
+  /** Milestone A agentic-read seam. When set, overrides the JARVIS_AGENTIC_READ flag
+   *  (true ⇒ use the agentic loop this turn). Default: the flag. */
+  agenticRead?: boolean;
+  /** Agentic loop seam (defaults to the real bounded loop over the read-tool registry).
+   *  Receives the bounded, redacted tool-message history for the turn. Injectable in tests. */
+  runAgentic?: (history: LLMToolMessage[]) => Promise<AgenticOutcome>;
 }
 
 const defaultAssembler: ContextAssembler = {
@@ -294,6 +305,16 @@ async function executeLifecycle(params: {
     return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
   }
   await runHook(hooks?.onUserMessage ? () => hooks.onUserMessage!(userMessageId) : undefined);
+
+  // (5.5) MILESTONE A — AGENTIC READ (additive, flag-gated). When ON, the turn is
+  //       answered by the bounded multi-tool read loop instead of the single-call V2/V1
+  //       path. Everything downstream (persistence, bridges, confidence override) is
+  //       reused. With the flag OFF (default) this block is skipped entirely and V2/V1
+  //       behaviour is byte-for-byte unchanged.
+  const useAgentic = deps.agenticRead ?? isJarvisAgenticReadEnabled();
+  if (useAgentic) {
+    return runAgenticLifecycle({ ctx, thread, userMessageId, repo, limits, deps, requestId, hooks, turnId, reauthorize });
+  }
 
   // (6) Deterministic context routing. The model never selects its own data, and
   //     a model-supplied client id would have zero authority here. Retrieval V2
@@ -545,6 +566,136 @@ async function executeLifecycle(params: {
     proposedIntent: value.proposedIntent,
     memoryCandidate: value.memoryCandidate,
     plan,
+    requestId,
+    deps,
+    turnId,
+  });
+
+  return {
+    ok: true,
+    threadId: thread.id,
+    requestId,
+    assistantMessage: value.assistantMessage,
+    proposedIntent: value.proposedIntent,
+    memoryCandidate: value.memoryCandidate,
+    uncertainty: effectiveUncertainty,
+    persisted: true,
+    action,
+    memory,
+  };
+}
+
+/**
+ * Milestone A — the AGENTIC READ lifecycle (steps 6–11 analogue). Reached only when
+ * JARVIS_AGENTIC_READ is on (or the test seam forces it). It drives the bounded
+ * multi-tool read loop, then reuses the SAME persistence, confidence override, and
+ * bridge machinery as the deterministic path. Never throws for an expected failure.
+ */
+async function runAgenticLifecycle(params: {
+  ctx: JarvisContext;
+  thread: ConversationThread;
+  userMessageId: string;
+  repo: ConversationRepo;
+  limits: IntelligenceLimits;
+  deps: TurnDeps;
+  requestId: string;
+  hooks?: TurnHooks;
+  turnId?: string;
+  reauthorize: () => Promise<JarvisContext | JarvisApiDenial>;
+}): Promise<TurnResult> {
+  const { ctx, thread, userMessageId, repo, limits, deps, requestId, hooks, turnId, reauthorize } = params;
+
+  // Bounded history, with REPLAYED content secret-redacted and the CURRENT user message
+  // (exact durable row identity) preserved — identical policy to the V2 path.
+  const history = await repo.loadBoundedHistory(ctx, thread.id, limits.historyTurns * 2);
+  const toolHistory: LLMToolMessage[] = history.map((m) =>
+    m.id === userMessageId && m.role === "user" ? { role: m.role, content: m.content } : { role: m.role, content: redactIfSecret(m.content) }
+  );
+
+  // Mark provider_started_at BEFORE any model call (hard precondition, same as V2).
+  if (hooks?.beforeProvider) {
+    try {
+      await hooks.beforeProvider();
+    } catch {
+      const stored = await persistFailure(repo, ctx, thread.id, requestId, "provider_start_failed");
+      return { ok: false, reason: "provider_start_failed", threadId: thread.id, requestId, persisted: stored };
+    }
+  }
+
+  const effectiveMax = Math.min(
+    INTELLIGENCE_LIMIT_BOUNDS.maxOutputTokens.max,
+    Math.max(limits.maxOutputTokens, V2_MIN_OUTPUT_TOKENS)
+  );
+  const runAgentic =
+    deps.runAgentic ??
+    (async (hist: LLMToolMessage[]): Promise<AgenticOutcome> => {
+      const supabase = await createClient();
+      const rc: RetrieverContext = { ctx, supabase, now: () => new Date() };
+      return runAgenticLoop({
+        provider: deps.provider,
+        rc,
+        ctx,
+        system: buildAgenticSystemPrompt(),
+        history: hist,
+        maxOutputTokens: effectiveMax,
+        deadlineMs: Date.now() + limits.timeoutMs,
+      });
+    });
+
+  let outcome: AgenticOutcome;
+  try {
+    outcome = await runAgentic(toolHistory);
+  } catch {
+    const stored = await persistFailure(repo, ctx, thread.id, requestId, "internal_error");
+    return { ok: false, reason: "internal_error", threadId: thread.id, requestId, persisted: stored };
+  }
+  await runHook(hooks?.onProviderResult ? () => hooks.onProviderResult!({ provider: deps.provider.id, model: deps.provider.model, usage: outcome.ok ? outcome.usage : undefined }) : undefined);
+
+  if (!outcome.ok) {
+    // Safe failure: persist a generic error row with ONLY the safe agentic trace as
+    // diagnostics (tool names/counts/status/termination — never raw output/args/secrets).
+    const invalid = outcome.reason.startsWith("invalid_response");
+    const safeReason = invalid ? "invalid_response" : outcome.reason;
+    const stored = await persistFailure(repo, ctx, thread.id, requestId, invalid ? `invalid_response:agentic` : outcome.reason, { agentic: outcome.trace });
+    return { ok: false, reason: safeReason, threadId: thread.id, requestId, persisted: stored };
+  }
+
+  const value = outcome.value;
+  // App-owned confidence (model's self-report discarded, same guarantee as V2).
+  const effectiveUncertainty = deterministicUncertainty(outcome.confidence, outcome.confidenceBasis);
+
+  const provenance: TrustedProvenance = {
+    contextKind: "agency",
+    clientId: null,
+    historyMessages: history.length,
+    contextMemoryCount: 0,
+    contextPortalFactCount: 0,
+    agentic: outcome.trace,
+  };
+
+  const assistantId = await tryPersistAssistant(repo, ctx, thread.id, requestId, {
+    status: "ok",
+    content: value.assistantMessage,
+    reasoningSummary: value.reasoningSummary,
+    uncertainty: effectiveUncertainty,
+    proposedIntent: value.proposedIntent,
+    provider: outcome.providerId,
+    model: outcome.model,
+    usage: outcome.usage,
+    provenance,
+  });
+  if (assistantId === null) return { ok: false, reason: "persist_failed", threadId: thread.id, requestId, persisted: false };
+  await runHook(hooks?.onAssistant ? () => hooks.onAssistant!(assistantId) : undefined);
+
+  // Bridges reuse the SAME reauthorize-once engine. The agentic plan is agency-scoped;
+  // no client-scoped write capability ships in Milestone A, so a client-scoped proposal
+  // would be rejected deterministically downstream.
+  const { action, memory } = await runBridges({
+    turnCtx: ctx,
+    reauthorize,
+    proposedIntent: value.proposedIntent,
+    memoryCandidate: value.memoryCandidate,
+    plan: { kind: "agency" },
     requestId,
     deps,
     turnId,

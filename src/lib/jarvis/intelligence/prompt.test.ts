@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildSystemPromptFromData } from "./prompt";
+import { buildSystemPrompt, buildSystemPromptFromData, buildAgenticSystemPrompt } from "./prompt";
 import type { ContextPackage } from "@/lib/jarvis/memory/context-shape";
 
 /** Minimal, valid agency context package (no facts/memory needed for these assertions). */
@@ -184,5 +184,41 @@ describe("buildSystemPromptFromData — Retrieval V2 output-shape hardening", ()
   it("requires real line breaks + Markdown and forbids literal escape sequences", () => {
     expect(prompt).toMatch(/real line breaks and Markdown/i);
     expect(prompt).toMatch(/NEVER output literal escape sequences/i);
+  });
+});
+
+describe("buildAgenticSystemPrompt — Milestone A read-only discipline", () => {
+  const prompt = buildAgenticSystemPrompt();
+
+  it("declares read-only mode and forbids offering/implying any write or action", () => {
+    expect(prompt).toMatch(/READ-ONLY MODE/);
+    expect(prompt).toMatch(/cannot perform or offer any write\/action/i);
+    // the exact offending phrasing from Preview must be explicitly forbidden
+    expect(prompt).toMatch(/a useful next step would be to create a Planner task/);
+    expect(prompt).toMatch(/would you like me to/i);
+  });
+
+  it("gives the advisory, non-interactive phrasing to use instead", () => {
+    expect(prompt).toMatch(/purely advisory, non-interactive/i);
+    expect(prompt).toMatch(/Consider auditing the client-update logging cadence/);
+  });
+
+  it("preserves the facts-vs-interpretation distinction", () => {
+    expect(prompt).toMatch(/authoritative Portal facts clearly distinct from your own interpretation/i);
+    expect(prompt).toMatch(/may indicate/i);
+    expect(prompt).toMatch(/never present an interpretation as a Portal fact/i);
+  });
+
+  it("still carries the agentic read-tool and grounding guidance", () => {
+    expect(prompt).toMatch(/READ TOOLS/);
+    expect(prompt).toMatch(/Every fact in your answer MUST come from a tool result/i);
+    expect(prompt).toMatch(/portal_resolve_client/);
+    expect(prompt).toMatch(/portal_aggregate/);
+  });
+
+  it("does NOT wire any new write capability into the catalog (read-only milestone)", () => {
+    // The only pre-existing model-facing capability remains the Slice-1 one; no new write.
+    expect(prompt).toContain('capability_id "portal.propose_internal_task"');
+    expect(prompt).not.toMatch(/portal\.create_planner_task|portal\.write_update|portal\.log_/);
   });
 });

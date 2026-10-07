@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { isPlannerEnabled } from "./flags";
+import { isPlannerEnabled, isJarvisAgenticReadEnabled } from "./flags";
 
 const original = process.env.PLANNER_ENABLED;
 afterEach(() => {
@@ -28,5 +28,23 @@ describe("isPlannerEnabled", () => {
     expect(isPlannerEnabled()).toBe(false);
     process.env.PLANNER_ENABLED = "";
     expect(isPlannerEnabled()).toBe(false);
+  });
+});
+
+describe("isJarvisAgenticReadEnabled (Milestone A — default OFF)", () => {
+  const orig = process.env.JARVIS_AGENTIC_READ;
+  afterEach(() => {
+    if (orig === undefined) delete process.env.JARVIS_AGENTIC_READ;
+    else process.env.JARVIS_AGENTIC_READ = orig;
+  });
+  it("defaults OFF and is on ONLY for exactly \"true\"", () => {
+    delete process.env.JARVIS_AGENTIC_READ;
+    expect(isJarvisAgenticReadEnabled()).toBe(false);
+    process.env.JARVIS_AGENTIC_READ = "TRUE";
+    expect(isJarvisAgenticReadEnabled()).toBe(false);
+    process.env.JARVIS_AGENTIC_READ = "1";
+    expect(isJarvisAgenticReadEnabled()).toBe(false);
+    process.env.JARVIS_AGENTIC_READ = "true";
+    expect(isJarvisAgenticReadEnabled()).toBe(true);
   });
 });

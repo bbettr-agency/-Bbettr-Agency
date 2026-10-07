@@ -5,6 +5,7 @@ vi.mock("@/lib/flags", () => ({
   isJarvisEnabled: vi.fn(() => true),
   isJarvisIntelligenceEnabled: vi.fn(() => true),
   isJarvisRetrievalV2Enabled: vi.fn(() => true),
+  isJarvisAgenticReadEnabled: vi.fn(() => false),
 }));
 vi.mock("@/lib/auth", () => ({ requireAdmin: async () => ({ id: "admin1", role: "admin" }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
