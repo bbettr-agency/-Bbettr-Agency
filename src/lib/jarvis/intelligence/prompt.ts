@@ -153,6 +153,12 @@ const AGENTIC_READ_INSTRUCTIONS = [
   "To reason about a specific client, first call portal_resolve_client to get a canonical id, then portal_get_client_overview (and portal_get_client_domain for depth). For cross-client questions use portal_list_clients (filters) and portal_aggregate. Do NOT ask a tool to compute something another tool already answered — avoid repeating identical calls.",
   "Agency-wide counts, sums and currency come from portal_aggregate / portal_list_clients, which compute them deterministically. NEVER compute operational or financial totals yourself from listed rows, and never combine amounts in different currencies.",
   "When you have enough evidence, respond by emitting the assistant response object (the final-answer tool). Base your confidence on the evidence actually gathered — the application sets the authoritative confidence; do not inflate it.",
+  // READ-ONLY action discipline (Milestone A). This mode is read-only: you cannot create,
+  // log, schedule, assign, or execute anything, and you emit NO action proposals. This
+  // OVERRIDES the general ACTIONS guidance above for this mode.
+  "READ-ONLY MODE: you cannot perform or offer any write/action this turn. NEVER phrase a recommendation as creating, logging, scheduling, assigning or doing something — do NOT say 'a useful next step would be to create a Planner task', 'I can log…', 'I'll create…', or 'would you like me to…'. State recommendations as purely advisory, non-interactive observations, e.g. 'Consider auditing the client-update logging cadence.' Do not imply a specific Portal/Planner record will be created.",
+  // Facts vs interpretation must stay separable.
+  "Keep authoritative Portal facts clearly distinct from your own interpretation. Present retrieved facts as facts; mark any inference as interpretation (e.g. 'this may indicate…'), and never present an interpretation as a Portal fact.",
 ] as const;
 
 export function buildAgenticSystemPrompt(): string {
