@@ -31,8 +31,15 @@ export interface AgenticTrace {
   evidenceEstTokens: number;
   evidenceBudget: number;
   termination: AgenticTermination;
-  /** Reliability contract (app-owned coverage): VERIFIED = authoritative source read and
-   *  scope covered; PARTIAL = some read failed/bounded; UNAVAILABLE = nothing read. */
+  /** Question-coverage axis: deterministic breadth of the user's question. */
+  questionBreadth: "broad" | "narrow";
+  /** Source-coverage axis: coverage domains actually checked this turn (names only). */
+  checkedCoverage: string[];
+  /** For a broad answer: important agency areas NOT examined (surfaced to the user). */
+  unexaminedAreas: string[];
+  /** Reliability contract (app-owned, coverage-aware): VERIFIED = authoritative sources
+   *  read AND sufficient for the question; PARTIAL = read failed/bounded OR a broad
+   *  question not fully covered; UNAVAILABLE = nothing read. */
   reliability: "verified" | "partial" | "unavailable";
   confidence: "high" | "qualified";
   confidenceBasis: string;

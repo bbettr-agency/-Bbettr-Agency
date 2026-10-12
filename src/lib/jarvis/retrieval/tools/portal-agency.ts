@@ -132,6 +132,8 @@ const SERVICE_TYPES = ["website", "google_ads", "meta_ads", "seo"];
 export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
   name: "portal_list_clients",
   scope: "agency",
+  coverageBreadth: "agency",
+  providesCoverage: ["clients"],
   requiredGrant: "portal.read",
   description:
     "List authorised Portal clients with optional deterministic filters (status, service, has_open_tasks, has_overdue_tasks, incomplete_onboarding, stale_updates_days, has_unpaid_invoices). Returns the authoritative total, the shown count, and whether the list is truncated. Use this to find which clients match operational signals; use portal_get_client_overview for depth on one client.",
@@ -262,6 +264,10 @@ interface AggregateArgs {
 export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
   name: "portal_aggregate",
   scope: "agency",
+  coverageBreadth: "agency",
+  // A single aggregate call covers only ONE metric's slice, so it declares no static
+  // domain coverage — its breadth marks the turn as an agency survey (needs more).
+  providesCoverage: [],
   requiredGrant: "portal.read",
   description:
     "Deterministically compute ONE narrow agency-wide fact in application/database code (never ask the model to do the arithmetic). Each task metric is a SINGLE-FIELD count, NOT the Planner Today set — for 'what needs my attention today / outstanding today' use portal_planner_today instead. Metrics: clients_by_status; open_tasks (all non-terminal, any date); overdue_tasks (due_date < today, agency tz); tasks_due_today (due_date == today — does NOT include scheduled-today); tasks_scheduled_today (scheduled_date == today); incomplete_onboarding; unpaid_invoices (PER CURRENCY, never combined); stage_distribution; stale_clients (needs stale_days). Dates are Africa/Johannesburg.",

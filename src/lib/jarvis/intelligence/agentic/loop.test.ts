@@ -217,6 +217,77 @@ describe("agentic loop — safety & isolation", () => {
     }
   });
 
+  // ── Correction 3: coverage-aware reliability (question coverage × source coverage) ──
+  const userMsg = (content: string) => [{ role: "user" as const, content }];
+
+  it("NARROW Planner Today question, complete retrieval ⇒ VERIFIED", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("12 total (7 completed, 5 remaining)"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What tasks do I have in Planner Today?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.questionBreadth).toBe("narrow");
+      expect(res.reliability).toBe("verified");
+      expect(res.confidence).toBe("high");
+    }
+  });
+
+  it("BROAD agency question with ONLY Planner checked ⇒ PARTIAL (tool success ≠ verified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("5 remaining today"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.questionBreadth).toBe("broad");
+      expect(res.reliability).toBe("partial");
+      expect(res.confidence).toBe("qualified");
+      // Surfaces important unexamined areas.
+      expect(res.trace.unexaminedAreas).toContain("Meetings / calendar");
+      expect(res.trace.unexaminedAreas).toContain("Finance (QuickBooks/PayFast)");
+    }
+  });
+
+  it("BROAD question with several successful tools but missing domains ⇒ PARTIAL", async () => {
+    const { provider } = makeProvider([
+      [
+        { name: "portal_planner_today", input: {} },
+        { name: "portal_list_clients", input: {} },
+        { name: "portal_aggregate", input: { metric: "unpaid_invoices" } },
+      ],
+      emit(),
+    ]);
+    const execute = vi.fn(async () => okOutcome("ok"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("Is everything okay with my business?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial"); // unsupported agency domains remain
+      expect(res.trace.checkedCoverage).toEqual(expect.arrayContaining(["tasks_today", "clients"]));
+    }
+  });
+
+  it("RECURRING-reminder question with only today's projections ⇒ NOT verified", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("today's recurring occurrence"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What recurring reminders do I have?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial");
+      expect(res.trace.unexaminedAreas).toContain("Recurring reminders (full)");
+    }
+  });
+
+  it("BROAD question with a FAILED required source ⇒ partial (never verified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_aggregate", input: { metric: "overdue_tasks" } }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: false, status: "error", message: "x" }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // No successful read at all ⇒ unavailable (and certainly not verified).
+      expect(res.reliability).toBe("unavailable");
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
   it("the safe trace never contains raw tool-result content", async () => {
     const { provider } = makeProvider([[{ name: "portal_list_clients", input: {} }], emit()]);
     const execute = vi.fn(async () => okOutcome("SECRET_ROW_DATA_12345"));

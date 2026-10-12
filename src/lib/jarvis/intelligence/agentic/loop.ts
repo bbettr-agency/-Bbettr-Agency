@@ -14,6 +14,7 @@ import type { RetrieverContext } from "@/lib/jarvis/retrieval/types";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
 import { READ_TOOL_REGISTRY, readToolSpecs, executeReadTool } from "@/lib/jarvis/retrieval/tools/registry";
 import type { ReadToolOutcome } from "@/lib/jarvis/retrieval/tools/types";
+import { classifyQuestionBreadth, broadCoverageComplete, unexaminedAgencyAreas, questionUnsupportedDomains, labelFor, type CoverageKey, type QuestionBreadth } from "@/lib/jarvis/retrieval/tools/coverage";
 import { ASSISTANT_RESPONSE_TOOL_NAME, ASSISTANT_RESPONSE_JSON_SCHEMA, ASSISTANT_RESPONSE_SCHEMA, parseAssistantResponse } from "../response-contract";
 import type { ValidatedAssistantResponse } from "../types";
 import type { AgenticTrace, AgenticToolCall, AgenticTermination } from "./trace";
@@ -122,7 +123,18 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   // Reliability-contract accumulators (app-owned coverage, never model self-assessed).
   let successfulReads = 0; // authoritative reads that returned ok
   let anyPartial = false; // any tool reported partial coverage (bounded/subset)
+  const checkedCoverage = new Set<CoverageKey>(); // source-coverage: domains actually checked
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+
+  // Question-coverage axis: a deterministic breadth signal from the CURRENT user message
+  // (the last user turn with string content). It never chooses data — it only sets how
+  // much coverage a confident ("verified") answer requires.
+  const lastUserMessage = [...deps.history].reverse().find((m) => m.role === "user" && typeof m.content === "string");
+  const questionText = typeof lastUserMessage?.content === "string" ? lastUserMessage.content : "";
+  const questionBreadth: QuestionBreadth = classifyQuestionBreadth(questionText);
+  // Unsupported domains the question explicitly asks about (e.g. recurring reminders,
+  // meetings) — Jarvis lacks the authoritative source, so it can never be "verified".
+  const askedUnsupported: CoverageKey[] = questionUnsupportedDomains(questionText);
   let providerId = deps.provider.id;
   let model = deps.provider.model;
 
@@ -135,22 +147,42 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   const remaining = () => deps.deadlineMs - now();
   const callBudget = () => Math.max(1, Math.min(remaining(), 60_000));
 
-  // Reliability contract (VERIFIED | PARTIAL | UNAVAILABLE), computed from coverage —
-  // NOT from the model. UNAVAILABLE when no authoritative read succeeded (so an answer
-  // with zero successful reads can never be "verified"/high). PARTIAL when some read
-  // failed or returned partial coverage. Only a fully-successful read set is VERIFIED.
+  // Coverage-aware reliability (VERIFIED | PARTIAL | UNAVAILABLE), computed from the
+  // THREE axes — retrieval success, source coverage, and question coverage — NOT from
+  // the model:
+  //   • UNAVAILABLE — no authoritative read succeeded (zero reads can never be verified);
+  //   • PARTIAL     — a read failed/was partial, OR a BROAD question whose relevant
+  //                   agency domains are not all supported+checked (honest incompleteness);
+  //   • VERIFIED    — reads succeeded AND the checked coverage is SUFFICIENT for the
+  //                   question (a narrow question's subject, or a broad question with the
+  //                   full agency coverage set). A single successful tool call does NOT
+  //                   imply verified for a broad question.
   const reliabilityOf = (): "verified" | "partial" | "unavailable" => {
     if (successfulReads === 0) return "unavailable";
     if (degraded || anyPartial) return "partial";
+    // The question asks about a domain we cannot fully check (recurring/meetings/…) ⇒
+    // never verified, regardless of breadth.
+    if (askedUnsupported.length > 0) return "partial";
+    if (questionBreadth === "broad") return broadCoverageComplete(checkedCoverage) ? "verified" : "partial";
     return "verified";
   };
   // App-owned confidence derives from reliability: only VERIFIED justifies high.
   const confidenceOf = (): "high" | "qualified" => (reliabilityOf() === "verified" ? "high" : "qualified");
+  const unexamined = (): string[] => {
+    const areas = new Set<string>();
+    if (questionBreadth === "broad") for (const a of unexaminedAgencyAreas(checkedCoverage)) areas.add(a);
+    for (const k of askedUnsupported) areas.add(labelFor(k));
+    return [...areas];
+  };
   const confidenceBasis = () => {
     const r = reliabilityOf();
     if (r === "unavailable") return "No authoritative Portal source was successfully read this turn; this answer is NOT verified and absence must not be asserted.";
-    if (r === "partial") return "Some required Portal reads failed or returned only partial coverage (see trace); qualify any claim that depends on them and state the scope checked.";
-    return "Every stated fact is grounded in Portal reads that succeeded this turn. Bounded lists are coverage, not lower confidence.";
+    if (r === "partial") {
+      const areas = unexamined();
+      const tail = areas.length > 0 ? ` Important areas NOT examined: ${areas.join(", ")}.` : "";
+      return `This is a PARTIAL assessment: the checked sources do not fully cover the question (a broad business question requires many domains, some not yet available). State the scope checked and do not present this as a complete, verified picture.${tail}`;
+    }
+    return "Every stated fact is grounded in Portal reads that succeeded this turn and sufficiently cover the question. Bounded lists are coverage, not lower confidence.";
   };
 
   const buildTrace = (termination: AgenticTermination): AgenticTrace => ({
@@ -162,6 +194,9 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
     evidenceEstTokens: evidenceTokens,
     evidenceBudget,
     termination,
+    questionBreadth,
+    checkedCoverage: [...checkedCoverage],
+    unexaminedAreas: unexamined(),
     reliability: reliabilityOf(),
     confidence: confidenceOf(),
     confidenceBasis: confidenceBasis(),
@@ -253,6 +288,8 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
           } else {
             successfulReads += 1;
             if (outcome.result.coverage === "partial") anyPartial = true;
+            // Source coverage: record the domains this tool authoritatively checked.
+            for (const key of descriptor.providesCoverage) checkedCoverage.add(key);
           }
           dedupe.set(key, content);
           toolCalls.push({ name: tu.name, scope: descriptor.scope, status: "ok", domains: outcome.result.domains, total: outcome.result.total, shown: outcome.result.shown, truncated: outcome.result.truncated, tookMs });

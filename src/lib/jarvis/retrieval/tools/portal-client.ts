@@ -41,6 +41,8 @@ interface ResolveArgs {
 export const resolveClientTool: ReadToolDescriptor<ResolveArgs> = {
   name: "portal_resolve_client",
   scope: "client",
+  coverageBreadth: "client",
+  providesCoverage: [],
   requiredGrant: "portal.read",
   description:
     "Resolve a client name/phrase to canonical Portal client id(s) under RLS. Returns exactly one match, several candidates (ask the user which), or none (the client is not in the Portal). Always resolve a name to an id with this before calling client-scoped tools; never guess an id.",
@@ -79,6 +81,8 @@ interface OverviewArgs {
 export const getClientOverviewTool: ReadToolDescriptor<OverviewArgs> = {
   name: "portal_get_client_overview",
   scope: "client",
+  coverageBreadth: "client",
+  providesCoverage: ["client_profile"],
   requiredGrant: "portal.read",
   description:
     "Full authoritative intelligence for ONE client (identity, services, stages, onboarding, updates, tasks, reports, contracts, invoices, payments, retainers, activity, weekly updates, deals, files + supplementary memory), bounded and secret-safe. This is the same evidence the deterministic client path produces. Pass a client_id from portal_resolve_client.",
@@ -121,6 +125,8 @@ interface DomainArgs {
 export const getClientDomainTool: ReadToolDescriptor<DomainArgs> = {
   name: "portal_get_client_domain",
   scope: "client",
+  coverageBreadth: "client",
+  providesCoverage: [],
   requiredGrant: "portal.read",
   description:
     "Detailed read of ONE domain for ONE client when the overview is not enough (e.g. all open tasks, or invoice detail). Pass a client_id from portal_resolve_client and a domain from the allowed list.",

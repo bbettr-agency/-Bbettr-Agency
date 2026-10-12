@@ -41,9 +41,12 @@ export function plannerTodayUnavailable(reason: string): ReadToolResult {
 export const plannerTodayTool: ReadToolDescriptor<Record<string, never>> = {
   name: "portal_planner_today",
   scope: "agency",
+  // Self-contained authoritative source for the "today's tasks" domain only.
+  coverageBreadth: "narrow",
+  providesCoverage: ["tasks_today"],
   requiredGrant: "portal.read",
   description:
-    "Authoritative Planner Today for the signed-in user: the SAME figures the Planner Today dashboard shows. Returns total in Today, completed today, remaining (actionable), overdue, waiting, and the actual outstanding task titles/ids. Use this for 'what do I need to do today', 'what's outstanding today', 'what needs my attention today' — NOT portal_aggregate(tasks_due_today), which is only a narrow due_date count.",
+    "Authoritative Planner Today for the signed-in user: the SAME figures the Planner Today dashboard shows. Returns total in Today, completed today, remaining (actionable), overdue, waiting, and the actual outstanding task titles/ids. Use this for 'what do I need to do today', 'what's outstanding today', 'what needs my attention today' — NOT portal_aggregate(tasks_due_today), which is only a narrow due_date count. RECURRING: this includes today's PROJECTED recurring occurrences only — it is NOT a complete list of recurring definitions, upcoming recurring work, or completed recurring history.",
   inputSchema: { type: "object", additionalProperties: false, properties: {} },
   parse(raw) {
     if (raw !== undefined && raw !== null && (typeof raw !== "object" || Object.keys(raw as object).length > 0)) {
@@ -76,6 +79,11 @@ export const plannerTodayTool: ReadToolDescriptor<Record<string, never>> = {
       lines.push(`Remaining (outstanding) tasks: none — all Today tasks are completed or none are scheduled/due today.`);
     }
     lines.push(`Scope checked: Planner Today tasks only (scheduled-or-due today, Africa/Johannesburg) for you as owner/assignee. Does NOT include meetings, other team members' tasks, or work not in Today.`);
+    // Recurring-reminder honesty (Correction 2): Today includes projected recurring
+    // occurrences for TODAY only — not the full recurring picture.
+    lines.push(
+      `Recurring note: any recurring items here are TODAY's projected occurrences only — this is NOT a complete list of recurring definitions, NOT a view of upcoming recurring work, and NOT a history of completed recurring occurrences. Do not claim full recurring-reminder coverage from this.`
+    );
 
     const truncated = summary.remainingTasks.length > MAX_TASK_TITLES;
     return {
