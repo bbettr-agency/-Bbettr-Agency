@@ -221,4 +221,15 @@ describe("buildAgenticSystemPrompt — Milestone A read-only discipline", () => 
     expect(prompt).toContain('capability_id "portal.propose_internal_task"');
     expect(prompt).not.toMatch(/portal\.create_planner_task|portal\.write_update|portal\.log_/);
   });
+
+  it("forbids the model from classifying evidence coverage itself (the system appends it)", () => {
+    expect(prompt).toMatch(/DO NOT CLASSIFY COVERAGE YOURSELF/);
+    expect(prompt).toMatch(/\(checked fully\)/);
+    expect(prompt).toMatch(/Evidence coverage/);
+  });
+
+  it("keeps the filter/aggregate evidence-framing distinctions", () => {
+    expect(prompt).toMatch(/FILTER COUNT, not a per-client inspection/);
+    expect(prompt).toMatch(/NEVER implies agency-wide task completeness/);
+  });
 });

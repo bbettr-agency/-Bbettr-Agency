@@ -2,6 +2,7 @@ import "server-only";
 
 import type { JarvisContext } from "@/lib/jarvis/identity";
 import type { RetrieverContext } from "../types";
+import type { CoverageContribution } from "./coverage";
 
 /**
  * Jarvis Milestone A — the general READ-TOOL contract.
@@ -33,6 +34,17 @@ export interface ReadToolResult {
    *  overview). The loop uses this to make the turn's app-owned confidence "qualified".
    *  Bounded/truncated lists are COVERAGE, not degradation, and never set this. */
   degraded?: boolean;
+  /** Reliability-contract coverage signal for THIS read:
+   *   • "full"        — the authoritative source was checked and the requested scope covered;
+   *   • "partial"     — only a bounded/subset view was available (e.g. truncated list);
+   *   • "unavailable" — the required source could not be accessed (e.g. module disabled).
+   *  Defaults to "full" when a tool returns ok without specifying. */
+  coverage?: "full" | "partial" | "unavailable";
+  /** GRANULAR, metric-aware coverage this SUCCESSFUL read actually contributes (domain +
+   *  level + scope). This — not the static descriptor list — is what the loop records, so
+   *  evidence coverage matches what was truly retrieved (e.g. an aggregate count is a
+   *  SIGNAL for its domain, never FULL). Omitted/empty ⇒ contributes no domain coverage. */
+  coverageContributions?: CoverageContribution[];
 }
 
 export type ReadToolOutcome =

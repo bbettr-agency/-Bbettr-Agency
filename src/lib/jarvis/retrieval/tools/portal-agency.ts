@@ -1,6 +1,8 @@
 import "server-only";
 
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
+import { agencyToday } from "@/lib/planner/tasks/schedule-date";
+import { aggregateMetricContribution, type CoverageContribution } from "./coverage";
 import type { RetrieverContext } from "../types";
 import type { ReadToolDescriptor, ReadToolResult } from "./types";
 
@@ -29,8 +31,11 @@ const SIGNAL_ROW_CAP = 5000; // per signal-table scan ceiling
 
 const OPEN_TASK_EXCLUDED = "(completed,archived)";
 
+/** The AGENCY-LOCAL (Africa/Johannesburg) date — the SAME "today" the Planner uses.
+ *  Previously this returned the UTC date, which disagreed with the Planner near the
+ *  day boundary; aligned to agencyToday so Jarvis and the Planner share one calendar. */
 function ymd(rc: RetrieverContext): string {
-  return rc.now().toISOString().slice(0, 10);
+  return agencyToday(rc.now());
 }
 
 interface ClientRow {
@@ -177,14 +182,23 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
   },
   async run(args, rc): Promise<ReadToolResult> {
     const { rows, total } = await loadClients(rc);
-    const domains = ["clients"];
+    const domains = ["clients"]; // observability: tables accessed (NOT coverage)
+    // SIGNAL contributions are pushed ONLY for a filter that was actually applied and
+    // successfully evaluated (a throwing query aborts the whole run → no ok result, so
+    // failed filters never contribute). Derived from the parsed args, not the `domains`
+    // access list. Each is a SIGNAL (a filter count), never FULL for the business domain.
+    const contributions: CoverageContribution[] = [];
+    const appliedFilters: string[] = []; // human description preserved in the result
     let filtered = rows;
-    if (args.status) filtered = filtered.filter((c) => c.status === args.status);
-
+    if (args.status) {
+      filtered = filtered.filter((c) => c.status === args.status);
+      appliedFilters.push(`status=${args.status}`);
+    }
     if (args.service) {
       const set = await clientsWithService(rc, args.service as ServiceType);
       domains.push("client_services");
       filtered = filtered.filter((c) => set.has(c.id));
+      appliedFilters.push(`service=${args.service}`);
     }
     if (args.has_open_tasks || args.has_overdue_tasks) {
       const set = await clientsWithTasks(rc, !!args.has_overdue_tasks && !args.has_open_tasks);
@@ -192,16 +206,24 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
       // If both requested, overdue implies open; compute the stricter requested one.
       const overdueSet = args.has_overdue_tasks ? await clientsWithTasks(rc, true) : null;
       filtered = filtered.filter((c) => (args.has_open_tasks ? set.has(c.id) : true) && (overdueSet ? overdueSet.has(c.id) : true));
+      // A SIGNAL about CLIENT-LINKED (client_id) tasks — not the viewer's Planner Today.
+      contributions.push({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+      if (args.has_open_tasks) appliedFilters.push("has_open_tasks=true");
+      if (args.has_overdue_tasks) appliedFilters.push("has_overdue_tasks=true");
     }
     if (args.incomplete_onboarding) {
       const set = await clientsIncompleteOnboarding(rc);
       domains.push("onboarding");
       filtered = filtered.filter((c) => set.has(c.id));
+      contributions.push({ domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push("incomplete_onboarding=true");
     }
     if (args.has_unpaid_invoices) {
       const set = await clientsWithUnpaidInvoices(rc);
       domains.push("invoices");
       filtered = filtered.filter((c) => set.has(c.id));
+      contributions.push({ domain: "invoices", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push("has_unpaid_invoices=true");
     }
     if (args.stale_updates_days) {
       const latest = await latestUpdateByClient(rc);
@@ -211,18 +233,39 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
         const at = latest.get(c.id);
         return !at || new Date(at).getTime() < cutoff;
       });
+      contributions.push({ domain: "client_updates", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push(`stale_updates_days=${args.stale_updates_days}`);
     }
 
     const matchTotal = filtered.length;
     const limit = args.limit ?? DEFAULT_LIST_LIMIT;
     const shown = filtered.slice(0, limit);
     const truncated = filtered.length > shown.length;
+    const anyFilter = appliedFilters.length > 0;
 
     const lines: string[] = [];
-    lines.push(`clients matching filter: ${matchTotal} (of ${total} total authorised clients)`);
+    // Preserve the applied filter(s) + values so the model can distinguish e.g. a 14-day
+    // from a 30-day staleness threshold, and frame the number as a FILTER COUNT.
+    if (anyFilter) {
+      lines.push(`clients matching filter [${appliedFilters.join(", ")}]: ${matchTotal} of ${total} authorised clients (this is a FILTER COUNT, not a full per-client inspection)`);
+    } else {
+      lines.push(`authorised client directory: ${total} clients`);
+    }
     for (const c of shown) lines.push(`- ${redactIfSecret(c.name)} [status: ${c.status}; id: ${c.id}]`);
     if (truncated) lines.push(`- (showing ${shown.length} of ${matchTotal}; narrow the filter to see more)`);
-    return { content: lines.join("\n"), total: matchTotal, shown: shown.length, truncated, domains };
+
+    // The UNFILTERED, untruncated directory is FULL coverage of the clients-directory
+    // scope; a filtered or truncated list is only a SIGNAL slice of it.
+    const clientsLevel = anyFilter || truncated ? ("signal" as const) : ("full" as const);
+    contributions.unshift({ domain: "clients", level: clientsLevel, scope: { breadth: "agency" } });
+    return {
+      content: lines.join("\n"),
+      total: matchTotal,
+      shown: shown.length,
+      truncated,
+      domains,
+      coverageContributions: contributions,
+    };
   },
 };
 
@@ -232,6 +275,7 @@ type Metric =
   | "open_tasks"
   | "overdue_tasks"
   | "tasks_due_today"
+  | "tasks_scheduled_today"
   | "incomplete_onboarding"
   | "unpaid_invoices"
   | "stage_distribution"
@@ -242,6 +286,7 @@ const METRICS: Metric[] = [
   "open_tasks",
   "overdue_tasks",
   "tasks_due_today",
+  "tasks_scheduled_today",
   "incomplete_onboarding",
   "unpaid_invoices",
   "stage_distribution",
@@ -258,7 +303,7 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
   scope: "agency",
   requiredGrant: "portal.read",
   description:
-    "Deterministically compute one agency-wide fact in application/database code (never ask the model to do the arithmetic). Supported metrics: clients_by_status, open_tasks, overdue_tasks, tasks_due_today, incomplete_onboarding, unpaid_invoices (reported PER CURRENCY, never combined), stage_distribution, stale_clients (needs stale_days).",
+    "Deterministically compute ONE narrow agency-wide fact in application/database code (never ask the model to do the arithmetic). Each task metric is a SINGLE-FIELD count, NOT the Planner Today set — for 'what needs my attention today / outstanding today' use portal_planner_today instead. Metrics: clients_by_status; open_tasks (all non-terminal, any date); overdue_tasks (due_date < today, agency tz); tasks_due_today (due_date == today — does NOT include scheduled-today); tasks_scheduled_today (scheduled_date == today); incomplete_onboarding; unpaid_invoices (PER CURRENCY, never combined); stage_distribution; stale_clients (needs stale_days). Dates are Africa/Johannesburg.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -282,6 +327,10 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
     return { ok: true, args };
   },
   async run(args, rc): Promise<ReadToolResult> {
+    // Metric-aware coverage: a successful aggregate is a SIGNAL (count/slice) for its
+    // domain at AGENCY scope — NEVER full domain coverage.
+    const contribution = aggregateMetricContribution(args.metric);
+    const base = await (async (): Promise<ReadToolResult> => {
     switch (args.metric) {
       case "clients_by_status": {
         const { rows, total } = await loadClients(rc);
@@ -293,13 +342,23 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
       }
       case "open_tasks":
       case "overdue_tasks":
-      case "tasks_due_today": {
+      case "tasks_due_today":
+      case "tasks_scheduled_today": {
+        const today = ymd(rc); // agency-local (Africa/Johannesburg)
         let q = rc.supabase.from("tasks").select("id", { count: "exact", head: true }).not("status", "in", OPEN_TASK_EXCLUDED).is("deleted_at", null);
-        if (args.metric === "overdue_tasks") q = q.lt("due_date", ymd(rc));
-        if (args.metric === "tasks_due_today") q = q.eq("due_date", ymd(rc));
+        if (args.metric === "overdue_tasks") q = q.lt("due_date", today);
+        if (args.metric === "tasks_due_today") q = q.eq("due_date", today);
+        if (args.metric === "tasks_scheduled_today") q = q.eq("scheduled_date", today);
         const { count } = await q;
         const label = args.metric.replace(/_/g, " ");
-        return { content: `${label}: ${count ?? 0}`, total: count ?? 0, shown: count ?? 0, truncated: false, domains: ["tasks"] };
+        // Honest scope note so a zero is never read as "nothing needs attention".
+        const note =
+          args.metric === "tasks_due_today"
+            ? " (due_date == today only; excludes scheduled-today — use portal_planner_today for the full Today set)"
+            : args.metric === "tasks_scheduled_today"
+              ? " (scheduled_date == today only)"
+              : "";
+        return { content: `${label} (${today}): ${count ?? 0}${note}`, total: count ?? 0, shown: count ?? 0, truncated: false, domains: ["tasks"] };
       }
       case "incomplete_onboarding": {
         const set = await clientsIncompleteOnboarding(rc);
@@ -350,5 +409,7 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
         };
       }
     }
+    })();
+    return contribution ? { ...base, coverageContributions: [contribution] } : base;
   },
 };

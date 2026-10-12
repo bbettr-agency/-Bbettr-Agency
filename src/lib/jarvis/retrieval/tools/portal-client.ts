@@ -105,7 +105,16 @@ export const getClientOverviewTool: ReadToolDescriptor<OverviewArgs> = {
     const content = serializeEvidencePackage(pkg, rc.now());
     const domains = pkg.portalAuthoritative.map((d) => d.domain);
     const truncated = pkg.portalAuthoritative.some((d) => d.truncated) || pkg.budget.droppedDomains.length > 0;
-    return { content, total: domains.length, shown: domains.length, truncated, domains, degraded: pkg.answerConfidence !== "high" };
+    return {
+      content,
+      total: domains.length,
+      shown: domains.length,
+      truncated,
+      domains,
+      degraded: pkg.answerConfidence !== "high",
+      // FULL for THIS ONE client only (CLIENT scope) — never agency-wide coverage.
+      coverageContributions: [{ domain: "client_profile", level: "full", scope: { breadth: "client", ref: subject.id } }],
+    };
   },
 };
 

@@ -38,6 +38,25 @@ function okOutcome(content: string, degraded = false): ReadToolOutcome {
   return { ok: true, result: { content, total: 1, shown: 1, truncated: false, domains: ["clients"], degraded } };
 }
 
+// Name-aware success: emits the SAME coverage contributions the real tools do, so the
+// loop's coverage map reflects per-tool/metric coverage in unit tests.
+function okForTool(name: string, input: unknown): ReadToolOutcome {
+  const base = { content: "ok", total: 1, shown: 1, truncated: false, domains: ["x"] };
+  if (name === "portal_planner_today") return { ok: true, result: { ...base, coverageContributions: [{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }] } };
+  if (name === "portal_list_clients") return { ok: true, result: { ...base, coverageContributions: [{ domain: "clients", level: "full", scope: { breadth: "agency" } }] } };
+  if (name === "portal_aggregate") {
+    const metric = (input as { metric?: string })?.metric ?? "";
+    const map: Record<string, { domain: "invoices" | "onboarding" | "client_updates" }> = {
+      unpaid_invoices: { domain: "invoices" },
+      incomplete_onboarding: { domain: "onboarding" },
+      stale_clients: { domain: "client_updates" },
+    };
+    const d = map[metric];
+    return { ok: true, result: { ...base, coverageContributions: d ? [{ domain: d.domain, level: "signal", scope: { breadth: "agency" } }] : [] } };
+  }
+  return { ok: true, result: base };
+}
+
 function baseDeps(over: Partial<AgenticLoopDeps>): AgenticLoopDeps {
   return {
     provider: makeProvider([emit()]).provider,
@@ -53,15 +72,20 @@ function baseDeps(over: Partial<AgenticLoopDeps>): AgenticLoopDeps {
 }
 
 describe("agentic loop — termination", () => {
-  it("terminates early when the model emits the final answer in round 1 (1 provider call)", async () => {
+  it("terminates early when the model emits in round 1 — but with ZERO reads that is UNAVAILABLE, never high", async () => {
     const { provider, calls } = makeProvider([emit("done")]);
     const res = await runAgenticLoop(baseDeps({ provider }));
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.value.assistantMessage).toBe("done");
+      expect(res.value.assistantMessage).toContain("done");
+      // The authoritative evidence-coverage summary is appended by the system.
+      expect(res.value.assistantMessage).toContain("Evidence coverage (authoritative");
       expect(res.trace.termination).toBe("final_answer");
       expect(res.trace.providerCalls).toBe(1);
-      expect(res.trace.confidence).toBe("high");
+      // Reliability contract: an answer grounded in NO authoritative read is UNAVAILABLE
+      // and must NOT be reported as high confidence.
+      expect(res.trace.reliability).toBe("unavailable");
+      expect(res.trace.confidence).toBe("qualified");
     }
     expect(calls()).toBe(1);
   });
@@ -178,6 +202,176 @@ describe("agentic loop — safety & isolation", () => {
     const res = await runAgenticLoop(baseDeps({ provider, maxRounds: 1 }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("invalid_response:no_emit");
+  });
+
+  it("a tool reporting PARTIAL coverage ⇒ reliability partial (qualified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: true, result: { content: "bounded", total: 1, shown: 1, truncated: true, domains: ["tasks"], coverage: "partial" } }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial");
+      expect(res.trace.reliability).toBe("partial");
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("a tool reporting UNAVAILABLE coverage ⇒ reliability unavailable (never high)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: true, result: { content: "source unavailable", total: null, shown: 0, truncated: false, domains: ["tasks"], coverage: "unavailable", degraded: true } }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("unavailable"); // the only read was unavailable → no verified coverage
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("a fully successful read ⇒ reliability verified (high)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("12 total (7 completed, 5 remaining)"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("verified");
+      expect(res.confidence).toBe("high");
+    }
+  });
+
+  // ── Correction 3: coverage-aware reliability (question coverage × source coverage) ──
+  const userMsg = (content: string) => [{ role: "user" as const, content }];
+
+  it("NARROW Planner Today question, complete retrieval ⇒ VERIFIED", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("12 total (7 completed, 5 remaining)"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What tasks do I have in Planner Today?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.questionBreadth).toBe("narrow");
+      expect(res.reliability).toBe("verified");
+      expect(res.confidence).toBe("high");
+    }
+  });
+
+  it("BROAD agency question with ONLY Planner checked ⇒ PARTIAL (tool success ≠ verified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("5 remaining today"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.questionBreadth).toBe("broad");
+      expect(res.reliability).toBe("partial");
+      expect(res.confidence).toBe("qualified");
+      // Surfaces important unexamined areas.
+      expect(res.trace.coverage.notChecked).toContain("Meetings / calendar");
+      expect(res.trace.coverage.notChecked).toContain("Finance (QuickBooks/PayFast)");
+    }
+  });
+
+  it("BROAD question with several successful tools but missing domains ⇒ PARTIAL", async () => {
+    const { provider } = makeProvider([
+      [
+        { name: "portal_planner_today", input: {} },
+        { name: "portal_list_clients", input: {} },
+        { name: "portal_aggregate", input: { metric: "unpaid_invoices" } },
+      ],
+      emit(),
+    ]);
+    const execute = vi.fn(async (name: string, input: unknown) => okForTool(name, input));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("Is everything okay with my business?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial"); // unsupported agency domains remain
+      // tasks_today was FULL (planner_today viewer), clients SIGNAL/FULL (list), invoices SIGNAL (aggregate).
+      expect([...res.trace.coverage.full, ...res.trace.coverage.signalOnly]).toEqual(
+        expect.arrayContaining(["Planner tasks (today)", "Client directory", "Unpaid invoices"])
+      );
+      // invoices was checked (as a signal) ⇒ must NOT be reported as not-checked.
+      expect(res.trace.coverage.notChecked).not.toContain("Unpaid invoices");
+    }
+  });
+
+  it("reproduces & resolves the Preview contradiction: a stale-filter list_clients records client_updates as SIGNAL (never NOT CHECKED)", async () => {
+    // Model: planner_today (full) + list_clients({stale_updates_days}) which now contributes
+    // clients + client_updates SIGNAL. client_updates must NOT appear under NOT CHECKED.
+    const { provider } = makeProvider([
+      [
+        { name: "portal_planner_today", input: {} },
+        { name: "portal_list_clients", input: { stale_updates_days: 14 } },
+      ],
+      emit(),
+    ]);
+    const execute = vi.fn(async (name: string, input: unknown): Promise<ReadToolOutcome> => {
+      if (name === "portal_planner_today") return { ok: true, result: { content: "today", total: 1, shown: 1, truncated: false, domains: ["tasks"], coverageContributions: [{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }] } };
+      // list_clients with a stale filter → clients + client_updates SIGNAL (what the fix emits)
+      void input;
+      return { ok: true, result: { content: "14 of 14", total: 14, shown: 14, truncated: false, domains: ["clients", "updates"], coverageContributions: [
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ] } };
+    });
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.coverage.signalOnly).toContain("Client update recency");
+      expect(res.trace.coverage.notChecked).not.toContain("Client update recency"); // the fixed contradiction
+      expect(res.reliability).toBe("partial"); // still partial (unsupported domains remain)
+    }
+  });
+
+  it("RECURRING-reminder question with only today's projections ⇒ NOT verified", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("today's recurring occurrence"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What recurring reminders do I have?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial");
+      expect(res.trace.coverage.notChecked).toContain("Recurring reminders (full)");
+    }
+  });
+
+  it("BROAD question with a FAILED required source ⇒ partial (never verified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_aggregate", input: { metric: "overdue_tasks" } }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: false, status: "error", message: "x" }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // No successful read at all ⇒ unavailable (and certainly not verified).
+      expect(res.reliability).toBe("unavailable");
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("appends an AUTHORITATIVE coverage summary that classifies aggregate/filter reads as SIGNAL, even if the model wrongly says 'checked fully'", async () => {
+    // Model emits the exact contradictory wording from Preview in its assistant_message.
+    const badEmit = [{ name: ASSISTANT_RESPONSE_TOOL_NAME, input: { assistant_message: "Incomplete onboarding (checked fully, aggregate): 6. Portal updates (checked fully, aggregate): 14/14." } }];
+    const { provider } = makeProvider([
+      [
+        { name: "portal_aggregate", input: { metric: "incomplete_onboarding" } },
+        { name: "portal_list_clients", input: { stale_updates_days: 14 } },
+      ],
+      badEmit,
+    ]);
+    const execute = vi.fn(async (name: string, input: unknown): Promise<ReadToolOutcome> => {
+      if (name === "portal_aggregate") return { ok: true, result: { content: "6", total: 6, shown: 6, truncated: false, domains: ["onboarding"], coverageContributions: [{ domain: "onboarding", level: "signal", scope: { breadth: "agency" } }] } };
+      void input;
+      return { ok: true, result: { content: "14/14", total: 14, shown: 14, truncated: false, domains: ["clients", "updates"], coverageContributions: [
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ] } };
+    });
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const msg = res.value.assistantMessage;
+      // The authoritative summary classifies onboarding + client_updates as LIMITED SIGNALS...
+      expect(msg).toMatch(/Checked as limited signals only[^\n]*Onboarding status/);
+      expect(msg).toMatch(/Checked as limited signals only[^\n]*Client update recency/);
+      // ...and NOT as "checked completely" (the authoritative line must not list them under full).
+      const fullLine = msg.split("\n").find((l) => l.includes("Checked completely")) ?? "";
+      expect(fullLine).not.toContain("Onboarding status");
+      expect(fullLine).not.toContain("Client update recency");
+    }
   });
 
   it("the safe trace never contains raw tool-result content", async () => {

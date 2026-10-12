@@ -14,6 +14,17 @@ import type { RetrieverContext } from "@/lib/jarvis/retrieval/types";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
 import { READ_TOOL_REGISTRY, readToolSpecs, executeReadTool } from "@/lib/jarvis/retrieval/tools/registry";
 import type { ReadToolOutcome } from "@/lib/jarvis/retrieval/tools/types";
+import {
+  classifyQuestionBreadth,
+  broadCoverageComplete,
+  buildCoverageBuckets,
+  formatCoverageSummary,
+  recordContribution,
+  questionUnsupportedDomains,
+  type CoverageKey,
+  type CoverageMap,
+  type QuestionBreadth,
+} from "@/lib/jarvis/retrieval/tools/coverage";
 import { ASSISTANT_RESPONSE_TOOL_NAME, ASSISTANT_RESPONSE_JSON_SCHEMA, ASSISTANT_RESPONSE_SCHEMA, parseAssistantResponse } from "../response-contract";
 import type { ValidatedAssistantResponse } from "../types";
 import type { AgenticTrace, AgenticToolCall, AgenticTermination } from "./trace";
@@ -66,6 +77,7 @@ export interface AgenticLoopDeps {
 export interface AgenticSuccess {
   ok: true;
   value: ValidatedAssistantResponse;
+  reliability: "verified" | "partial" | "unavailable";
   confidence: "high" | "qualified";
   confidenceBasis: string;
   trace: AgenticTrace;
@@ -118,7 +130,21 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   let providerCalls = 0;
   let rounds = 0;
   let degraded = false;
+  // Reliability-contract accumulators (app-owned coverage, never model self-assessed).
+  let successfulReads = 0; // authoritative reads that returned ok
+  let anyPartial = false; // any tool reported partial coverage (bounded/subset)
+  const coverage: CoverageMap = new Map(); // source-coverage: domain → {level, agencyFull}, from successful results
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+
+  // Question-coverage axis: a deterministic breadth signal from the CURRENT user message
+  // (the last user turn with string content). It never chooses data — it only sets how
+  // much coverage a confident ("verified") answer requires.
+  const lastUserMessage = [...deps.history].reverse().find((m) => m.role === "user" && typeof m.content === "string");
+  const questionText = typeof lastUserMessage?.content === "string" ? lastUserMessage.content : "";
+  const questionBreadth: QuestionBreadth = classifyQuestionBreadth(questionText);
+  // Unsupported domains the question explicitly asks about (e.g. recurring reminders,
+  // meetings) — Jarvis lacks the authoritative source, so it can never be "verified".
+  const askedUnsupported: CoverageKey[] = questionUnsupportedDomains(questionText);
   let providerId = deps.provider.id;
   let model = deps.provider.model;
 
@@ -131,24 +157,59 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   const remaining = () => deps.deadlineMs - now();
   const callBudget = () => Math.max(1, Math.min(remaining(), 60_000));
 
-  const confidenceBasis = () =>
-    degraded
-      ? "Some required Portal reads could not be completed this turn (see trace); any answer depending on them is qualified, and absence was not asserted."
-      : "Every stated fact is grounded in Portal reads that succeeded this turn. Bounded lists are coverage, not lower confidence.";
+  // Coverage-aware reliability (VERIFIED | PARTIAL | UNAVAILABLE), computed from the
+  // THREE axes — retrieval success, source coverage, and question coverage — NOT from
+  // the model:
+  //   • UNAVAILABLE — no authoritative read succeeded (zero reads can never be verified);
+  //   • PARTIAL     — a read failed/was partial, OR a BROAD question whose relevant
+  //                   agency domains are not all supported+checked (honest incompleteness);
+  //   • VERIFIED    — reads succeeded AND the checked coverage is SUFFICIENT for the
+  //                   question (a narrow question's subject, or a broad question with the
+  //                   full agency coverage set). A single successful tool call does NOT
+  //                   imply verified for a broad question.
+  const reliabilityOf = (): "verified" | "partial" | "unavailable" => {
+    if (successfulReads === 0) return "unavailable";
+    if (degraded || anyPartial) return "partial";
+    // The question asks about a domain we cannot fully check (recurring/meetings/…) ⇒
+    // never verified, regardless of breadth.
+    if (askedUnsupported.length > 0) return "partial";
+    if (questionBreadth === "broad") return broadCoverageComplete(coverage) ? "verified" : "partial";
+    return "verified";
+  };
+  // App-owned confidence derives from reliability: only VERIFIED justifies high.
+  const confidenceOf = (): "high" | "qualified" => (reliabilityOf() === "verified" ? "high" : "qualified");
+  const buckets = () => buildCoverageBuckets({ map: coverage, breadth: questionBreadth, askedUnsupported });
+  const confidenceBasis = () => {
+    const r = reliabilityOf();
+    if (r === "unavailable") return "No authoritative Portal source was successfully read this turn; this answer is NOT verified and absence must not be asserted.";
+    if (r === "partial") {
+      const b = buckets();
+      const signal = b.signalOnly.length > 0 ? ` Checked as LIMITED SIGNALS ONLY (counts, not full records): ${b.signalOnly.join(", ")}.` : "";
+      const none = b.notChecked.length > 0 ? ` NOT checked / unavailable: ${b.notChecked.join(", ")}.` : "";
+      return `This is a PARTIAL assessment — the checked sources do not fully cover the question. Present it as partial, state the scope checked, and do not claim a complete/verified picture.${signal}${none}`;
+    }
+    return "Every stated fact is grounded in Portal reads that were FULLY checked for the question's scope. Bounded lists are coverage, not lower confidence.";
+  };
 
-  const buildTrace = (termination: AgenticTermination): AgenticTrace => ({
-    mode: "agentic",
-    rounds,
-    maxRounds,
-    providerCalls,
-    toolCalls,
-    evidenceEstTokens: evidenceTokens,
-    evidenceBudget,
-    termination,
-    confidence: degraded ? "qualified" : "high",
-    confidenceBasis: confidenceBasis(),
-    totalMs: now() - started,
-  });
+  const buildTrace = (termination: AgenticTermination): AgenticTrace => {
+    const b = buckets();
+    return {
+      mode: "agentic",
+      rounds,
+      maxRounds,
+      providerCalls,
+      toolCalls,
+      evidenceEstTokens: evidenceTokens,
+      evidenceBudget,
+      termination,
+      questionBreadth,
+      coverage: { full: b.full, signalOnly: b.signalOnly, notChecked: b.notChecked },
+      reliability: reliabilityOf(),
+      confidence: confidenceOf(),
+      confidenceBasis: confidenceBasis(),
+      totalMs: now() - started,
+    };
+  };
 
   if (typeof deps.provider.completeWithTools !== "function") {
     return { ok: false, reason: "provider_no_tools", trace: buildTrace("no_tool") };
@@ -157,10 +218,15 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   const finalize = (raw: string, termination: AgenticTermination): AgenticOutcome => {
     const parsed = parseAssistantResponse(raw);
     if (!parsed.ok) return { ok: false, reason: `invalid_response:${parsed.reason}`, trace: buildTrace(termination) };
+    // Append the SINGLE authoritative, app-owned evidence-coverage summary (same buckets
+    // as the confidence basis) so the main answer and confidence cannot contradict each
+    // other about FULL vs SIGNAL. The model never classifies coverage itself.
+    const value = { ...parsed.value, assistantMessage: `${parsed.value.assistantMessage}\n\n${formatCoverageSummary(buckets())}` };
     return {
       ok: true,
-      value: parsed.value,
-      confidence: degraded ? "qualified" : "high",
+      value,
+      reliability: reliabilityOf(),
+      confidence: confidenceOf(),
       confidenceBasis: confidenceBasis(),
       trace: buildTrace(termination),
       providerId,
@@ -226,6 +292,18 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
           const content = outcome.result.content;
           evidenceTokens += estimateTokens(content);
           if (outcome.result.degraded) degraded = true;
+          // Reliability coverage: an "unavailable" source degrades and does NOT count as
+          // a successful read; a "partial" read DID read (counts) but flags partial; a
+          // "full"/unspecified read counts toward VERIFIED coverage.
+          if (outcome.result.coverage === "unavailable") {
+            degraded = true;
+          } else {
+            successfulReads += 1;
+            if (outcome.result.coverage === "partial") anyPartial = true;
+            // Source coverage: record what this SUCCESSFUL read actually contributed
+            // (metric-aware, level + scope) — not the static descriptor list.
+            for (const c of outcome.result.coverageContributions ?? []) recordContribution(coverage, c);
+          }
           dedupe.set(key, content);
           toolCalls.push({ name: tu.name, scope: descriptor.scope, status: "ok", domains: outcome.result.domains, total: outcome.result.total, shown: outcome.result.shown, truncated: outcome.result.truncated, tookMs });
           resultBlocks.push({ type: "tool_result", toolUseId: tu.id, content });

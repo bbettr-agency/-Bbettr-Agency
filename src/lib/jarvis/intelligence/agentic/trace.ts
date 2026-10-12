@@ -31,6 +31,16 @@ export interface AgenticTrace {
   evidenceEstTokens: number;
   evidenceBudget: number;
   termination: AgenticTermination;
+  /** Question-coverage axis: deterministic breadth of the user's question. */
+  questionBreadth: "broad" | "narrow";
+  /** Source-coverage axis (granular): domains checked COMPLETELY for their scope (full),
+   *  domains checked as LIMITED SIGNALS ONLY (counts/slices), and domains NOT checked /
+   *  unavailable. Labels only — no raw rows. */
+  coverage: { full: string[]; signalOnly: string[]; notChecked: string[] };
+  /** Reliability contract (app-owned, coverage-aware): VERIFIED = authoritative sources
+   *  read AND sufficient for the question; PARTIAL = read failed/bounded OR a broad
+   *  question not fully covered; UNAVAILABLE = nothing read. */
+  reliability: "verified" | "partial" | "unavailable";
   confidence: "high" | "qualified";
   confidenceBasis: string;
   totalMs: number;

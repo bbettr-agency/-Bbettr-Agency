@@ -9,9 +9,9 @@ import { listAdminTeam } from "@/lib/planner/team";
 import { listMeetings, getSafeProjectionViews } from "@/lib/planner/meetings/queries";
 import { meetingsOnDate } from "@/lib/planner/meetings/date-views";
 import { getInternalFeed } from "@/lib/internal-notifications";
-import { groupToday, actionableToday } from "@/lib/planner/today/today-grouping";
+import { groupToday } from "@/lib/planner/today/today-grouping";
+import { summariseTodayTaskViews } from "@/lib/planner/today/today-summary";
 import { nextBestAction } from "@/lib/planner/today/next-best-action";
-import { todayProgress } from "@/lib/planner/today/today-progress";
 import { smartAlerts } from "@/lib/planner/today/smart-alerts";
 import { buildGreeting } from "@/lib/planner/today/greeting";
 import { minutesUntil, remainingMeetings, type TodayMeeting } from "@/lib/planner/today/today-meeting";
@@ -82,7 +82,6 @@ export async function TodayDashboard() {
   const activeViews = [...materialisedViews, ...projectedViews];
 
   const groups = groupToday(activeViews, completedViews);
-  const actionable = actionableToday(activeViews);
 
   const allMeetings = meetingsRes.status === "fulfilled" ? meetingsRes.value : [];
   const todayMeetings = meetingsOnDate(allMeetings, today);
@@ -91,7 +90,8 @@ export async function TodayDashboard() {
   const remaining = remainingMeetings(meetingLites, now);
   const meetingsCompleted = meetingLites.filter((m) => m.status !== "cancelled" && new Date(m.endsAt).getTime() <= now.getTime()).length;
 
-  const progress = todayProgress(actionable, completedViews, remaining.length);
+  // Shared authoritative Today summary (same pure logic Jarvis uses — they cannot diverge).
+  const { actionable, progress } = summariseTodayTaskViews(activeViews, completedViews, remaining.length);
   const nba = nextBestAction(actionable, meetingLites, now);
   const nbaMeetUrl = nba?.kind === "meeting" ? meetViews.get(nba.meeting.id)?.meetUrl ?? null : null;
   const dueTodayCount = actionable.filter((t) => t.dueDate === today && !t.isOverdue).length;

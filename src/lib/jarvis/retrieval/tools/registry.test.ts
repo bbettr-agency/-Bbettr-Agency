@@ -16,7 +16,7 @@ describe("read-tool registry", () => {
   it("exposes a small, frozen, named tool surface", () => {
     const names = readToolSpecs().map((t) => t.name).sort();
     expect(names).toEqual(
-      ["portal_aggregate", "portal_get_client_domain", "portal_get_client_overview", "portal_list_clients", "portal_resolve_client"].sort()
+      ["portal_aggregate", "portal_get_client_domain", "portal_get_client_overview", "portal_list_clients", "portal_planner_today", "portal_resolve_client"].sort()
     );
     // every spec has an object input schema with additionalProperties:false
     for (const spec of readToolSpecs()) {

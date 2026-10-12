@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { listClientsTool, aggregateTool } from "./portal-agency";
+import { executeReadTool } from "./registry";
 import { makeFakeSupabase, type FakeRow } from "@/test/jarvis-fake-supabase";
 import type { RetrieverContext } from "../types";
 import type { JarvisContext } from "@/lib/jarvis/identity";
@@ -38,7 +39,8 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
     expect(r.total).toBe(4); // matched = all 4
     expect(r.shown).toBe(2);
     expect(r.truncated).toBe(true);
-    expect(r.content).toContain("4 (of 4 total");
+    expect(r.content).toContain("authorised client directory: 4 clients");
+    expect(r.content).toContain("showing 2 of 4");
   });
 
   it("filters by status deterministically", async () => {
@@ -70,6 +72,54 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
     expect(r.content).toContain("Imatec");
   });
 
+  it("contributes FULL clients coverage when unfiltered, SIGNAL when filtered", async () => {
+    const unfiltered = await listClientsTool.run({}, rc({ clients: CLIENTS }), CTX);
+    expect(unfiltered.coverageContributions).toEqual([{ domain: "clients", level: "full", scope: { breadth: "agency" } }]);
+    const filtered = await listClientsTool.run({ status: "active" }, rc({ clients: CLIENTS }), CTX);
+    expect(filtered.coverageContributions).toEqual([{ domain: "clients", level: "signal", scope: { breadth: "agency" } }]);
+  });
+
+  it("each applied filter adds its own SIGNAL domain (never FULL for the business domain)", async () => {
+    const stale = await listClientsTool.run({ stale_updates_days: 14 }, rc({ clients: CLIENTS, updates: [{ client_id: "c1", published_at: "2026-10-01T00:00:00Z" }] }), CTX);
+    expect(stale.coverageContributions).toEqual(
+      expect.arrayContaining([
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ])
+    );
+    // the filtered business domain is SIGNAL, never FULL:
+    expect(stale.coverageContributions!.find((c) => c.domain === "client_updates")!.level).toBe("signal");
+    // stale threshold preserved in the result so 14-day vs 30-day is distinguishable:
+    expect(stale.content).toContain("stale_updates_days=14");
+    expect(stale.content).toContain("FILTER COUNT, not a full per-client inspection");
+
+    const tasks = await listClientsTool.run({ has_open_tasks: true }, rc({ clients: CLIENTS, tasks: [] }), CTX);
+    expect(tasks.coverageContributions).toContainEqual({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+    expect(tasks.content).toContain("has_open_tasks=true");
+
+    const overdue = await listClientsTool.run({ has_overdue_tasks: true }, rc({ clients: CLIENTS, tasks: [] }), CTX);
+    expect(overdue.coverageContributions).toContainEqual({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+
+    const onb = await listClientsTool.run({ incomplete_onboarding: true }, rc({ clients: CLIENTS, onboarding_submissions: [] }), CTX);
+    expect(onb.coverageContributions).toContainEqual({ domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+
+    const inv = await listClientsTool.run({ has_unpaid_invoices: true }, rc({ clients: CLIENTS, client_invoices: [] }), CTX);
+    expect(inv.coverageContributions).toContainEqual({ domain: "invoices", level: "signal", scope: { breadth: "agency" } });
+  });
+
+  it("a FAILED filter (throwing query) contributes NO successful coverage", async () => {
+    // updates table throws → the stale filter query throws → whole run throws → executor
+    // returns an error outcome → no coverage recorded for this turn.
+    const out = await executeReadTool("portal_list_clients", { stale_updates_days: 14 }, rc({ clients: CLIENTS }, ["updates"]), CTX);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.status).toBe("error");
+  });
+
+  it("an unfiltered directory read contributes ONLY the clients directory (no business-domain coverage)", async () => {
+    const r = await listClientsTool.run({}, rc({ clients: CLIENTS }), CTX);
+    expect(r.coverageContributions).toEqual([{ domain: "clients", level: "full", scope: { breadth: "agency" } }]);
+  });
+
   it("secret-scans client names before returning them", async () => {
     const secret = "sk-A1b2C3d4E5f6G7h8I9j0K1l2";
     const r = await listClientsTool.run({}, rc({ clients: [{ id: "x", name: `Client ${secret}`, status: "active" }] }), CTX);
@@ -79,6 +129,15 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
 });
 
 describe("portal_aggregate — deterministic, app-computed facts", () => {
+  it("each aggregate result carries a metric-aware SIGNAL contribution (never full)", async () => {
+    const onb = await aggregateTool.run({ metric: "incomplete_onboarding" }, rc({ onboarding_submissions: [{ client_id: "c3", status: "in_progress" }] }), CTX);
+    expect(onb.coverageContributions).toEqual([{ domain: "onboarding", level: "signal", scope: { breadth: "agency" } }]);
+    const inv = await aggregateTool.run({ metric: "unpaid_invoices" }, rc({ client_invoices: [] }), CTX);
+    expect(inv.coverageContributions).toEqual([{ domain: "invoices", level: "signal", scope: { breadth: "agency" } }]);
+    const stale = await aggregateTool.run({ metric: "stale_clients", stale_days: 7 }, rc({ clients: CLIENTS }), CTX);
+    expect(stale.coverageContributions).toEqual([{ domain: "client_updates", level: "signal", scope: { breadth: "agency" } }]);
+  });
+
   it("clients_by_status counts in code", async () => {
     const r = await aggregateTool.run({ metric: "clients_by_status" }, rc({ clients: CLIENTS }), CTX);
     expect(r.content).toContain("active: 2");
@@ -94,7 +153,29 @@ describe("portal_aggregate — deterministic, app-computed facts", () => {
     ];
     const r = await aggregateTool.run({ metric: "overdue_tasks" }, rc({ tasks }), CTX);
     expect(r.total).toBe(1);
-    expect(r.content).toContain("overdue tasks: 1");
+    expect(r.content).toMatch(/overdue tasks \(\d{4}-\d{2}-\d{2}\): 1/);
+  });
+
+  it("tasks_due_today uses the AGENCY date (Africa/Johannesburg), not UTC, at the day boundary", async () => {
+    // 22:30 UTC on the 12th is 00:30 on the 13th in SAST (+2). Agency 'today' = 2026-10-13.
+    const lateUtc = new Date("2026-10-12T22:30:00Z");
+    const boundaryRc = { ctx: CTX, supabase: makeFakeSupabase({ tables: { tasks: [
+      { id: "t13", status: "scheduled", deleted_at: null, due_date: "2026-10-13" }, // due agency-today
+      { id: "t12", status: "scheduled", deleted_at: null, due_date: "2026-10-12" }, // yesterday (agency) → not due today
+    ] } }) as unknown as RetrieverContext["supabase"], now: () => lateUtc } as RetrieverContext;
+    const r = await aggregateTool.run({ metric: "tasks_due_today" }, boundaryRc, CTX);
+    expect(r.content).toContain("(2026-10-13)"); // agency date, not UTC 2026-10-12
+    expect(r.total).toBe(1); // only the 2026-10-13 task; a UTC impl would have counted the 12th
+  });
+
+  it("tasks_scheduled_today counts scheduled_date == today (distinct from due_today)", async () => {
+    const tasks: FakeRow[] = [
+      { id: "s1", status: "scheduled", deleted_at: null, scheduled_date: "2026-10-06", due_date: null }, // scheduled today, no due
+      { id: "s2", status: "scheduled", deleted_at: null, scheduled_date: "2026-10-01", due_date: null }, // not today
+    ];
+    const r = await aggregateTool.run({ metric: "tasks_scheduled_today" }, rc({ tasks }), CTX);
+    expect(r.total).toBe(1);
+    expect(r.content).toMatch(/tasks scheduled today \(2026-10-06\): 1/);
   });
 
   it("unpaid_invoices reports PER CURRENCY and never combines currencies", async () => {
