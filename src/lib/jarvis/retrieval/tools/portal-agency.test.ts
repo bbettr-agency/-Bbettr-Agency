@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { listClientsTool, aggregateTool } from "./portal-agency";
+import { executeReadTool } from "./registry";
 import { makeFakeSupabase, type FakeRow } from "@/test/jarvis-fake-supabase";
 import type { RetrieverContext } from "../types";
 import type { JarvisContext } from "@/lib/jarvis/identity";
@@ -38,7 +39,8 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
     expect(r.total).toBe(4); // matched = all 4
     expect(r.shown).toBe(2);
     expect(r.truncated).toBe(true);
-    expect(r.content).toContain("4 (of 4 total");
+    expect(r.content).toContain("authorised client directory: 4 clients");
+    expect(r.content).toContain("showing 2 of 4");
   });
 
   it("filters by status deterministically", async () => {
@@ -75,6 +77,47 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
     expect(unfiltered.coverageContributions).toEqual([{ domain: "clients", level: "full", scope: { breadth: "agency" } }]);
     const filtered = await listClientsTool.run({ status: "active" }, rc({ clients: CLIENTS }), CTX);
     expect(filtered.coverageContributions).toEqual([{ domain: "clients", level: "signal", scope: { breadth: "agency" } }]);
+  });
+
+  it("each applied filter adds its own SIGNAL domain (never FULL for the business domain)", async () => {
+    const stale = await listClientsTool.run({ stale_updates_days: 14 }, rc({ clients: CLIENTS, updates: [{ client_id: "c1", published_at: "2026-10-01T00:00:00Z" }] }), CTX);
+    expect(stale.coverageContributions).toEqual(
+      expect.arrayContaining([
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ])
+    );
+    // the filtered business domain is SIGNAL, never FULL:
+    expect(stale.coverageContributions!.find((c) => c.domain === "client_updates")!.level).toBe("signal");
+    // stale threshold preserved in the result so 14-day vs 30-day is distinguishable:
+    expect(stale.content).toContain("stale_updates_days=14");
+    expect(stale.content).toContain("FILTER COUNT, not a full per-client inspection");
+
+    const tasks = await listClientsTool.run({ has_open_tasks: true }, rc({ clients: CLIENTS, tasks: [] }), CTX);
+    expect(tasks.coverageContributions).toContainEqual({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+    expect(tasks.content).toContain("has_open_tasks=true");
+
+    const overdue = await listClientsTool.run({ has_overdue_tasks: true }, rc({ clients: CLIENTS, tasks: [] }), CTX);
+    expect(overdue.coverageContributions).toContainEqual({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+
+    const onb = await listClientsTool.run({ incomplete_onboarding: true }, rc({ clients: CLIENTS, onboarding_submissions: [] }), CTX);
+    expect(onb.coverageContributions).toContainEqual({ domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+
+    const inv = await listClientsTool.run({ has_unpaid_invoices: true }, rc({ clients: CLIENTS, client_invoices: [] }), CTX);
+    expect(inv.coverageContributions).toContainEqual({ domain: "invoices", level: "signal", scope: { breadth: "agency" } });
+  });
+
+  it("a FAILED filter (throwing query) contributes NO successful coverage", async () => {
+    // updates table throws → the stale filter query throws → whole run throws → executor
+    // returns an error outcome → no coverage recorded for this turn.
+    const out = await executeReadTool("portal_list_clients", { stale_updates_days: 14 }, rc({ clients: CLIENTS }, ["updates"]), CTX);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.status).toBe("error");
+  });
+
+  it("an unfiltered directory read contributes ONLY the clients directory (no business-domain coverage)", async () => {
+    const r = await listClientsTool.run({}, rc({ clients: CLIENTS }), CTX);
+    expect(r.coverageContributions).toEqual([{ domain: "clients", level: "full", scope: { breadth: "agency" } }]);
   });
 
   it("secret-scans client names before returning them", async () => {

@@ -2,7 +2,7 @@ import "server-only";
 
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
 import { agencyToday } from "@/lib/planner/tasks/schedule-date";
-import { aggregateMetricContribution } from "./coverage";
+import { aggregateMetricContribution, type CoverageContribution } from "./coverage";
 import type { RetrieverContext } from "../types";
 import type { ReadToolDescriptor, ReadToolResult } from "./types";
 
@@ -182,14 +182,23 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
   },
   async run(args, rc): Promise<ReadToolResult> {
     const { rows, total } = await loadClients(rc);
-    const domains = ["clients"];
+    const domains = ["clients"]; // observability: tables accessed (NOT coverage)
+    // SIGNAL contributions are pushed ONLY for a filter that was actually applied and
+    // successfully evaluated (a throwing query aborts the whole run → no ok result, so
+    // failed filters never contribute). Derived from the parsed args, not the `domains`
+    // access list. Each is a SIGNAL (a filter count), never FULL for the business domain.
+    const contributions: CoverageContribution[] = [];
+    const appliedFilters: string[] = []; // human description preserved in the result
     let filtered = rows;
-    if (args.status) filtered = filtered.filter((c) => c.status === args.status);
-
+    if (args.status) {
+      filtered = filtered.filter((c) => c.status === args.status);
+      appliedFilters.push(`status=${args.status}`);
+    }
     if (args.service) {
       const set = await clientsWithService(rc, args.service as ServiceType);
       domains.push("client_services");
       filtered = filtered.filter((c) => set.has(c.id));
+      appliedFilters.push(`service=${args.service}`);
     }
     if (args.has_open_tasks || args.has_overdue_tasks) {
       const set = await clientsWithTasks(rc, !!args.has_overdue_tasks && !args.has_open_tasks);
@@ -197,16 +206,24 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
       // If both requested, overdue implies open; compute the stricter requested one.
       const overdueSet = args.has_overdue_tasks ? await clientsWithTasks(rc, true) : null;
       filtered = filtered.filter((c) => (args.has_open_tasks ? set.has(c.id) : true) && (overdueSet ? overdueSet.has(c.id) : true));
+      // A SIGNAL about CLIENT-LINKED (client_id) tasks — not the viewer's Planner Today.
+      contributions.push({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+      if (args.has_open_tasks) appliedFilters.push("has_open_tasks=true");
+      if (args.has_overdue_tasks) appliedFilters.push("has_overdue_tasks=true");
     }
     if (args.incomplete_onboarding) {
       const set = await clientsIncompleteOnboarding(rc);
       domains.push("onboarding");
       filtered = filtered.filter((c) => set.has(c.id));
+      contributions.push({ domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push("incomplete_onboarding=true");
     }
     if (args.has_unpaid_invoices) {
       const set = await clientsWithUnpaidInvoices(rc);
       domains.push("invoices");
       filtered = filtered.filter((c) => set.has(c.id));
+      contributions.push({ domain: "invoices", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push("has_unpaid_invoices=true");
     }
     if (args.stale_updates_days) {
       const latest = await latestUpdateByClient(rc);
@@ -216,28 +233,38 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
         const at = latest.get(c.id);
         return !at || new Date(at).getTime() < cutoff;
       });
+      contributions.push({ domain: "client_updates", level: "signal", scope: { breadth: "agency" } });
+      appliedFilters.push(`stale_updates_days=${args.stale_updates_days}`);
     }
 
     const matchTotal = filtered.length;
     const limit = args.limit ?? DEFAULT_LIST_LIMIT;
     const shown = filtered.slice(0, limit);
     const truncated = filtered.length > shown.length;
+    const anyFilter = appliedFilters.length > 0;
 
     const lines: string[] = [];
-    lines.push(`clients matching filter: ${matchTotal} (of ${total} total authorised clients)`);
+    // Preserve the applied filter(s) + values so the model can distinguish e.g. a 14-day
+    // from a 30-day staleness threshold, and frame the number as a FILTER COUNT.
+    if (anyFilter) {
+      lines.push(`clients matching filter [${appliedFilters.join(", ")}]: ${matchTotal} of ${total} authorised clients (this is a FILTER COUNT, not a full per-client inspection)`);
+    } else {
+      lines.push(`authorised client directory: ${total} clients`);
+    }
     for (const c of shown) lines.push(`- ${redactIfSecret(c.name)} [status: ${c.status}; id: ${c.id}]`);
     if (truncated) lines.push(`- (showing ${shown.length} of ${matchTotal}; narrow the filter to see more)`);
-    // The UNFILTERED, untruncated directory is FULL agency coverage of the clients
-    // domain; a filtered or truncated list is only a SIGNAL slice.
-    const anyFilter = !!(args.status || args.service || args.has_open_tasks || args.has_overdue_tasks || args.incomplete_onboarding || args.stale_updates_days || args.has_unpaid_invoices);
-    const level = anyFilter || truncated ? ("signal" as const) : ("full" as const);
+
+    // The UNFILTERED, untruncated directory is FULL coverage of the clients-directory
+    // scope; a filtered or truncated list is only a SIGNAL slice of it.
+    const clientsLevel = anyFilter || truncated ? ("signal" as const) : ("full" as const);
+    contributions.unshift({ domain: "clients", level: clientsLevel, scope: { breadth: "agency" } });
     return {
       content: lines.join("\n"),
       total: matchTotal,
       shown: shown.length,
       truncated,
       domains,
-      coverageContributions: [{ domain: "clients", level, scope: { breadth: "agency" } }],
+      coverageContributions: contributions,
     };
   },
 };

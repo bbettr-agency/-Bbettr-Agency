@@ -289,6 +289,34 @@ describe("agentic loop — safety & isolation", () => {
     }
   });
 
+  it("reproduces & resolves the Preview contradiction: a stale-filter list_clients records client_updates as SIGNAL (never NOT CHECKED)", async () => {
+    // Model: planner_today (full) + list_clients({stale_updates_days}) which now contributes
+    // clients + client_updates SIGNAL. client_updates must NOT appear under NOT CHECKED.
+    const { provider } = makeProvider([
+      [
+        { name: "portal_planner_today", input: {} },
+        { name: "portal_list_clients", input: { stale_updates_days: 14 } },
+      ],
+      emit(),
+    ]);
+    const execute = vi.fn(async (name: string, input: unknown): Promise<ReadToolOutcome> => {
+      if (name === "portal_planner_today") return { ok: true, result: { content: "today", total: 1, shown: 1, truncated: false, domains: ["tasks"], coverageContributions: [{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }] } };
+      // list_clients with a stale filter → clients + client_updates SIGNAL (what the fix emits)
+      void input;
+      return { ok: true, result: { content: "14 of 14", total: 14, shown: 14, truncated: false, domains: ["clients", "updates"], coverageContributions: [
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ] } };
+    });
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.trace.coverage.signalOnly).toContain("Client update recency");
+      expect(res.trace.coverage.notChecked).not.toContain("Client update recency"); // the fixed contradiction
+      expect(res.reliability).toBe("partial"); // still partial (unsupported domains remain)
+    }
+  });
+
   it("RECURRING-reminder question with only today's projections ⇒ NOT verified", async () => {
     const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
     const execute = vi.fn(async () => okOutcome("today's recurring occurrence"));
