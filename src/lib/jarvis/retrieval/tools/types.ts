@@ -33,6 +33,12 @@ export interface ReadToolResult {
    *  overview). The loop uses this to make the turn's app-owned confidence "qualified".
    *  Bounded/truncated lists are COVERAGE, not degradation, and never set this. */
   degraded?: boolean;
+  /** Reliability-contract coverage signal for THIS read:
+   *   • "full"        — the authoritative source was checked and the requested scope covered;
+   *   • "partial"     — only a bounded/subset view was available (e.g. truncated list);
+   *   • "unavailable" — the required source could not be accessed (e.g. module disabled).
+   *  Defaults to "full" when a tool returns ok without specifying. */
+  coverage?: "full" | "partial" | "unavailable";
 }
 
 export type ReadToolOutcome =

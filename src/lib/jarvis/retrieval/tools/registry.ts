@@ -6,6 +6,7 @@ import type { RetrieverContext } from "../types";
 import type { ReadToolDescriptor, ReadToolOutcome } from "./types";
 import { listClientsTool, aggregateTool } from "./portal-agency";
 import { resolveClientTool, getClientOverviewTool, getClientDomainTool } from "./portal-client";
+import { plannerTodayTool } from "./planner-today";
 
 /**
  * Jarvis Milestone A — the FROZEN read-tool registry + executor.
@@ -25,6 +26,8 @@ const TOOLS: ReadToolDescriptor[] = [
   // agency-scoped
   listClientsTool,
   aggregateTool,
+  // planner (authoritative Today — reconciles with the Planner UI)
+  plannerTodayTool,
 ];
 
 export const READ_TOOL_REGISTRY: ReadonlyMap<string, ReadToolDescriptor> = new Map(TOOLS.map((t) => [t.name, t]));

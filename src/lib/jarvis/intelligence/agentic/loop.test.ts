@@ -53,7 +53,7 @@ function baseDeps(over: Partial<AgenticLoopDeps>): AgenticLoopDeps {
 }
 
 describe("agentic loop — termination", () => {
-  it("terminates early when the model emits the final answer in round 1 (1 provider call)", async () => {
+  it("terminates early when the model emits in round 1 — but with ZERO reads that is UNAVAILABLE, never high", async () => {
     const { provider, calls } = makeProvider([emit("done")]);
     const res = await runAgenticLoop(baseDeps({ provider }));
     expect(res.ok).toBe(true);
@@ -61,7 +61,10 @@ describe("agentic loop — termination", () => {
       expect(res.value.assistantMessage).toBe("done");
       expect(res.trace.termination).toBe("final_answer");
       expect(res.trace.providerCalls).toBe(1);
-      expect(res.trace.confidence).toBe("high");
+      // Reliability contract: an answer grounded in NO authoritative read is UNAVAILABLE
+      // and must NOT be reported as high confidence.
+      expect(res.trace.reliability).toBe("unavailable");
+      expect(res.trace.confidence).toBe("qualified");
     }
     expect(calls()).toBe(1);
   });
@@ -178,6 +181,40 @@ describe("agentic loop — safety & isolation", () => {
     const res = await runAgenticLoop(baseDeps({ provider, maxRounds: 1 }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("invalid_response:no_emit");
+  });
+
+  it("a tool reporting PARTIAL coverage ⇒ reliability partial (qualified)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: true, result: { content: "bounded", total: 1, shown: 1, truncated: true, domains: ["tasks"], coverage: "partial" } }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("partial");
+      expect(res.trace.reliability).toBe("partial");
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("a tool reporting UNAVAILABLE coverage ⇒ reliability unavailable (never high)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async (): Promise<ReadToolOutcome> => ({ ok: true, result: { content: "source unavailable", total: null, shown: 0, truncated: false, domains: ["tasks"], coverage: "unavailable", degraded: true } }));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("unavailable"); // the only read was unavailable → no verified coverage
+      expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("a fully successful read ⇒ reliability verified (high)", async () => {
+    const { provider } = makeProvider([[{ name: "portal_planner_today", input: {} }], emit()]);
+    const execute = vi.fn(async () => okOutcome("12 total (7 completed, 5 remaining)"));
+    const res = await runAgenticLoop(baseDeps({ provider, execute }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.reliability).toBe("verified");
+      expect(res.confidence).toBe("high");
+    }
   });
 
   it("the safe trace never contains raw tool-result content", async () => {

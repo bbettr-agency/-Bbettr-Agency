@@ -31,6 +31,9 @@ export interface AgenticTrace {
   evidenceEstTokens: number;
   evidenceBudget: number;
   termination: AgenticTermination;
+  /** Reliability contract (app-owned coverage): VERIFIED = authoritative source read and
+   *  scope covered; PARTIAL = some read failed/bounded; UNAVAILABLE = nothing read. */
+  reliability: "verified" | "partial" | "unavailable";
   confidence: "high" | "qualified";
   confidenceBasis: string;
   totalMs: number;

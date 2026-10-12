@@ -34,6 +34,7 @@ const TRACE: AgenticTrace = {
   evidenceEstTokens: 120,
   evidenceBudget: 10000,
   termination: "final_answer",
+  reliability: "verified",
   confidence: "high",
   confidenceBasis: "grounded",
   totalMs: 5,
@@ -43,6 +44,7 @@ function agenticSuccess(over: Partial<Extract<AgenticOutcome, { ok: true }>> = {
   return {
     ok: true,
     value: { assistantMessage: "Across the agency: 4 clients." },
+    reliability: "verified",
     confidence: "high",
     confidenceBasis: "grounded",
     trace: TRACE,

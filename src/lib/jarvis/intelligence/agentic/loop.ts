@@ -66,6 +66,7 @@ export interface AgenticLoopDeps {
 export interface AgenticSuccess {
   ok: true;
   value: ValidatedAssistantResponse;
+  reliability: "verified" | "partial" | "unavailable";
   confidence: "high" | "qualified";
   confidenceBasis: string;
   trace: AgenticTrace;
@@ -118,6 +119,9 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   let providerCalls = 0;
   let rounds = 0;
   let degraded = false;
+  // Reliability-contract accumulators (app-owned coverage, never model self-assessed).
+  let successfulReads = 0; // authoritative reads that returned ok
+  let anyPartial = false; // any tool reported partial coverage (bounded/subset)
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
   let providerId = deps.provider.id;
   let model = deps.provider.model;
@@ -131,10 +135,23 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   const remaining = () => deps.deadlineMs - now();
   const callBudget = () => Math.max(1, Math.min(remaining(), 60_000));
 
-  const confidenceBasis = () =>
-    degraded
-      ? "Some required Portal reads could not be completed this turn (see trace); any answer depending on them is qualified, and absence was not asserted."
-      : "Every stated fact is grounded in Portal reads that succeeded this turn. Bounded lists are coverage, not lower confidence.";
+  // Reliability contract (VERIFIED | PARTIAL | UNAVAILABLE), computed from coverage —
+  // NOT from the model. UNAVAILABLE when no authoritative read succeeded (so an answer
+  // with zero successful reads can never be "verified"/high). PARTIAL when some read
+  // failed or returned partial coverage. Only a fully-successful read set is VERIFIED.
+  const reliabilityOf = (): "verified" | "partial" | "unavailable" => {
+    if (successfulReads === 0) return "unavailable";
+    if (degraded || anyPartial) return "partial";
+    return "verified";
+  };
+  // App-owned confidence derives from reliability: only VERIFIED justifies high.
+  const confidenceOf = (): "high" | "qualified" => (reliabilityOf() === "verified" ? "high" : "qualified");
+  const confidenceBasis = () => {
+    const r = reliabilityOf();
+    if (r === "unavailable") return "No authoritative Portal source was successfully read this turn; this answer is NOT verified and absence must not be asserted.";
+    if (r === "partial") return "Some required Portal reads failed or returned only partial coverage (see trace); qualify any claim that depends on them and state the scope checked.";
+    return "Every stated fact is grounded in Portal reads that succeeded this turn. Bounded lists are coverage, not lower confidence.";
+  };
 
   const buildTrace = (termination: AgenticTermination): AgenticTrace => ({
     mode: "agentic",
@@ -145,7 +162,8 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
     evidenceEstTokens: evidenceTokens,
     evidenceBudget,
     termination,
-    confidence: degraded ? "qualified" : "high",
+    reliability: reliabilityOf(),
+    confidence: confidenceOf(),
     confidenceBasis: confidenceBasis(),
     totalMs: now() - started,
   });
@@ -160,7 +178,8 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
     return {
       ok: true,
       value: parsed.value,
-      confidence: degraded ? "qualified" : "high",
+      reliability: reliabilityOf(),
+      confidence: confidenceOf(),
       confidenceBasis: confidenceBasis(),
       trace: buildTrace(termination),
       providerId,
@@ -226,6 +245,15 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
           const content = outcome.result.content;
           evidenceTokens += estimateTokens(content);
           if (outcome.result.degraded) degraded = true;
+          // Reliability coverage: an "unavailable" source degrades and does NOT count as
+          // a successful read; a "partial" read DID read (counts) but flags partial; a
+          // "full"/unspecified read counts toward VERIFIED coverage.
+          if (outcome.result.coverage === "unavailable") {
+            degraded = true;
+          } else {
+            successfulReads += 1;
+            if (outcome.result.coverage === "partial") anyPartial = true;
+          }
           dedupe.set(key, content);
           toolCalls.push({ name: tu.name, scope: descriptor.scope, status: "ok", domains: outcome.result.domains, total: outcome.result.total, shown: outcome.result.shown, truncated: outcome.result.truncated, tookMs });
           resultBlocks.push({ type: "tool_result", toolUseId: tu.id, content });

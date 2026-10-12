@@ -1,6 +1,7 @@
 import "server-only";
 
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
+import { agencyToday } from "@/lib/planner/tasks/schedule-date";
 import type { RetrieverContext } from "../types";
 import type { ReadToolDescriptor, ReadToolResult } from "./types";
 
@@ -29,8 +30,11 @@ const SIGNAL_ROW_CAP = 5000; // per signal-table scan ceiling
 
 const OPEN_TASK_EXCLUDED = "(completed,archived)";
 
+/** The AGENCY-LOCAL (Africa/Johannesburg) date — the SAME "today" the Planner uses.
+ *  Previously this returned the UTC date, which disagreed with the Planner near the
+ *  day boundary; aligned to agencyToday so Jarvis and the Planner share one calendar. */
 function ymd(rc: RetrieverContext): string {
-  return rc.now().toISOString().slice(0, 10);
+  return agencyToday(rc.now());
 }
 
 interface ClientRow {
@@ -232,6 +236,7 @@ type Metric =
   | "open_tasks"
   | "overdue_tasks"
   | "tasks_due_today"
+  | "tasks_scheduled_today"
   | "incomplete_onboarding"
   | "unpaid_invoices"
   | "stage_distribution"
@@ -242,6 +247,7 @@ const METRICS: Metric[] = [
   "open_tasks",
   "overdue_tasks",
   "tasks_due_today",
+  "tasks_scheduled_today",
   "incomplete_onboarding",
   "unpaid_invoices",
   "stage_distribution",
@@ -258,7 +264,7 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
   scope: "agency",
   requiredGrant: "portal.read",
   description:
-    "Deterministically compute one agency-wide fact in application/database code (never ask the model to do the arithmetic). Supported metrics: clients_by_status, open_tasks, overdue_tasks, tasks_due_today, incomplete_onboarding, unpaid_invoices (reported PER CURRENCY, never combined), stage_distribution, stale_clients (needs stale_days).",
+    "Deterministically compute ONE narrow agency-wide fact in application/database code (never ask the model to do the arithmetic). Each task metric is a SINGLE-FIELD count, NOT the Planner Today set — for 'what needs my attention today / outstanding today' use portal_planner_today instead. Metrics: clients_by_status; open_tasks (all non-terminal, any date); overdue_tasks (due_date < today, agency tz); tasks_due_today (due_date == today — does NOT include scheduled-today); tasks_scheduled_today (scheduled_date == today); incomplete_onboarding; unpaid_invoices (PER CURRENCY, never combined); stage_distribution; stale_clients (needs stale_days). Dates are Africa/Johannesburg.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -293,13 +299,23 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
       }
       case "open_tasks":
       case "overdue_tasks":
-      case "tasks_due_today": {
+      case "tasks_due_today":
+      case "tasks_scheduled_today": {
+        const today = ymd(rc); // agency-local (Africa/Johannesburg)
         let q = rc.supabase.from("tasks").select("id", { count: "exact", head: true }).not("status", "in", OPEN_TASK_EXCLUDED).is("deleted_at", null);
-        if (args.metric === "overdue_tasks") q = q.lt("due_date", ymd(rc));
-        if (args.metric === "tasks_due_today") q = q.eq("due_date", ymd(rc));
+        if (args.metric === "overdue_tasks") q = q.lt("due_date", today);
+        if (args.metric === "tasks_due_today") q = q.eq("due_date", today);
+        if (args.metric === "tasks_scheduled_today") q = q.eq("scheduled_date", today);
         const { count } = await q;
         const label = args.metric.replace(/_/g, " ");
-        return { content: `${label}: ${count ?? 0}`, total: count ?? 0, shown: count ?? 0, truncated: false, domains: ["tasks"] };
+        // Honest scope note so a zero is never read as "nothing needs attention".
+        const note =
+          args.metric === "tasks_due_today"
+            ? " (due_date == today only; excludes scheduled-today — use portal_planner_today for the full Today set)"
+            : args.metric === "tasks_scheduled_today"
+              ? " (scheduled_date == today only)"
+              : "";
+        return { content: `${label} (${today}): ${count ?? 0}${note}`, total: count ?? 0, shown: count ?? 0, truncated: false, domains: ["tasks"] };
       }
       case "incomplete_onboarding": {
         const set = await clientsIncompleteOnboarding(rc);

@@ -94,7 +94,29 @@ describe("portal_aggregate — deterministic, app-computed facts", () => {
     ];
     const r = await aggregateTool.run({ metric: "overdue_tasks" }, rc({ tasks }), CTX);
     expect(r.total).toBe(1);
-    expect(r.content).toContain("overdue tasks: 1");
+    expect(r.content).toMatch(/overdue tasks \(\d{4}-\d{2}-\d{2}\): 1/);
+  });
+
+  it("tasks_due_today uses the AGENCY date (Africa/Johannesburg), not UTC, at the day boundary", async () => {
+    // 22:30 UTC on the 12th is 00:30 on the 13th in SAST (+2). Agency 'today' = 2026-10-13.
+    const lateUtc = new Date("2026-10-12T22:30:00Z");
+    const boundaryRc = { ctx: CTX, supabase: makeFakeSupabase({ tables: { tasks: [
+      { id: "t13", status: "scheduled", deleted_at: null, due_date: "2026-10-13" }, // due agency-today
+      { id: "t12", status: "scheduled", deleted_at: null, due_date: "2026-10-12" }, // yesterday (agency) → not due today
+    ] } }) as unknown as RetrieverContext["supabase"], now: () => lateUtc } as RetrieverContext;
+    const r = await aggregateTool.run({ metric: "tasks_due_today" }, boundaryRc, CTX);
+    expect(r.content).toContain("(2026-10-13)"); // agency date, not UTC 2026-10-12
+    expect(r.total).toBe(1); // only the 2026-10-13 task; a UTC impl would have counted the 12th
+  });
+
+  it("tasks_scheduled_today counts scheduled_date == today (distinct from due_today)", async () => {
+    const tasks: FakeRow[] = [
+      { id: "s1", status: "scheduled", deleted_at: null, scheduled_date: "2026-10-06", due_date: null }, // scheduled today, no due
+      { id: "s2", status: "scheduled", deleted_at: null, scheduled_date: "2026-10-01", due_date: null }, // not today
+    ];
+    const r = await aggregateTool.run({ metric: "tasks_scheduled_today" }, rc({ tasks }), CTX);
+    expect(r.total).toBe(1);
+    expect(r.content).toMatch(/tasks scheduled today \(2026-10-06\): 1/);
   });
 
   it("unpaid_invoices reports PER CURRENCY and never combines currencies", async () => {
