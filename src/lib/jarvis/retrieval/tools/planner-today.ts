@@ -41,9 +41,6 @@ export function plannerTodayUnavailable(reason: string): ReadToolResult {
 export const plannerTodayTool: ReadToolDescriptor<Record<string, never>> = {
   name: "portal_planner_today",
   scope: "agency",
-  // Self-contained authoritative source for the "today's tasks" domain only.
-  coverageBreadth: "narrow",
-  providesCoverage: ["tasks_today"],
   requiredGrant: "portal.read",
   description:
     "Authoritative Planner Today for the signed-in user: the SAME figures the Planner Today dashboard shows. Returns total in Today, completed today, remaining (actionable), overdue, waiting, and the actual outstanding task titles/ids. Use this for 'what do I need to do today', 'what's outstanding today', 'what needs my attention today' — NOT portal_aggregate(tasks_due_today), which is only a narrow due_date count. RECURRING: this includes today's PROJECTED recurring occurrences only — it is NOT a complete list of recurring definitions, upcoming recurring work, or completed recurring history.",
@@ -93,6 +90,9 @@ export const plannerTodayTool: ReadToolDescriptor<Record<string, never>> = {
       truncated,
       domains: ["tasks"],
       coverage: truncated ? "partial" : "full",
+      // FULL for the signed-in user's Today view (VIEWER scope) — NOT agency-wide task
+      // coverage (not all clients, team members, dates, or recurring definitions).
+      coverageContributions: [{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }],
     };
   },
 };

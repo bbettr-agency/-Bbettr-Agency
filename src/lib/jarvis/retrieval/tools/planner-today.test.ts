@@ -41,6 +41,8 @@ describe("portal_planner_today", () => {
     expect(getTodayTaskSummary).toHaveBeenCalledWith(NOW, "admin1"); // viewer = principal
     expect(r.total).toBe(12);
     expect(r.coverage).toBe("full");
+    // FULL coverage, but VIEWER scope only (not agency-wide) — prevents scope escalation.
+    expect(r.coverageContributions).toEqual([{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }]);
     expect(r.content).toContain("12 total in Today (7 completed, 5 remaining)");
     expect(r.content).toContain("0 overdue");
     expect(r.content).toContain("Cuisine Foods website finish before thu [id: t1");

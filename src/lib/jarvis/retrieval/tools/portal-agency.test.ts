@@ -70,6 +70,13 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
     expect(r.content).toContain("Imatec");
   });
 
+  it("contributes FULL clients coverage when unfiltered, SIGNAL when filtered", async () => {
+    const unfiltered = await listClientsTool.run({}, rc({ clients: CLIENTS }), CTX);
+    expect(unfiltered.coverageContributions).toEqual([{ domain: "clients", level: "full", scope: { breadth: "agency" } }]);
+    const filtered = await listClientsTool.run({ status: "active" }, rc({ clients: CLIENTS }), CTX);
+    expect(filtered.coverageContributions).toEqual([{ domain: "clients", level: "signal", scope: { breadth: "agency" } }]);
+  });
+
   it("secret-scans client names before returning them", async () => {
     const secret = "sk-A1b2C3d4E5f6G7h8I9j0K1l2";
     const r = await listClientsTool.run({}, rc({ clients: [{ id: "x", name: `Client ${secret}`, status: "active" }] }), CTX);
@@ -79,6 +86,15 @@ describe("portal_list_clients — deterministic filtering & counts", () => {
 });
 
 describe("portal_aggregate — deterministic, app-computed facts", () => {
+  it("each aggregate result carries a metric-aware SIGNAL contribution (never full)", async () => {
+    const onb = await aggregateTool.run({ metric: "incomplete_onboarding" }, rc({ onboarding_submissions: [{ client_id: "c3", status: "in_progress" }] }), CTX);
+    expect(onb.coverageContributions).toEqual([{ domain: "onboarding", level: "signal", scope: { breadth: "agency" } }]);
+    const inv = await aggregateTool.run({ metric: "unpaid_invoices" }, rc({ client_invoices: [] }), CTX);
+    expect(inv.coverageContributions).toEqual([{ domain: "invoices", level: "signal", scope: { breadth: "agency" } }]);
+    const stale = await aggregateTool.run({ metric: "stale_clients", stale_days: 7 }, rc({ clients: CLIENTS }), CTX);
+    expect(stale.coverageContributions).toEqual([{ domain: "client_updates", level: "signal", scope: { breadth: "agency" } }]);
+  });
+
   it("clients_by_status counts in code", async () => {
     const r = await aggregateTool.run({ metric: "clients_by_status" }, rc({ clients: CLIENTS }), CTX);
     expect(r.content).toContain("active: 2");

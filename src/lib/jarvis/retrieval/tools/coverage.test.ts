@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   classifyQuestionBreadth,
   broadCoverageComplete,
-  unexaminedAgencyAreas,
+  buildCoverageBuckets,
+  recordContribution,
+  aggregateMetricContribution,
   SUPPORTED_AGENCY_KEYS,
   UNSUPPORTED_AGENCY_KEYS,
-  type CoverageKey,
+  type CoverageMap,
 } from "./coverage";
 
 describe("classifyQuestionBreadth", () => {
@@ -41,26 +43,72 @@ describe("classifyQuestionBreadth", () => {
   });
 });
 
-describe("broadCoverageComplete", () => {
-  it("is false while ANY agency domain is unsupported (current milestone)", () => {
-    expect(UNSUPPORTED_AGENCY_KEYS.length).toBeGreaterThan(0); // meetings/finance/etc not built
-    const allSupportedChecked = new Set<CoverageKey>(SUPPORTED_AGENCY_KEYS);
-    // Even having checked every SUPPORTED agency domain, unsupported ones remain → not complete.
-    expect(broadCoverageComplete(allSupportedChecked)).toBe(false);
+describe("aggregateMetricContribution — metric → domain (SIGNAL, agency)", () => {
+  it("maps each metric to its actual domain at signal level", () => {
+    expect(aggregateMetricContribution("incomplete_onboarding")).toEqual({ domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+    expect(aggregateMetricContribution("unpaid_invoices")).toEqual({ domain: "invoices", level: "signal", scope: { breadth: "agency" } });
+    expect(aggregateMetricContribution("stale_clients")).toEqual({ domain: "client_updates", level: "signal", scope: { breadth: "agency" } });
+    expect(aggregateMetricContribution("stage_distribution")).toEqual({ domain: "project_stages", level: "signal", scope: { breadth: "agency" } });
+    expect(aggregateMetricContribution("clients_by_status")).toEqual({ domain: "clients", level: "signal", scope: { breadth: "agency" } });
+    for (const m of ["open_tasks", "overdue_tasks", "tasks_due_today", "tasks_scheduled_today"]) {
+      expect(aggregateMetricContribution(m)).toEqual({ domain: "tasks_today", level: "signal", scope: { breadth: "agency" } });
+    }
+    expect(aggregateMetricContribution("bogus")).toBeNull();
   });
-  it("is false when supported domains are unchecked", () => {
-    expect(broadCoverageComplete(new Set())).toBe(false);
+  it("NEVER marks an aggregate as full coverage", () => {
+    for (const m of Object.keys({ incomplete_onboarding: 1, unpaid_invoices: 1, stale_clients: 1 })) {
+      expect(aggregateMetricContribution(m)?.level).toBe("signal");
+    }
   });
 });
 
-describe("unexaminedAgencyAreas", () => {
-  it("names unchecked supported domains AND all unsupported agency domains", () => {
-    const areas = unexaminedAgencyAreas(new Set<CoverageKey>(["tasks_today"]));
-    // tasks_today checked ⇒ not listed; other supported + all unsupported ⇒ listed.
-    expect(areas).not.toContain("Planner tasks (today)");
-    expect(areas).toContain("Meetings / calendar");
-    expect(areas).toContain("Finance (QuickBooks/PayFast)");
-    expect(areas).toContain("Client communications (email/WhatsApp)");
-    expect(areas).toContain("Leads & opportunities (GHL)");
+describe("broadCoverageComplete", () => {
+  it("is false while ANY agency domain is unsupported (current milestone), even with all signals", () => {
+    expect(UNSUPPORTED_AGENCY_KEYS.length).toBeGreaterThan(0); // meetings/finance/etc not built
+    const map: CoverageMap = new Map();
+    for (const k of SUPPORTED_AGENCY_KEYS) recordContribution(map, { domain: k, level: "signal", scope: { breadth: "agency" } });
+    expect(broadCoverageComplete(map)).toBe(false); // signals + unsupported remain
+  });
+  it("is false when a supported domain has only signal (not agency-full)", () => {
+    const map: CoverageMap = new Map();
+    recordContribution(map, { domain: "clients", level: "signal", scope: { breadth: "agency" } });
+    expect(broadCoverageComplete(map)).toBe(false);
+  });
+});
+
+describe("recordContribution — level/scope folding (no escalation)", () => {
+  it("a FULL at a narrow (viewer) scope does NOT set agencyFull", () => {
+    const map: CoverageMap = new Map();
+    recordContribution(map, { domain: "tasks_today", level: "full", scope: { breadth: "viewer" } });
+    expect(map.get("tasks_today")).toEqual({ level: "full", agencyFull: false });
+  });
+  it("keeps the strongest level; agencyFull only from a FULL+agency contribution", () => {
+    const map: CoverageMap = new Map();
+    recordContribution(map, { domain: "clients", level: "signal", scope: { breadth: "agency" } });
+    recordContribution(map, { domain: "clients", level: "full", scope: { breadth: "agency" } });
+    expect(map.get("clients")).toEqual({ level: "full", agencyFull: true });
+  });
+});
+
+describe("buildCoverageBuckets — full / signal-only / not-checked", () => {
+  it("separates a signal-checked domain from not-checked ones (broad question)", () => {
+    const map: CoverageMap = new Map();
+    recordContribution(map, { domain: "onboarding", level: "signal", scope: { breadth: "agency" } });
+    recordContribution(map, { domain: "tasks_today", level: "full", scope: { breadth: "viewer" } });
+    const b = buildCoverageBuckets({ map, breadth: "broad", askedUnsupported: [] });
+    expect(b.full).toContain("Planner tasks (today)"); // full
+    expect(b.signalOnly).toContain("Onboarding status"); // signal-only
+    // onboarding must NOT be reported as not-checked (its signal WAS retrieved):
+    expect(b.notChecked).not.toContain("Onboarding status");
+    // unsupported agency domains surface as not-checked:
+    expect(b.notChecked).toContain("Meetings / calendar");
+    expect(b.notChecked).toContain("Finance (QuickBooks/PayFast)");
+  });
+  it("narrow question only adds explicitly-asked unsupported domains to not-checked", () => {
+    const map: CoverageMap = new Map();
+    recordContribution(map, { domain: "tasks_today", level: "full", scope: { breadth: "viewer" } });
+    const b = buildCoverageBuckets({ map, breadth: "narrow", askedUnsupported: ["recurring_reminders"] });
+    expect(b.full).toContain("Planner tasks (today)");
+    expect(b.notChecked).toEqual(["Recurring reminders (full)"]); // not the whole agency universe
   });
 });

@@ -68,24 +68,99 @@ export function labelFor(key: CoverageKey): string {
   return COVERAGE_DOMAINS.find((d) => d.key === key)?.label ?? key;
 }
 
-/**
- * Is a BROAD agency-wide assessment fully covered by what was checked? True only when
- * EVERY agency-relevant SUPPORTED domain was checked AND there are NO agency-relevant
- * UNSUPPORTED domains outstanding. While any relevant domain is unsupported (current
- * milestone), this is always false — a broad answer can never be "verified" yet.
- */
-export function broadCoverageComplete(checked: ReadonlySet<CoverageKey>): boolean {
-  if (UNSUPPORTED_AGENCY_KEYS.length > 0) return false;
-  return SUPPORTED_AGENCY_KEYS.every((k) => checked.has(k));
+// ── Granular coverage contributions (level + scope) ──────────────────────────────
+// A contribution is emitted ONLY by a SUCCESSFUL tool result and records what was
+// actually checked:
+//   • level  — "full" (authoritative source read for the stated scope) or "signal"
+//              (a count / aggregate / partial slice);
+//   • scope  — breadth of the read: "agency" (across the workspace), "viewer" (the
+//              signed-in user's own slice, e.g. Planner Today), or "client" (one client).
+// FULL at a NARROW scope (viewer/client) does NOT imply agency-wide coverage — this is
+// how scope escalation is prevented.
+export type CoverageLevel = "signal" | "full";
+export type CoverageBreadth = "agency" | "viewer" | "client";
+export interface CoverageScope {
+  breadth: CoverageBreadth;
+  ref?: string; // e.g. a client id; omitted for agency/viewer
+}
+export interface CoverageContribution {
+  domain: CoverageKey;
+  level: CoverageLevel;
+  scope: CoverageScope;
 }
 
-/** The important areas a broad answer did NOT examine (unchecked supported + all
- *  unsupported agency domains), as human labels — surfaced in the answer. */
-export function unexaminedAgencyAreas(checked: ReadonlySet<CoverageKey>): string[] {
-  const out: string[] = [];
-  for (const k of SUPPORTED_AGENCY_KEYS) if (!checked.has(k)) out.push(labelFor(k));
-  for (const k of UNSUPPORTED_AGENCY_KEYS) out.push(labelFor(k));
-  return out;
+/** Per-domain tally: the strongest level seen, and whether an AGENCY-scoped FULL exists
+ *  (the only thing that counts toward agency-wide completeness). */
+export interface CoverageTally {
+  level: CoverageLevel; // full if any full contribution (any scope), else signal
+  agencyFull: boolean; // a {level:"full", scope.breadth:"agency"} contribution exists
+}
+export type CoverageMap = Map<CoverageKey, CoverageTally>;
+
+/** Fold one successful contribution into the map (keeps the strongest valid state). */
+export function recordContribution(map: CoverageMap, c: CoverageContribution): void {
+  const prev = map.get(c.domain);
+  const level: CoverageLevel = c.level === "full" || prev?.level === "full" ? "full" : "signal";
+  const agencyFull = (c.level === "full" && c.scope.breadth === "agency") || prev?.agencyFull === true;
+  map.set(c.domain, { level, agencyFull });
+}
+
+/** Deterministic metric → coverage contribution for portal_aggregate. Every metric is a
+ *  SIGNAL (a count/slice) at AGENCY scope — never FULL domain coverage. Unknown ⇒ null. */
+const AGGREGATE_METRIC_DOMAIN: Readonly<Record<string, CoverageKey>> = {
+  clients_by_status: "clients",
+  open_tasks: "tasks_today",
+  overdue_tasks: "tasks_today",
+  tasks_due_today: "tasks_today",
+  tasks_scheduled_today: "tasks_today",
+  incomplete_onboarding: "onboarding",
+  unpaid_invoices: "invoices",
+  stage_distribution: "project_stages",
+  stale_clients: "client_updates",
+};
+export function aggregateMetricContribution(metric: string): CoverageContribution | null {
+  const domain = AGGREGATE_METRIC_DOMAIN[metric];
+  return domain ? { domain, level: "signal", scope: { breadth: "agency" } } : null;
+}
+
+/**
+ * Is a BROAD agency-wide assessment COMPLETELY covered? True only when EVERY
+ * agency-relevant SUPPORTED domain has an AGENCY-scoped FULL tally AND there are NO
+ * agency-relevant UNSUPPORTED domains outstanding. Signal-only or narrow-scope-full do
+ * NOT satisfy it. While any relevant domain is unsupported (current milestone) this is
+ * always false — a broad answer can never be "verified" yet.
+ */
+export function broadCoverageComplete(map: CoverageMap): boolean {
+  if (UNSUPPORTED_AGENCY_KEYS.length > 0) return false;
+  return SUPPORTED_AGENCY_KEYS.every((k) => map.get(k)?.agencyFull === true);
+}
+
+/** Three honest coverage buckets (as human labels) for the answer/trace:
+ *   • full       — checked completely for the stated scope (a FULL contribution);
+ *   • signalOnly — checked as limited signals only (count/aggregate, no FULL);
+ *   • notChecked — not checked / unavailable.
+ *  For a BROAD question the agency universe defines notChecked; for a NARROW question
+ *  only explicitly-asked unsupported domains are added (so narrow answers stay focused). */
+export function buildCoverageBuckets(args: {
+  map: CoverageMap;
+  breadth: QuestionBreadth;
+  askedUnsupported: CoverageKey[];
+}): { full: string[]; signalOnly: string[]; notChecked: string[] } {
+  const { map, breadth, askedUnsupported } = args;
+  const full: string[] = [];
+  const signalOnly: string[] = [];
+  const notCheckedKeys = new Set<CoverageKey>();
+
+  for (const [key, tally] of map) {
+    if (tally.level === "full") full.push(labelFor(key));
+    else signalOnly.push(labelFor(key));
+  }
+  if (breadth === "broad") {
+    for (const k of AGENCY_RELEVANT_KEYS) if (!map.has(k)) notCheckedKeys.add(k);
+  }
+  for (const k of askedUnsupported) if (!map.has(k)) notCheckedKeys.add(k);
+
+  return { full, signalOnly, notChecked: [...notCheckedKeys].map(labelFor) };
 }
 
 // ── Deterministic question-breadth classifier (question coverage axis) ───────────

@@ -38,6 +38,25 @@ function okOutcome(content: string, degraded = false): ReadToolOutcome {
   return { ok: true, result: { content, total: 1, shown: 1, truncated: false, domains: ["clients"], degraded } };
 }
 
+// Name-aware success: emits the SAME coverage contributions the real tools do, so the
+// loop's coverage map reflects per-tool/metric coverage in unit tests.
+function okForTool(name: string, input: unknown): ReadToolOutcome {
+  const base = { content: "ok", total: 1, shown: 1, truncated: false, domains: ["x"] };
+  if (name === "portal_planner_today") return { ok: true, result: { ...base, coverageContributions: [{ domain: "tasks_today", level: "full", scope: { breadth: "viewer" } }] } };
+  if (name === "portal_list_clients") return { ok: true, result: { ...base, coverageContributions: [{ domain: "clients", level: "full", scope: { breadth: "agency" } }] } };
+  if (name === "portal_aggregate") {
+    const metric = (input as { metric?: string })?.metric ?? "";
+    const map: Record<string, { domain: "invoices" | "onboarding" | "client_updates" }> = {
+      unpaid_invoices: { domain: "invoices" },
+      incomplete_onboarding: { domain: "onboarding" },
+      stale_clients: { domain: "client_updates" },
+    };
+    const d = map[metric];
+    return { ok: true, result: { ...base, coverageContributions: d ? [{ domain: d.domain, level: "signal", scope: { breadth: "agency" } }] : [] } };
+  }
+  return { ok: true, result: base };
+}
+
 function baseDeps(over: Partial<AgenticLoopDeps>): AgenticLoopDeps {
   return {
     provider: makeProvider([emit()]).provider,
@@ -242,8 +261,8 @@ describe("agentic loop — safety & isolation", () => {
       expect(res.reliability).toBe("partial");
       expect(res.confidence).toBe("qualified");
       // Surfaces important unexamined areas.
-      expect(res.trace.unexaminedAreas).toContain("Meetings / calendar");
-      expect(res.trace.unexaminedAreas).toContain("Finance (QuickBooks/PayFast)");
+      expect(res.trace.coverage.notChecked).toContain("Meetings / calendar");
+      expect(res.trace.coverage.notChecked).toContain("Finance (QuickBooks/PayFast)");
     }
   });
 
@@ -256,12 +275,17 @@ describe("agentic loop — safety & isolation", () => {
       ],
       emit(),
     ]);
-    const execute = vi.fn(async () => okOutcome("ok"));
+    const execute = vi.fn(async (name: string, input: unknown) => okForTool(name, input));
     const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("Is everything okay with my business?") }));
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.reliability).toBe("partial"); // unsupported agency domains remain
-      expect(res.trace.checkedCoverage).toEqual(expect.arrayContaining(["tasks_today", "clients"]));
+      // tasks_today was FULL (planner_today viewer), clients SIGNAL/FULL (list), invoices SIGNAL (aggregate).
+      expect([...res.trace.coverage.full, ...res.trace.coverage.signalOnly]).toEqual(
+        expect.arrayContaining(["Planner tasks (today)", "Client directory", "Unpaid invoices"])
+      );
+      // invoices was checked (as a signal) ⇒ must NOT be reported as not-checked.
+      expect(res.trace.coverage.notChecked).not.toContain("Unpaid invoices");
     }
   });
 
@@ -272,7 +296,7 @@ describe("agentic loop — safety & isolation", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.reliability).toBe("partial");
-      expect(res.trace.unexaminedAreas).toContain("Recurring reminders (full)");
+      expect(res.trace.coverage.notChecked).toContain("Recurring reminders (full)");
     }
   });
 

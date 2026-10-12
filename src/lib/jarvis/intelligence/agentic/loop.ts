@@ -14,7 +14,16 @@ import type { RetrieverContext } from "@/lib/jarvis/retrieval/types";
 import { estimateTokens } from "@/lib/jarvis/retrieval/evidence/serialize";
 import { READ_TOOL_REGISTRY, readToolSpecs, executeReadTool } from "@/lib/jarvis/retrieval/tools/registry";
 import type { ReadToolOutcome } from "@/lib/jarvis/retrieval/tools/types";
-import { classifyQuestionBreadth, broadCoverageComplete, unexaminedAgencyAreas, questionUnsupportedDomains, labelFor, type CoverageKey, type QuestionBreadth } from "@/lib/jarvis/retrieval/tools/coverage";
+import {
+  classifyQuestionBreadth,
+  broadCoverageComplete,
+  buildCoverageBuckets,
+  recordContribution,
+  questionUnsupportedDomains,
+  type CoverageKey,
+  type CoverageMap,
+  type QuestionBreadth,
+} from "@/lib/jarvis/retrieval/tools/coverage";
 import { ASSISTANT_RESPONSE_TOOL_NAME, ASSISTANT_RESPONSE_JSON_SCHEMA, ASSISTANT_RESPONSE_SCHEMA, parseAssistantResponse } from "../response-contract";
 import type { ValidatedAssistantResponse } from "../types";
 import type { AgenticTrace, AgenticToolCall, AgenticTermination } from "./trace";
@@ -123,7 +132,7 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   // Reliability-contract accumulators (app-owned coverage, never model self-assessed).
   let successfulReads = 0; // authoritative reads that returned ok
   let anyPartial = false; // any tool reported partial coverage (bounded/subset)
-  const checkedCoverage = new Set<CoverageKey>(); // source-coverage: domains actually checked
+  const coverage: CoverageMap = new Map(); // source-coverage: domain → {level, agencyFull}, from successful results
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
 
   // Question-coverage axis: a deterministic breadth signal from the CURRENT user message
@@ -163,45 +172,43 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
     // The question asks about a domain we cannot fully check (recurring/meetings/…) ⇒
     // never verified, regardless of breadth.
     if (askedUnsupported.length > 0) return "partial";
-    if (questionBreadth === "broad") return broadCoverageComplete(checkedCoverage) ? "verified" : "partial";
+    if (questionBreadth === "broad") return broadCoverageComplete(coverage) ? "verified" : "partial";
     return "verified";
   };
   // App-owned confidence derives from reliability: only VERIFIED justifies high.
   const confidenceOf = (): "high" | "qualified" => (reliabilityOf() === "verified" ? "high" : "qualified");
-  const unexamined = (): string[] => {
-    const areas = new Set<string>();
-    if (questionBreadth === "broad") for (const a of unexaminedAgencyAreas(checkedCoverage)) areas.add(a);
-    for (const k of askedUnsupported) areas.add(labelFor(k));
-    return [...areas];
-  };
+  const buckets = () => buildCoverageBuckets({ map: coverage, breadth: questionBreadth, askedUnsupported });
   const confidenceBasis = () => {
     const r = reliabilityOf();
     if (r === "unavailable") return "No authoritative Portal source was successfully read this turn; this answer is NOT verified and absence must not be asserted.";
     if (r === "partial") {
-      const areas = unexamined();
-      const tail = areas.length > 0 ? ` Important areas NOT examined: ${areas.join(", ")}.` : "";
-      return `This is a PARTIAL assessment: the checked sources do not fully cover the question (a broad business question requires many domains, some not yet available). State the scope checked and do not present this as a complete, verified picture.${tail}`;
+      const b = buckets();
+      const signal = b.signalOnly.length > 0 ? ` Checked as LIMITED SIGNALS ONLY (counts, not full records): ${b.signalOnly.join(", ")}.` : "";
+      const none = b.notChecked.length > 0 ? ` NOT checked / unavailable: ${b.notChecked.join(", ")}.` : "";
+      return `This is a PARTIAL assessment — the checked sources do not fully cover the question. Present it as partial, state the scope checked, and do not claim a complete/verified picture.${signal}${none}`;
     }
-    return "Every stated fact is grounded in Portal reads that succeeded this turn and sufficiently cover the question. Bounded lists are coverage, not lower confidence.";
+    return "Every stated fact is grounded in Portal reads that were FULLY checked for the question's scope. Bounded lists are coverage, not lower confidence.";
   };
 
-  const buildTrace = (termination: AgenticTermination): AgenticTrace => ({
-    mode: "agentic",
-    rounds,
-    maxRounds,
-    providerCalls,
-    toolCalls,
-    evidenceEstTokens: evidenceTokens,
-    evidenceBudget,
-    termination,
-    questionBreadth,
-    checkedCoverage: [...checkedCoverage],
-    unexaminedAreas: unexamined(),
-    reliability: reliabilityOf(),
-    confidence: confidenceOf(),
-    confidenceBasis: confidenceBasis(),
-    totalMs: now() - started,
-  });
+  const buildTrace = (termination: AgenticTermination): AgenticTrace => {
+    const b = buckets();
+    return {
+      mode: "agentic",
+      rounds,
+      maxRounds,
+      providerCalls,
+      toolCalls,
+      evidenceEstTokens: evidenceTokens,
+      evidenceBudget,
+      termination,
+      questionBreadth,
+      coverage: { full: b.full, signalOnly: b.signalOnly, notChecked: b.notChecked },
+      reliability: reliabilityOf(),
+      confidence: confidenceOf(),
+      confidenceBasis: confidenceBasis(),
+      totalMs: now() - started,
+    };
+  };
 
   if (typeof deps.provider.completeWithTools !== "function") {
     return { ok: false, reason: "provider_no_tools", trace: buildTrace("no_tool") };
@@ -288,8 +295,9 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
           } else {
             successfulReads += 1;
             if (outcome.result.coverage === "partial") anyPartial = true;
-            // Source coverage: record the domains this tool authoritatively checked.
-            for (const key of descriptor.providesCoverage) checkedCoverage.add(key);
+            // Source coverage: record what this SUCCESSFUL read actually contributed
+            // (metric-aware, level + scope) — not the static descriptor list.
+            for (const c of outcome.result.coverageContributions ?? []) recordContribution(coverage, c);
           }
           dedupe.set(key, content);
           toolCalls.push({ name: tu.name, scope: descriptor.scope, status: "ok", domains: outcome.result.domains, total: outcome.result.total, shown: outcome.result.shown, truncated: outcome.result.truncated, tookMs });

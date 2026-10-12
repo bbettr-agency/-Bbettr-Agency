@@ -2,7 +2,7 @@ import "server-only";
 
 import type { JarvisContext } from "@/lib/jarvis/identity";
 import type { RetrieverContext } from "../types";
-import type { CoverageKey } from "./coverage";
+import type { CoverageContribution } from "./coverage";
 
 /**
  * Jarvis Milestone A — the general READ-TOOL contract.
@@ -40,6 +40,11 @@ export interface ReadToolResult {
    *   • "unavailable" — the required source could not be accessed (e.g. module disabled).
    *  Defaults to "full" when a tool returns ok without specifying. */
   coverage?: "full" | "partial" | "unavailable";
+  /** GRANULAR, metric-aware coverage this SUCCESSFUL read actually contributes (domain +
+   *  level + scope). This — not the static descriptor list — is what the loop records, so
+   *  evidence coverage matches what was truly retrieved (e.g. an aggregate count is a
+   *  SIGNAL for its domain, never FULL). Omitted/empty ⇒ contributes no domain coverage. */
+  coverageContributions?: CoverageContribution[];
 }
 
 export type ReadToolOutcome =
@@ -53,13 +58,6 @@ export interface ReadToolDescriptor<A = unknown> {
   /** JSON Schema the model fills. `additionalProperties:false` — no smuggled keys. */
   inputSchema: Record<string, unknown>;
   scope: ToolScope;
-  /** Coverage BREADTH this tool contributes (for coverage-aware reliability, distinct
-   *  from the authz `scope`): "agency" = an agency-wide SURVEY slice (a broad answer
-   *  needs many of these); "client" = scoped to one resolved client; "narrow" = a
-   *  self-contained authoritative source for its own domain (e.g. Planner Today). */
-  coverageBreadth: "agency" | "client" | "narrow";
-  /** The coverage domains a SUCCESSFUL call of this tool actually checks. */
-  providesCoverage: CoverageKey[];
   /** Capability grant the principal must hold (enforced by the executor). */
   requiredGrant: string;
   /** Validate + narrow untrusted model input. Never throws. */

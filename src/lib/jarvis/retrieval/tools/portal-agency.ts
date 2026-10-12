@@ -2,6 +2,7 @@ import "server-only";
 
 import { redactIfSecret } from "@/lib/jarvis/memory/secrets";
 import { agencyToday } from "@/lib/planner/tasks/schedule-date";
+import { aggregateMetricContribution } from "./coverage";
 import type { RetrieverContext } from "../types";
 import type { ReadToolDescriptor, ReadToolResult } from "./types";
 
@@ -132,8 +133,6 @@ const SERVICE_TYPES = ["website", "google_ads", "meta_ads", "seo"];
 export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
   name: "portal_list_clients",
   scope: "agency",
-  coverageBreadth: "agency",
-  providesCoverage: ["clients"],
   requiredGrant: "portal.read",
   description:
     "List authorised Portal clients with optional deterministic filters (status, service, has_open_tasks, has_overdue_tasks, incomplete_onboarding, stale_updates_days, has_unpaid_invoices). Returns the authoritative total, the shown count, and whether the list is truncated. Use this to find which clients match operational signals; use portal_get_client_overview for depth on one client.",
@@ -228,7 +227,18 @@ export const listClientsTool: ReadToolDescriptor<ListClientsArgs> = {
     lines.push(`clients matching filter: ${matchTotal} (of ${total} total authorised clients)`);
     for (const c of shown) lines.push(`- ${redactIfSecret(c.name)} [status: ${c.status}; id: ${c.id}]`);
     if (truncated) lines.push(`- (showing ${shown.length} of ${matchTotal}; narrow the filter to see more)`);
-    return { content: lines.join("\n"), total: matchTotal, shown: shown.length, truncated, domains };
+    // The UNFILTERED, untruncated directory is FULL agency coverage of the clients
+    // domain; a filtered or truncated list is only a SIGNAL slice.
+    const anyFilter = !!(args.status || args.service || args.has_open_tasks || args.has_overdue_tasks || args.incomplete_onboarding || args.stale_updates_days || args.has_unpaid_invoices);
+    const level = anyFilter || truncated ? ("signal" as const) : ("full" as const);
+    return {
+      content: lines.join("\n"),
+      total: matchTotal,
+      shown: shown.length,
+      truncated,
+      domains,
+      coverageContributions: [{ domain: "clients", level, scope: { breadth: "agency" } }],
+    };
   },
 };
 
@@ -264,10 +274,6 @@ interface AggregateArgs {
 export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
   name: "portal_aggregate",
   scope: "agency",
-  coverageBreadth: "agency",
-  // A single aggregate call covers only ONE metric's slice, so it declares no static
-  // domain coverage — its breadth marks the turn as an agency survey (needs more).
-  providesCoverage: [],
   requiredGrant: "portal.read",
   description:
     "Deterministically compute ONE narrow agency-wide fact in application/database code (never ask the model to do the arithmetic). Each task metric is a SINGLE-FIELD count, NOT the Planner Today set — for 'what needs my attention today / outstanding today' use portal_planner_today instead. Metrics: clients_by_status; open_tasks (all non-terminal, any date); overdue_tasks (due_date < today, agency tz); tasks_due_today (due_date == today — does NOT include scheduled-today); tasks_scheduled_today (scheduled_date == today); incomplete_onboarding; unpaid_invoices (PER CURRENCY, never combined); stage_distribution; stale_clients (needs stale_days). Dates are Africa/Johannesburg.",
@@ -294,6 +300,10 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
     return { ok: true, args };
   },
   async run(args, rc): Promise<ReadToolResult> {
+    // Metric-aware coverage: a successful aggregate is a SIGNAL (count/slice) for its
+    // domain at AGENCY scope — NEVER full domain coverage.
+    const contribution = aggregateMetricContribution(args.metric);
+    const base = await (async (): Promise<ReadToolResult> => {
     switch (args.metric) {
       case "clients_by_status": {
         const { rows, total } = await loadClients(rc);
@@ -372,5 +382,7 @@ export const aggregateTool: ReadToolDescriptor<AggregateArgs> = {
         };
       }
     }
+    })();
+    return contribution ? { ...base, coverageContributions: [contribution] } : base;
   },
 };
