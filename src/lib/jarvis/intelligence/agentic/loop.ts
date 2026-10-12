@@ -18,6 +18,7 @@ import {
   classifyQuestionBreadth,
   broadCoverageComplete,
   buildCoverageBuckets,
+  formatCoverageSummary,
   recordContribution,
   questionUnsupportedDomains,
   type CoverageKey,
@@ -217,9 +218,13 @@ export async function runAgenticLoop(deps: AgenticLoopDeps): Promise<AgenticOutc
   const finalize = (raw: string, termination: AgenticTermination): AgenticOutcome => {
     const parsed = parseAssistantResponse(raw);
     if (!parsed.ok) return { ok: false, reason: `invalid_response:${parsed.reason}`, trace: buildTrace(termination) };
+    // Append the SINGLE authoritative, app-owned evidence-coverage summary (same buckets
+    // as the confidence basis) so the main answer and confidence cannot contradict each
+    // other about FULL vs SIGNAL. The model never classifies coverage itself.
+    const value = { ...parsed.value, assistantMessage: `${parsed.value.assistantMessage}\n\n${formatCoverageSummary(buckets())}` };
     return {
       ok: true,
-      value: parsed.value,
+      value,
       reliability: reliabilityOf(),
       confidence: confidenceOf(),
       confidenceBasis: confidenceBasis(),

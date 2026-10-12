@@ -77,7 +77,9 @@ describe("agentic loop — termination", () => {
     const res = await runAgenticLoop(baseDeps({ provider }));
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.value.assistantMessage).toBe("done");
+      expect(res.value.assistantMessage).toContain("done");
+      // The authoritative evidence-coverage summary is appended by the system.
+      expect(res.value.assistantMessage).toContain("Evidence coverage (authoritative");
       expect(res.trace.termination).toBe("final_answer");
       expect(res.trace.providerCalls).toBe(1);
       // Reliability contract: an answer grounded in NO authoritative read is UNAVAILABLE
@@ -337,6 +339,38 @@ describe("agentic loop — safety & isolation", () => {
       // No successful read at all ⇒ unavailable (and certainly not verified).
       expect(res.reliability).toBe("unavailable");
       expect(res.confidence).toBe("qualified");
+    }
+  });
+
+  it("appends an AUTHORITATIVE coverage summary that classifies aggregate/filter reads as SIGNAL, even if the model wrongly says 'checked fully'", async () => {
+    // Model emits the exact contradictory wording from Preview in its assistant_message.
+    const badEmit = [{ name: ASSISTANT_RESPONSE_TOOL_NAME, input: { assistant_message: "Incomplete onboarding (checked fully, aggregate): 6. Portal updates (checked fully, aggregate): 14/14." } }];
+    const { provider } = makeProvider([
+      [
+        { name: "portal_aggregate", input: { metric: "incomplete_onboarding" } },
+        { name: "portal_list_clients", input: { stale_updates_days: 14 } },
+      ],
+      badEmit,
+    ]);
+    const execute = vi.fn(async (name: string, input: unknown): Promise<ReadToolOutcome> => {
+      if (name === "portal_aggregate") return { ok: true, result: { content: "6", total: 6, shown: 6, truncated: false, domains: ["onboarding"], coverageContributions: [{ domain: "onboarding", level: "signal", scope: { breadth: "agency" } }] } };
+      void input;
+      return { ok: true, result: { content: "14/14", total: 14, shown: 14, truncated: false, domains: ["clients", "updates"], coverageContributions: [
+        { domain: "clients", level: "signal", scope: { breadth: "agency" } },
+        { domain: "client_updates", level: "signal", scope: { breadth: "agency" } },
+      ] } };
+    });
+    const res = await runAgenticLoop(baseDeps({ provider, execute, history: userMsg("What needs my attention across Bbettr?") }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const msg = res.value.assistantMessage;
+      // The authoritative summary classifies onboarding + client_updates as LIMITED SIGNALS...
+      expect(msg).toMatch(/Checked as limited signals only[^\n]*Onboarding status/);
+      expect(msg).toMatch(/Checked as limited signals only[^\n]*Client update recency/);
+      // ...and NOT as "checked completely" (the authoritative line must not list them under full).
+      const fullLine = msg.split("\n").find((l) => l.includes("Checked completely")) ?? "";
+      expect(fullLine).not.toContain("Onboarding status");
+      expect(fullLine).not.toContain("Client update recency");
     }
   });
 

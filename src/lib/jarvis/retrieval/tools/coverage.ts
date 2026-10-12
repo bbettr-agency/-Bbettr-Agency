@@ -163,6 +163,25 @@ export function buildCoverageBuckets(args: {
   return { full, signalOnly, notChecked: [...notCheckedKeys].map(labelFor) };
 }
 
+/**
+ * The single AUTHORITATIVE, app-owned evidence-coverage summary, rendered from the
+ * deterministic buckets. This is appended to the answer by trusted code so the main
+ * answer and the confidence section cannot disagree about FULL vs SIGNAL — the model
+ * never classifies coverage itself. FULL = authoritative for the stated scope; SIGNAL =
+ * limited observations (aggregate counts, filtered client lists); NOT CHECKED = no
+ * successful relevant retrieval. A filtered count that evaluated every client is still a
+ * SIGNAL, never FULL.
+ */
+export function formatCoverageSummary(buckets: { full: string[]; signalOnly: string[]; notChecked: string[] }): string {
+  const list = (xs: string[]) => (xs.length > 0 ? xs.join(", ") : "none");
+  return [
+    "Evidence coverage (authoritative — set by the system, not the assistant):",
+    `- Checked completely (authoritative for the stated scope): ${list(buckets.full)}`,
+    `- Checked as limited signals only (aggregate counts / filtered lists): ${list(buckets.signalOnly)}`,
+    `- Not checked / unavailable: ${list(buckets.notChecked)}`,
+  ].join("\n");
+}
+
 // ── Deterministic question-breadth classifier (question coverage axis) ───────────
 // Broad = a whole-business / cross-client / "needs attention" / "which clients" style
 // question that implies surveying many domains. Narrow = a single subject/domain (a

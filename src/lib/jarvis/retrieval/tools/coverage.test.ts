@@ -3,6 +3,7 @@ import {
   classifyQuestionBreadth,
   broadCoverageComplete,
   buildCoverageBuckets,
+  formatCoverageSummary,
   recordContribution,
   aggregateMetricContribution,
   SUPPORTED_AGENCY_KEYS,
@@ -110,5 +111,21 @@ describe("buildCoverageBuckets — full / signal-only / not-checked", () => {
     const b = buildCoverageBuckets({ map, breadth: "narrow", askedUnsupported: ["recurring_reminders"] });
     expect(b.full).toContain("Planner tasks (today)");
     expect(b.notChecked).toEqual(["Recurring reminders (full)"]); // not the whole agency universe
+  });
+});
+
+describe("formatCoverageSummary — single authoritative classification", () => {
+  it("renders the three buckets and marks itself system-owned", () => {
+    const s = formatCoverageSummary({ full: ["Planner tasks (today)"], signalOnly: ["Onboarding status", "Client update recency"], notChecked: ["Finance (QuickBooks/PayFast)"] });
+    expect(s).toContain("Evidence coverage (authoritative");
+    expect(s).toMatch(/Checked completely[^\n]*Planner tasks \(today\)/);
+    expect(s).toMatch(/Checked as limited signals only[^\n]*Onboarding status, Client update recency/);
+    expect(s).toMatch(/Not checked \/ unavailable[^\n]*Finance/);
+  });
+  it("uses 'none' for empty buckets and never lists a signal under completely-checked", () => {
+    const s = formatCoverageSummary({ full: [], signalOnly: ["Unpaid invoices"], notChecked: [] });
+    expect(s).toMatch(/Checked completely[^\n]*none/);
+    const fullLine = s.split("\n").find((l) => l.includes("Checked completely"))!;
+    expect(fullLine).not.toContain("Unpaid invoices");
   });
 });
